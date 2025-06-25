@@ -1,0 +1,370 @@
+
+package org.example;
+
+import java.io.*;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * In-place YAML editor with comprehensive formatting preservation.
+ * <p>
+ * Features:
+ * 1. Replace a scalar value specified by a slash-separated path (e.g. "root/child/key").
+ * 2. Preserves every byte not related to the updated value: indentation, spaces, line endings (mixed CR/LF/CRLF),
+ *    comments, quoting style, block scalars, etc.
+ * 3. Supports GBK, UTF-8, UTF-16 and other encodings (auto-detect) and preserves any existing BOM.
+ * 4. Provides convenience overloads for editing via {@link File} as well as arbitrary {@link InputStream}s.
+ */
+public final class YamlInPlaceEditor {
+
+    /* =====================================================
+     * Public API
+     * ===================================================== */
+
+    /**
+     * Edit YAML file in-place, replacing the scalar value located at {@code yamlPath} with {@code newValue}.
+     *
+     * @param file     YAML file to update.
+     * @param yamlPath Slash-separated path (e.g. "root/child/key").
+     * @param newValue Replacement scalar value (written literally, caller must quote if required).
+     */
+    public static void editYaml(File file, String yamlPath, String newValue) throws IOException {
+        Objects.requireNonNull(file, "file must not be null");
+        Objects.requireNonNull(yamlPath, "yamlPath must not be null");
+
+        byte[] originalBytes = Files.readAllBytes(file.toPath());
+        FileInfo fileInfo = FileInfo.detect(originalBytes);
+
+        byte[] modified = editYamlInternal(originalBytes, fileInfo, toPathList(yamlPath), newValue);
+
+        // Write back preserving BOM and encoding.
+        Files.write(file.toPath(), modified);
+    }
+
+    /**
+     * Edit YAML content received from an {@link InputStream}. The stream is consumed fully, modified in memory and the
+     * resulting bytes are returned. The caller can then decide what to do with the data (e.g. write to disk).
+     */
+    public static byte[] editYaml(InputStream inputStream, String yamlPath, String newValue) throws IOException {
+        byte[] originalBytes = inputStream.readAllBytes();
+        FileInfo fileInfo = FileInfo.detect(originalBytes);
+        return editYamlInternal(originalBytes, fileInfo, toPathList(yamlPath), newValue);
+    }
+
+    /**
+     * Edit YAML file with an explicitly specified character encoding (e.g. "GBK").
+     */
+    public static void editYamlWithEncoding(File file, String encoding, String yamlPath, String newValue) throws IOException {
+        Objects.requireNonNull(encoding, "encoding must not be null");
+        byte[] originalBytes = Files.readAllBytes(file.toPath());
+
+        FileInfo baseInfo = FileInfo.detect(originalBytes);
+        Charset charset = Charset.forName(encoding);
+        FileInfo overridden = new FileInfo(charset, baseInfo.eol(), baseInfo.originalEols(), baseInfo.lastLineNoEol(), baseInfo.bom(), baseInfo.offset());
+
+        byte[] modified = editYamlInternal(originalBytes, overridden, toPathList(yamlPath), newValue);
+        Files.write(file.toPath(), modified);
+    }
+
+    /* =====================================================
+     * Internals
+     * ===================================================== */
+
+    private static List<String> toPathList(String slashPath) {
+        if (slashPath.startsWith("/")) slashPath = slashPath.substring(1);
+        String[] parts = slashPath.split("/");
+        return Arrays.asList(parts);
+    }
+
+    private static byte[] editYamlInternal(byte[] originalBytes, FileInfo fileInfo, List<String> path, String newValue) {
+        String content = new String(originalBytes, fileInfo.offset(), originalBytes.length - fileInfo.offset(), fileInfo.charset());
+
+        // Split keeping trailing empty lines.
+        List<String> rawLines = new ArrayList<>();
+        Matcher m = Pattern.compile("(.*?(?:\\r\\n|\\r|\\n|$))", Pattern.DOTALL).matcher(content);
+        while (m.find()) {
+            if (m.group(1).isEmpty()) break; // Last empty match
+            rawLines.add(m.group(1));
+        }
+
+        List<String> updatedLines = updateLines(rawLines, path, newValue);
+
+        // Re-assemble string.
+        StringBuilder sb = new StringBuilder(content.length());
+        for (String l : updatedLines) sb.append(l);
+        String updatedContent = sb.toString();
+
+        // Encode using original charset and BOM.
+        byte[] bytes = updatedContent.getBytes(fileInfo.charset());
+        if (fileInfo.bom() != null && fileInfo.bom().length > 0) {
+            byte[] withBom = new byte[fileInfo.bom().length + bytes.length];
+            System.arraycopy(fileInfo.bom(), 0, withBom, 0, fileInfo.bom().length);
+            System.arraycopy(bytes, 0, withBom, fileInfo.bom().length, bytes.length);
+            return withBom;
+        }
+        return bytes;
+    }
+
+    /**
+     * Updates list of raw lines, replacing value at target path. Only inline scalar values are supported. If the path
+     * cannot be resolved to an inline scalar, the method throws {@link IllegalArgumentException}.
+     */
+    private static List<String> updateLines(List<String> lines, List<String> path, String newValue) {
+        // Stack representing current path components (mapping keys or sequence indices)
+        Deque<PathEntry> stack = new ArrayDeque<>();
+        // Sequence index counters per indent level
+        int[] seqIdx = new int[64];          // enlarge if ever needed
+        Arrays.fill(seqIdx, -1);
+
+        Pattern mapKvPattern = Pattern.compile("^(\\s*)([^:]+?):(\\s*)(.*)$");
+        Pattern seqKvPattern = Pattern.compile("^(\\s*)-\\s+([^:]+?):(\\s*)(.*)$");
+        Pattern seqScalarPattern = Pattern.compile("^(\\s*)-\\s+(.*)$");
+
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            String logicalLine = line.replaceAll("(\\r\\n|\\r|\\n)$", "");
+            String eol = line.substring(logicalLine.length());
+
+            String trimmed = logicalLine.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue; // skip blank & comment
+            }
+
+            // Determine indent (spaces before first non-space char)
+            int indent = 0;
+            while (indent < logicalLine.length() && logicalLine.charAt(indent) == ' ') indent++;
+
+            // Pop stack levels deeper or equal to current indent
+            while (!stack.isEmpty() && stack.peekLast().indent() >= indent) {
+                stack.pollLast();
+            }
+            // Clear sequence counters deeper than current indent
+            final int currentIndent = indent;
+            seqIdx[currentIndent+1] = -1;               // cheap "reset deeper levels"
+
+            Matcher mSeqKv = seqKvPattern.matcher(logicalLine);
+            boolean matchedSeqKv = mSeqKv.find();
+            Matcher mSeqScalar = seqScalarPattern.matcher(logicalLine);
+            boolean matchedSeqScalar = !matchedSeqKv && mSeqScalar.find();
+            Matcher mMapKv = mapKvPattern.matcher(logicalLine);
+
+            if (matchedSeqKv) {
+                // Sequence item with inline key-value ("- key: value")
+                int seqIndent = mSeqKv.group(1).length();
+                int index = ++seqIdx[seqIndent];
+                seqIdx[seqIndent+1] = -1;               // cheap "reset deeper levels"
+
+                stack.addLast(new PathEntry(seqIndent, String.valueOf(index)));
+
+                String key = mSeqKv.group(2).trim();
+                String afterColonSpaces = mSeqKv.group(3);
+                String valueAndComment = mSeqKv.group(4);
+
+                // Prepare candidate path
+                List<String> candidate = new ArrayList<>();
+                for (PathEntry p : stack) candidate.add(p.key());
+                candidate.add(key);
+
+                if (candidate.equals(path)) {
+                    if (valueAndComment.startsWith("|") || valueAndComment.startsWith(">") || valueAndComment.isEmpty()) {
+                        throw new IllegalArgumentException("Path points to non-scalar or multi-line value which is not supported by in-place editor.");
+                    }
+
+                    int commentIdx = findCommentIndex(valueAndComment);
+                    String valuePart;
+                    String commentPart = "";
+                    if (commentIdx >= 0) {
+                        valuePart = valueAndComment.substring(0, commentIdx);
+                        commentPart = valueAndComment.substring(commentIdx);
+                    } else {
+                        valuePart = valueAndComment;
+                    }
+
+                    int trailingSpaces = 0;
+                    for (int p = valuePart.length() - 1; p >= 0 && Character.isWhitespace(valuePart.charAt(p)); p--) trailingSpaces++;
+
+                    String spacesBeforeComment = " ".repeat(trailingSpaces);
+                    String beforeDash = logicalLine.substring(0, logicalLine.indexOf('-'));
+                    String newLogicalLine = beforeDash + "- " + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
+                    lines.set(i, newLogicalLine + eol);
+                    return lines;
+                }
+
+            } else if (matchedSeqScalar) {
+                // Sequence item with scalar ("- value")
+                int seqIndent = mSeqScalar.group(1).length();
+                int index = ++seqIdx[seqIndent];
+                seqIdx[seqIndent+1] = -1;               // cheap "reset deeper levels"
+
+                stack.addLast(new PathEntry(seqIndent, String.valueOf(index)));
+
+                String valueAndComment = mSeqScalar.group(2);
+
+                List<String> candidate = new ArrayList<>();
+                for (PathEntry p : stack) candidate.add(p.key());
+
+                if (candidate.equals(path)) {
+                    if (valueAndComment.startsWith("|") || valueAndComment.startsWith(">") || valueAndComment.isEmpty()) {
+                        throw new IllegalArgumentException("Path points to non-scalar or multi-line value which is not supported by in-place editor.");
+                    }
+
+                    int commentIdx = findCommentIndex(valueAndComment);
+                    String valuePart;
+                    String commentPart = "";
+                    if (commentIdx >= 0) {
+                        valuePart = valueAndComment.substring(0, commentIdx);
+                        commentPart = valueAndComment.substring(commentIdx);
+                    } else {
+                        valuePart = valueAndComment;
+                    }
+
+                    int trailingSpaces = 0;
+                    for (int p = valuePart.length() - 1; p >= 0 && Character.isWhitespace(valuePart.charAt(p)); p--) trailingSpaces++;
+                    String spacesBeforeComment = " ".repeat(trailingSpaces);
+
+                    String beforeDash = logicalLine.substring(0, logicalLine.indexOf('-'));
+                    String newLogicalLine = beforeDash + "- " + newValue + spacesBeforeComment + commentPart;
+                    lines.set(i, newLogicalLine + eol);
+                    return lines;
+                }
+
+            } else if (mMapKv.find()) {
+                // Standard mapping key-value
+                String indentStr = mMapKv.group(1);
+                String key = mMapKv.group(2).trim();
+                String afterColonSpaces = mMapKv.group(3);
+                String valueAndComment = mMapKv.group(4);
+
+                stack.addLast(new PathEntry(indent, key));
+
+                List<String> candidate = new ArrayList<>();
+                for (PathEntry p : stack) candidate.add(p.key());
+
+                if (candidate.equals(path)) {
+                    if (valueAndComment.startsWith("|") || valueAndComment.startsWith(">") || valueAndComment.isEmpty()) {
+                        throw new IllegalArgumentException("Path points to non-scalar or multi-line value which is not supported by in-place editor.");
+                    }
+
+                    int commentIdx = findCommentIndex(valueAndComment);
+                    String valuePart;
+                    String commentPart = "";
+                    if (commentIdx >= 0) {
+                        valuePart = valueAndComment.substring(0, commentIdx);
+                        commentPart = valueAndComment.substring(commentIdx);
+                    } else {
+                        valuePart = valueAndComment;
+                    }
+
+                    int trailingSpaces = 0;
+                    for (int p = valuePart.length() - 1; p >= 0 && Character.isWhitespace(valuePart.charAt(p)); p--) trailingSpaces++;
+                    String spacesBeforeComment = " ".repeat(trailingSpaces);
+
+                    String newLogicalLine = indentStr + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
+                    lines.set(i, newLogicalLine + eol);
+                    return lines;
+                }
+            }
+        }
+        throw new IllegalArgumentException("Path not found or does not correspond to an inline scalar value: " + String.join("/", path));
+    }
+
+    /**
+     * Returns the index (within {@code valueAndComment}) of the # that starts an inline comment, or -1 if none.
+     */
+    private static int findCommentIndex(String valueAndComment) {
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+        for (int i = 0; i < valueAndComment.length(); i++) {
+            char c = valueAndComment.charAt(i);
+            if (c == '\'' && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+            } else if (c == '"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+            } else if (c == '#' && !inSingleQuote && !inDoubleQuote) {
+                // Comment starts if preceding char is whitespace or start of string
+                if (i == 0 || Character.isWhitespace(valueAndComment.charAt(i - 1))) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /* =====================================================
+     * Helpers & internal records
+     * ===================================================== */
+
+    private record PathEntry(int indent, String key) {}
+
+    private record FileInfo(Charset charset, String eol, List<String> originalEols, boolean lastLineNoEol, byte[] bom, int offset) {
+        static FileInfo detect(byte[] content) {
+            var encodingInfo = EncodingUtil.detectEncoding(content);
+            var eolInfo = EolUtil.detectLineEndings(content, encodingInfo.charset());
+            return new FileInfo(encodingInfo.charset(), eolInfo.eol(), eolInfo.originalEols(), eolInfo.lastLineNoEol(), encodingInfo.bom(), encodingInfo.offset());
+        }
+    }
+
+    /* =====================================================
+     * Encoding & EOL detection utilities (copied from IniInPlaceEditor)
+     * ===================================================== */
+
+    private static final class EncodingUtil {
+        private static final byte[] UTF8_BOM = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+        private static final byte[] UTF16BE_BOM = {(byte) 0xFE, (byte) 0xFF};
+        private static final byte[] UTF16LE_BOM = {(byte) 0xFF, (byte) 0xFE};
+
+        private static EncodingInfo detectEncoding(byte[] content) {
+            if (startsWith(content, UTF8_BOM)) {
+                return new EncodingInfo(StandardCharsets.UTF_8, UTF8_BOM, UTF8_BOM.length);
+            }
+            if (startsWith(content, UTF16BE_BOM)) {
+                return new EncodingInfo(StandardCharsets.UTF_16BE, UTF16BE_BOM, UTF16BE_BOM.length);
+            }
+            if (startsWith(content, UTF16LE_BOM)) {
+                return new EncodingInfo(StandardCharsets.UTF_16LE, UTF16LE_BOM, UTF16LE_BOM.length);
+            }
+            // Fallback: Try UTF-8, else GBK
+            String utf8 = StandardCharsets.UTF_8.name();
+            try {
+                new String(content, StandardCharsets.UTF_8);
+                return new EncodingInfo(StandardCharsets.UTF_8, new byte[0], 0);
+            } catch (Exception ignored) {
+            }
+            return new EncodingInfo(Charset.forName("GBK"), new byte[0], 0);
+        }
+
+        private static boolean startsWith(byte[] content, byte[] prefix) {
+            if (content.length < prefix.length) return false;
+            for (int i = 0; i < prefix.length; i++) {
+                if (content[i] != prefix[i]) return false;
+            }
+            return true;
+        }
+    }
+
+    private record EncodingInfo(Charset charset, byte[] bom, int offset) {}
+
+    private static final class EolUtil {
+        private static final Pattern EOL_PATTERN = Pattern.compile("(\r\n|\r|\n)");
+
+        private static EolInfo detectLineEndings(byte[] content, Charset charset) {
+            String text = new String(content, charset);
+            Matcher matcher = EOL_PATTERN.matcher(text);
+            List<String> eols = new ArrayList<>();
+            while (matcher.find()) {
+                eols.add(matcher.group());
+            }
+            String dominant = eols.stream()
+                    .reduce((a, b) -> a.length() >= b.length() ? a : b)
+                    .orElse("\n");
+            boolean lastLineNoEol = !text.endsWith("\n") && !text.endsWith("\r");
+            return new EolInfo(dominant, eols, lastLineNoEol);
+        }
+    }
+
+    private record EolInfo(String eol, List<String> originalEols, boolean lastLineNoEol) {}
+} 
