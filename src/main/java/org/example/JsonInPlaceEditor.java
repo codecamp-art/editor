@@ -198,7 +198,7 @@ public final class JsonInPlaceEditor {
             case '}': {
                 // Close object – pop path segment if present (could be key or numeric index)
                 if (!stack.isEmpty()) {
-                    PathEntry popped = stack.removeLast();
+                    stack.removeLast();
                     // If we just closed an array element (numeric), nothing else required.
                 }
                 break;

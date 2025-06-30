@@ -320,8 +320,6 @@ public final class YamlInPlaceEditor {
                 candidate.add(key);
 
                 if (candidate.equals(path)) {
-                    int dashIdx = logicalLine.indexOf('-');
-                    String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
                     int cIdx = findCommentIndex(valueAndComment);
                     String commentPart = cIdx>=0 ? valueAndComment.substring(cIdx):"";
                     String valuePrefix = cIdx>=0 ? valueAndComment.substring(0,cIdx):valueAndComment;
@@ -343,11 +341,12 @@ public final class YamlInPlaceEditor {
 
                         switch(op){
                             case REPLACE -> {
+                                String indentBeforeDash = mSeqKv.group(1);
                                 String newLogical;
                                 if(newValue.contains("\n")){
-                                    newLogical = beforeDash + "- " + key + ": |" + commentPart + eol;
+                                    newLogical = indentBeforeDash + "- " + key + ": |" + commentPart + eol;
                                     List<String> block = new ArrayList<>();
-                                    String seqIndentStr = beforeDash + "  ";
+                                    String seqIndentStr = indentBeforeDash + "  ";
                                     for(String part:newValue.split("\\n",-1)){
                                         block.add(seqIndentStr + part + eol);
                                     }
@@ -355,13 +354,14 @@ public final class YamlInPlaceEditor {
                                     lines.add(i,newLogical);
                                     lines.addAll(i+1,block);
                                 }else{
-                                    newLogical = beforeDash + "- " + key + ": " + newValue + commentPart;
+                                    newLogical = indentBeforeDash + "- " + key + ": " + newValue + commentPart;
                                     lines.subList(i,end).clear();
                                     lines.add(i,newLogical+eol);
                                 }
                             }
                             case CLEAR_VALUE -> {
-                                String newLogical = beforeDash + "- " + key + ":" + afterColonSpaces + "" + commentPart + eol;
+                                String indentBeforeDash = mSeqKv.group(1);
+                                String newLogical = indentBeforeDash + "- " + key + ":" + afterColonSpaces + "" + commentPart + eol;
                                 lines.subList(i,end).clear();
                                 lines.add(i,newLogical);
                             }
@@ -386,11 +386,13 @@ public final class YamlInPlaceEditor {
 
                     switch(op) {
                         case REPLACE -> {
-                            String newLogical = beforeDash + "- " + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
+                            String indentBeforeDash = mSeqKv.group(1);
+                            String newLogical = indentBeforeDash + "- " + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
                             lines.set(i, newLogical + eol);
                         }
                         case CLEAR_VALUE -> {
-                            String newLogical = beforeDash + "- " + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
+                            String indentBeforeDash = mSeqKv.group(1);
+                            String newLogical = indentBeforeDash + "- " + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
                             lines.set(i, newLogical + eol);
                         }
                         case DELETE_LINE -> {
@@ -439,17 +441,15 @@ public final class YamlInPlaceEditor {
                         case REPLACE -> {
                             int trailingSpaces = countTrailingSpaces(valuePart);
                             String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            int dashIdx = logicalLine.indexOf('-');
-                            String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
-                            String newLogicalLine = beforeDash + "- " + newValue + spacesBeforeComment + commentPart;
+                            String indentBeforeDash = mSeqScalar.group(1);
+                            String newLogicalLine = indentBeforeDash + "- " + newValue + spacesBeforeComment + commentPart;
                             lines.set(i, newLogicalLine + eol);
                         }
                         case CLEAR_VALUE -> {
                             int trailingSpaces = countTrailingSpaces(valuePart);
                             String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            int dashIdx = logicalLine.indexOf('-');
-                            String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
-                            String newLogicalLine = beforeDash + "- " + "" + spacesBeforeComment + commentPart;
+                            String indentBeforeDash = mSeqScalar.group(1);
+                            String newLogicalLine = indentBeforeDash + "- " + "" + spacesBeforeComment + commentPart;
                             lines.set(i, newLogicalLine + eol);
                         }
                         case DELETE_LINE -> {
@@ -474,8 +474,6 @@ public final class YamlInPlaceEditor {
 
                 if (candidate.equals(path)) {
                     // split comment from value string (if any)
-                    int dashIdx = logicalLine.indexOf('-');
-                    String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
                     int cIdx = findCommentIndex(valueAndComment);
                     String commentPart = cIdx>=0 ? valueAndComment.substring(cIdx):"";
                     String valuePrefix = cIdx>=0 ? valueAndComment.substring(0,cIdx):valueAndComment;
@@ -497,11 +495,12 @@ public final class YamlInPlaceEditor {
                         switch(op) {
                             case REPLACE -> {
                                 // Build new block with '|'
+                                String indentBeforeDash = mMapKv.group(1);
                                 String newLogicalLine;
                                 if (newValue.contains("\n")) {
-                                    newLogicalLine = indentStr + key + ": |" + commentPart + eol;
+                                    newLogicalLine = indentBeforeDash + key + ": |" + commentPart + eol;
                                     List<String> newBlock = new ArrayList<>();
-                                    String seqIndentStr = indentStr + "  ";
+                                    String seqIndentStr = indentBeforeDash + "  ";
                                     for (String p : newValue.split("\n", -1)) {
                                         newBlock.add(seqIndentStr + p + eol);
                                     }
@@ -510,13 +509,14 @@ public final class YamlInPlaceEditor {
                                     lines.addAll(i+1, newBlock);
                                 } else {
                                     // simple scalar replacement, drop old block
-                                    newLogicalLine = indentStr + key + ": " + newValue + commentPart;
+                                    newLogicalLine = indentBeforeDash + key + ": " + newValue + commentPart;
                                     lines.subList(i, end).clear();
                                     lines.add(i, newLogicalLine + eol);
                                 }
                             }
                             case CLEAR_VALUE -> {
-                                String newLogicalLine = indentStr + key + ":" + afterColonSpaces + "" + commentPart;
+                                String indentBeforeDash = mMapKv.group(1);
+                                String newLogicalLine = indentBeforeDash + key + ":" + afterColonSpaces + "" + commentPart;
                                 lines.subList(i, end).clear();
                                 lines.add(i, newLogicalLine + eol);
                             }
@@ -542,11 +542,13 @@ public final class YamlInPlaceEditor {
 
                     switch(op) {
                         case REPLACE -> {
-                            String newLogical = indentStr + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
+                            String indentBeforeDash = mMapKv.group(1);
+                            String newLogical = indentBeforeDash + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
                             lines.set(i, newLogical + eol);
                         }
                         case CLEAR_VALUE -> {
-                            String newLogical = indentStr + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
+                            String indentBeforeDash = mMapKv.group(1);
+                            String newLogical = indentBeforeDash + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
                             lines.set(i, newLogical + eol);
                         }
                         case DELETE_LINE -> {
@@ -617,7 +619,6 @@ public final class YamlInPlaceEditor {
                 return new EncodingInfo(StandardCharsets.UTF_16LE, UTF16LE_BOM, UTF16LE_BOM.length);
             }
             // Fallback: Try UTF-8, else GBK
-            String utf8 = StandardCharsets.UTF_8.name();
             try {
                 new String(content, StandardCharsets.UTF_8);
                 return new EncodingInfo(StandardCharsets.UTF_8, new byte[0], 0);

@@ -232,71 +232,6 @@ public final class PropertiesInPlaceEditor {
         return mutateLinesMulti(originalBytes, info, targetKey, expectedOldValue, "", true);
     }
 
-    private interface LineTransformer {
-        String apply(String indent, String key, String separator, String valuePart, String spaces, String commentPart);
-    }
-
-    private static byte[] mutateLines(byte[] originalBytes, FileInfo info, String targetKey, String expectedOldValue, LineTransformer transformer) {
-        String content = new String(originalBytes, info.offset, originalBytes.length - info.offset, info.charset);
-        List<String> lines = splitLines(content);
-        Pattern kvPattern = Pattern.compile("^(\\s*)([^:=\\s\\\\]+)(\\s*[=:]\\s*)(.*)$");
-        for (int i = 0; i < lines.size(); i++) {
-            String fullLine = lines.get(i);
-            String logical = stripEol(fullLine);
-            String eol = fullLine.substring(logical.length());
-            String trimmed = logical.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) continue;
-            Matcher kv = kvPattern.matcher(logical);
-            if (kv.find()) {
-                String key = kv.group(2).trim();
-                if (key.equals(targetKey)) {
-                    String indent = kv.group(1);
-                    String separator = kv.group(3);
-                    String valueAndRest = kv.group(4);
-                    int commentIdx = findInlineComment(valueAndRest);
-                    String valuePart = commentIdx >= 0 ? valueAndRest.substring(0, commentIdx) : valueAndRest;
-                    String commentPart = commentIdx >= 0 ? valueAndRest.substring(commentIdx) : "";
-                    int trailingSpaces = countTrailingSpaces(valuePart);
-                    String spaces = " ".repeat(trailingSpaces);
-                    if (expectedOldValue != null && !valuePart.trim().equals(expectedOldValue)) continue;
-                    String newLogical = transformer.apply(indent, key, separator, valuePart, spaces, commentPart);
-                    lines.set(i, newLogical + eol);
-                    return assemble(lines, info);
-                }
-            }
-        }
-        throw new IllegalArgumentException("Key not found (or value mismatch): " + targetKey);
-    }
-
-    private static List<String> splitLines(String content) {
-        List<String> lines = new ArrayList<>();
-        Matcher m = Pattern.compile("(.*?(?:\r\n|\r|\n|$))", Pattern.DOTALL).matcher(content);
-        while (m.find()) {
-            if (m.group(1).isEmpty()) break;
-            lines.add(m.group(1));
-        }
-        return lines;
-    }
-
-    private static String stripEol(String fullLine) {
-        return fullLine.replaceAll("(\r\n|\r|\n)$", "");
-    }
-
-    private static boolean endsWithContinuation(String logical) {
-        int idx = logical.length() - 1;
-        // Skip trailing whitespace
-        while (idx >= 0 && Character.isWhitespace(logical.charAt(idx))) idx--;
-        if (idx < 0 || logical.charAt(idx) != '\\') return false;
-        // Count consecutive backslashes backwards
-        int bs = 0;
-        while (idx >= 0 && logical.charAt(idx) == '\\') { bs++; idx--; }
-        return bs % 2 == 1; // odd means the last backslash is not escaped
-    }
-
-    private static String leadingWhitespace(String s) {
-        int i = 0; while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++; return s.substring(0, i);
-    }
-
     private static byte[] mutateLinesMulti(byte[] originalBytes, FileInfo info, String targetKey, String expectedOldValue, String newValue, boolean removeLine) {
         String content = new String(originalBytes, info.offset, originalBytes.length - info.offset, info.charset);
         List<String> lines = splitLines(content);
@@ -392,6 +327,35 @@ public final class PropertiesInPlaceEditor {
             return assemble(lines, info);
         }
         throw new IllegalArgumentException("Key not found (or value mismatch): " + targetKey);
+    }
+
+    private static List<String> splitLines(String content) {
+        List<String> lines = new ArrayList<>();
+        Matcher m = Pattern.compile("(.*?(?:\r\n|\r|\n|$))", Pattern.DOTALL).matcher(content);
+        while (m.find()) {
+            if (m.group(1).isEmpty()) break;
+            lines.add(m.group(1));
+        }
+        return lines;
+    }
+
+    private static String stripEol(String fullLine) {
+        return fullLine.replaceAll("(\r\n|\r|\n)$", "");
+    }
+
+    private static boolean endsWithContinuation(String logical) {
+        int idx = logical.length() - 1;
+        // Skip trailing whitespace
+        while (idx >= 0 && Character.isWhitespace(logical.charAt(idx))) idx--;
+        if (idx < 0 || logical.charAt(idx) != '\\') return false;
+        // Count consecutive backslashes backwards
+        int bs = 0;
+        while (idx >= 0 && logical.charAt(idx) == '\\') { bs++; idx--; }
+        return bs % 2 == 1; // odd means the last backslash is not escaped
+    }
+
+    private static String leadingWhitespace(String s) {
+        int i = 0; while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++; return s.substring(0, i);
     }
 
     /* --- Encoding & EOL detection utilities (copied) -------------------- */
