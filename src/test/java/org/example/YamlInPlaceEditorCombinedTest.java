@@ -61,7 +61,13 @@ class YamlInPlaceEditorCombinedTest {
                 "  features:\n" +
                 "    - name: auth\n" +
                 "      enabled: true\n" +
+                "      description: |\n" +
+                "        Provides authentication\n" +
+                "        for users\n" +
                 "    - name: cache\r\n" +
+                "      description: |\r\n" +
+                "        multi-line\r\n" +
+                "        cache desc\r\n" +
                 "      ttl: 3600\n" +
                 "service:\n" +
                 "  port: 8080 # to be changed\n";
@@ -84,6 +90,7 @@ class YamlInPlaceEditorCombinedTest {
         YamlInPlaceEditor.setValue(file, "app/database/password", "");
         // Replace inside sequence
         YamlInPlaceEditor.setValue(file, "app/features/1/ttl", "7200");
+        YamlInPlaceEditor.setValue(file, "app/features/1/description", "Updated desc line1\nUpdated line2");
         // Delete a line
         YamlInPlaceEditor.deleteLine(file, "app/features/0/enabled");
         // Replace service port
@@ -108,7 +115,13 @@ class YamlInPlaceEditorCombinedTest {
                 "    password: \n" +
                 "  features:\n" +
                 "    - name: auth\n" +
+                "      description: |\n" +
+                "        Provides authentication\n" +
+                "        for users\n" +
                 "    - name: cache\r\n" +
+                "      description: |\r\n" +
+                "        Updated desc line1\r\n" +
+                "        Updated line2\r\n" +
                 "      ttl: 7200\n" +
                 "service:\n" +
                 "  port: 9090 # to be changed\n";
@@ -139,7 +152,13 @@ class YamlInPlaceEditorCombinedTest {
                 "  features:\n" +
                 "    - name: 认证\n" +
                 "      enabled: true\n" +
+                "      description: |\n" +
+                "        Provides authentication\n" +
+                "        for users\n" +
                 "    - name: 缓存\r\n" +
+                "      description: |\r\n" +
+                "        multi-line\r\n" +
+                "        cache desc\r\n" +
                 "      ttl: 3600\n" +
                 "service:\n" +
                 "  port: 8080 # 待修改\n";
@@ -151,6 +170,7 @@ class YamlInPlaceEditorCombinedTest {
         YamlInPlaceEditor.setValue(file, "app/debug", "true", "false", "GBK");
         YamlInPlaceEditor.setValue(file, "app/database/password", null, "", "GBK");
         YamlInPlaceEditor.setValue(file, "app/features/1/ttl", null, "7200", "GBK");
+        YamlInPlaceEditor.setValue(file, "app/features/1/description", null, "Updated desc line1\nUpdated line2", "GBK");
         YamlInPlaceEditor.deleteLine(file, "app/features/0/enabled", null, "GBK");
         YamlInPlaceEditor.setValue(file, "service/port", null, "9090", "GBK");
 
@@ -170,7 +190,13 @@ class YamlInPlaceEditorCombinedTest {
                 "    password: \n" +
                 "  features:\n" +
                 "    - name: 认证\n" +
+                "      description: |\n" +
+                "        Provides authentication\n" +
+                "        for users\n" +
                 "    - name: 缓存\r\n" +
+                "      description: |\r\n" +
+                "        Updated desc line1\r\n" +
+                "        Updated line2\r\n" +
                 "      ttl: 7200\n" +
                 "service:\n" +
                 "  port: 9090 # 待修改\n";

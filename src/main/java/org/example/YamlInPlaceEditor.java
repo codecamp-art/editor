@@ -320,44 +320,82 @@ public final class YamlInPlaceEditor {
                 candidate.add(key);
 
                 if (candidate.equals(path)) {
-                    if (valueAndComment.startsWith("|") || valueAndComment.startsWith(">") || valueAndComment.isEmpty()) {
-                        throw new IllegalArgumentException("Path points to non-scalar or multi-line value which is not supported by in-place editor.");
+                    int dashIdx = logicalLine.indexOf('-');
+                    String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
+                    int cIdx = findCommentIndex(valueAndComment);
+                    String commentPart = cIdx>=0 ? valueAndComment.substring(cIdx):"";
+                    String valuePrefix = cIdx>=0 ? valueAndComment.substring(0,cIdx):valueAndComment;
+
+                    boolean isBlock = valuePrefix.trim().startsWith("|") || valuePrefix.trim().startsWith(">");
+
+                    if (isBlock) {
+                        // locate block end
+                        int startIndent = indent;
+                        int end = i+1;
+                        while(end < lines.size()){
+                            String next = lines.get(end);
+                            String nl = next.replaceAll("(\\r\\n|\\r|\\n)$", "");
+                            int ni=0; while(ni<nl.length() && nl.charAt(ni)==' ') ni++;
+                            if(nl.trim().isEmpty()){ end++; continue; }
+                            if(ni <= startIndent) break;
+                            end++;
+                        }
+
+                        switch(op){
+                            case REPLACE -> {
+                                String newLogical;
+                                if(newValue.contains("\n")){
+                                    newLogical = beforeDash + "- " + key + ": |" + commentPart + eol;
+                                    List<String> block = new ArrayList<>();
+                                    String seqIndentStr = beforeDash + "  ";
+                                    for(String part:newValue.split("\\n",-1)){
+                                        block.add(seqIndentStr + part + eol);
+                                    }
+                                    lines.subList(i,end).clear();
+                                    lines.add(i,newLogical);
+                                    lines.addAll(i+1,block);
+                                }else{
+                                    newLogical = beforeDash + "- " + key + ": " + newValue + commentPart;
+                                    lines.subList(i,end).clear();
+                                    lines.add(i,newLogical+eol);
+                                }
+                            }
+                            case CLEAR_VALUE -> {
+                                String newLogical = beforeDash + "- " + key + ":" + afterColonSpaces + "" + commentPart + eol;
+                                lines.subList(i,end).clear();
+                                lines.add(i,newLogical);
+                            }
+                            case DELETE_LINE -> {
+                                lines.subList(i,end).clear();
+                                i--;
+                            }
+                        }
+                        return lines;
                     }
 
-                    int commentIdx = findCommentIndex(valueAndComment);
-                    String valuePart;
-                    String commentPart = "";
-                    if (commentIdx >= 0) {
-                        valuePart = valueAndComment.substring(0, commentIdx);
-                        commentPart = valueAndComment.substring(commentIdx);
-                    } else {
-                        valuePart = valueAndComment;
-                    }
+                    String valuePart = valuePrefix;
 
-                    // Check if value matches expected (if specified)
+                    // Check expected value
                     if (expectedOldValue != null && !valuePart.trim().equals(expectedOldValue)) {
-                        continue; // Not the occurrence we want
+                        // value mismatch – skip
+                        return lines;
                     }
 
-                    // Perform the operation
-                    switch (op) {
+                    int trailingSpaces = countTrailingSpaces(valuePart);
+                    String spacesBeforeComment = " ".repeat(trailingSpaces);
+
+                    switch(op) {
                         case REPLACE -> {
-                            int trailingSpaces = countTrailingSpaces(valuePart);
-                            String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            String beforeDash = logicalLine.substring(0, logicalLine.indexOf('-'));
-                            String newLogicalLine = beforeDash + "- " + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
-                            lines.set(i, newLogicalLine + eol);
+                            String newLogical = beforeDash + "- " + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
+                            lines.set(i, newLogical + eol);
                         }
                         case CLEAR_VALUE -> {
-                            int trailingSpaces = countTrailingSpaces(valuePart);
-                            String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            String beforeDash = logicalLine.substring(0, logicalLine.indexOf('-'));
-                            String newLogicalLine = beforeDash + "- " + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
-                            lines.set(i, newLogicalLine + eol);
+                            String newLogical = beforeDash + "- " + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
+                            lines.set(i, newLogical + eol);
                         }
                         case DELETE_LINE -> {
                             lines.remove(i);
-                            i--; // Adjust index since we removed a line
+                            i--; // adjust index
                         }
                     }
                     return lines;
@@ -401,14 +439,16 @@ public final class YamlInPlaceEditor {
                         case REPLACE -> {
                             int trailingSpaces = countTrailingSpaces(valuePart);
                             String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            String beforeDash = logicalLine.substring(0, logicalLine.indexOf('-'));
+                            int dashIdx = logicalLine.indexOf('-');
+                            String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
                             String newLogicalLine = beforeDash + "- " + newValue + spacesBeforeComment + commentPart;
                             lines.set(i, newLogicalLine + eol);
                         }
                         case CLEAR_VALUE -> {
                             int trailingSpaces = countTrailingSpaces(valuePart);
                             String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            String beforeDash = logicalLine.substring(0, logicalLine.indexOf('-'));
+                            int dashIdx = logicalLine.indexOf('-');
+                            String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
                             String newLogicalLine = beforeDash + "- " + "" + spacesBeforeComment + commentPart;
                             lines.set(i, newLogicalLine + eol);
                         }
@@ -433,42 +473,85 @@ public final class YamlInPlaceEditor {
                 for (PathEntry p : stack) candidate.add(p.key());
 
                 if (candidate.equals(path)) {
-                    if (valueAndComment.startsWith("|") || valueAndComment.startsWith(">") || valueAndComment.isEmpty()) {
-                        throw new IllegalArgumentException("Path points to non-scalar or multi-line value which is not supported by in-place editor.");
+                    // split comment from value string (if any)
+                    int dashIdx = logicalLine.indexOf('-');
+                    String beforeDash = dashIdx >= 0 ? logicalLine.substring(0, dashIdx) : "";
+                    int cIdx = findCommentIndex(valueAndComment);
+                    String commentPart = cIdx>=0 ? valueAndComment.substring(cIdx):"";
+                    String valuePrefix = cIdx>=0 ? valueAndComment.substring(0,cIdx):valueAndComment;
+
+                    boolean isBlock = valuePrefix.trim().startsWith("|") || valuePrefix.trim().startsWith(">");
+
+                    if (isBlock) {
+                        // locate end of block (first line whose indent <= current indent)
+                        int end = i + 1;
+                        while (end < lines.size()) {
+                            String next = lines.get(end);
+                            String nextLogical = next.replaceAll("(\\r\\n|\\r|\\n)$", "");
+                            int nextIndent = 0; while (nextIndent < nextLogical.length() && nextLogical.charAt(nextIndent)==' ') nextIndent++;
+                            if (nextLogical.trim().isEmpty()) { end++; continue; }
+                            if (nextIndent <= indent) break;
+                            end++;
+                        }
+
+                        switch(op) {
+                            case REPLACE -> {
+                                // Build new block with '|'
+                                String newLogicalLine;
+                                if (newValue.contains("\n")) {
+                                    newLogicalLine = indentStr + key + ": |" + commentPart + eol;
+                                    List<String> newBlock = new ArrayList<>();
+                                    String seqIndentStr = indentStr + "  ";
+                                    for (String p : newValue.split("\n", -1)) {
+                                        newBlock.add(seqIndentStr + p + eol);
+                                    }
+                                    lines.subList(i, end).clear();
+                                    lines.add(i, newLogicalLine);
+                                    lines.addAll(i+1, newBlock);
+                                } else {
+                                    // simple scalar replacement, drop old block
+                                    newLogicalLine = indentStr + key + ": " + newValue + commentPart;
+                                    lines.subList(i, end).clear();
+                                    lines.add(i, newLogicalLine + eol);
+                                }
+                            }
+                            case CLEAR_VALUE -> {
+                                String newLogicalLine = indentStr + key + ":" + afterColonSpaces + "" + commentPart;
+                                lines.subList(i, end).clear();
+                                lines.add(i, newLogicalLine + eol);
+                            }
+                            case DELETE_LINE -> {
+                                lines.subList(i, end).clear();
+                                i--; // adjust after deletion
+                            }
+                        }
+                        return lines;
                     }
 
-                    int commentIdx = findCommentIndex(valueAndComment);
-                    String valuePart;
-                    String commentPart = "";
-                    if (commentIdx >= 0) {
-                        valuePart = valueAndComment.substring(0, commentIdx);
-                        commentPart = valueAndComment.substring(commentIdx);
-                    } else {
-                        valuePart = valueAndComment;
-                    }
+                    // ---- Inline scalar handling (original logic) ----
+                    String valuePart = valuePrefix;
 
-                    // Check if value matches expected (if specified)
+                    // Check expected value
                     if (expectedOldValue != null && !valuePart.trim().equals(expectedOldValue)) {
-                        continue; // Not the occurrence we want
+                        // value mismatch – skip
+                        return lines;
                     }
 
-                    // Perform the operation
-                    switch (op) {
+                    int trailingSpaces = countTrailingSpaces(valuePart);
+                    String spacesBeforeComment = " ".repeat(trailingSpaces);
+
+                    switch(op) {
                         case REPLACE -> {
-                            int trailingSpaces = countTrailingSpaces(valuePart);
-                            String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            String newLogicalLine = indentStr + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
-                            lines.set(i, newLogicalLine + eol);
+                            String newLogical = indentStr + key + ":" + afterColonSpaces + newValue + spacesBeforeComment + commentPart;
+                            lines.set(i, newLogical + eol);
                         }
                         case CLEAR_VALUE -> {
-                            int trailingSpaces = countTrailingSpaces(valuePart);
-                            String spacesBeforeComment = " ".repeat(trailingSpaces);
-                            String newLogicalLine = indentStr + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
-                            lines.set(i, newLogicalLine + eol);
+                            String newLogical = indentStr + key + ":" + afterColonSpaces + "" + spacesBeforeComment + commentPart;
+                            lines.set(i, newLogical + eol);
                         }
                         case DELETE_LINE -> {
                             lines.remove(i);
-                            i--; // Adjust index since we removed a line
+                            i--; // adjust index
                         }
                     }
                     return lines;
