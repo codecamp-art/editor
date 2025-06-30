@@ -221,38 +221,15 @@ public final class PropertiesInPlaceEditor {
     // Internal helper implementations (previously removed by mistake)
     // ---------------------------------------------------------------------
     private static byte[] replaceInternal(byte[] originalBytes, FileInfo info, String targetKey, String expectedOldValue, String newValue) {
-        return mutateLines(originalBytes, info, targetKey, expectedOldValue,
-                (indent, key, separator, valuePart, spaces, commentPart) -> indent + key + separator + newValue + spaces + commentPart);
+        return mutateLinesMulti(originalBytes, info, targetKey, expectedOldValue, newValue, false);
     }
 
     private static byte[] clearInternal(byte[] originalBytes, FileInfo info, String targetKey, String expectedOldValue) {
-        return mutateLines(originalBytes, info, targetKey, expectedOldValue,
-                (indent, key, separator, valuePart, spaces, commentPart) -> indent + key + separator + spaces + commentPart);
+        return mutateLinesMulti(originalBytes, info, targetKey, expectedOldValue, "", false);
     }
 
     private static byte[] removeLineInternal(byte[] originalBytes, FileInfo info, String targetKey, String expectedOldValue) {
-        String content = new String(originalBytes, info.offset, originalBytes.length - info.offset, info.charset);
-        List<String> lines = splitLines(content);
-        Pattern kvPattern = Pattern.compile("^(\\s*)([^:=\\s\\\\]+)(\\s*[=:]\\s*)(.*)$");
-        for (int i = 0; i < lines.size(); i++) {
-            String fullLine = lines.get(i);
-            String logical = stripEol(fullLine);
-            String trimmed = logical.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) continue;
-            Matcher kv = kvPattern.matcher(logical);
-            if (kv.find()) {
-                String key = kv.group(2).trim();
-                if (key.equals(targetKey)) {
-                    String valueAndRest = kv.group(4);
-                    int commentIdx = findInlineComment(valueAndRest);
-                    String valuePart = commentIdx >= 0 ? valueAndRest.substring(0, commentIdx) : valueAndRest;
-                    if (expectedOldValue != null && !valuePart.trim().equals(expectedOldValue)) continue;
-                    lines.remove(i);
-                    return assemble(lines, info);
-                }
-            }
-        }
-        throw new IllegalArgumentException("Key not found (or value mismatch): " + targetKey);
+        return mutateLinesMulti(originalBytes, info, targetKey, expectedOldValue, "", true);
     }
 
     private interface LineTransformer {
@@ -303,6 +280,118 @@ public final class PropertiesInPlaceEditor {
 
     private static String stripEol(String fullLine) {
         return fullLine.replaceAll("(\r\n|\r|\n)$", "");
+    }
+
+    private static boolean endsWithContinuation(String logical) {
+        int idx = logical.length() - 1;
+        // Skip trailing whitespace
+        while (idx >= 0 && Character.isWhitespace(logical.charAt(idx))) idx--;
+        if (idx < 0 || logical.charAt(idx) != '\\') return false;
+        // Count consecutive backslashes backwards
+        int bs = 0;
+        while (idx >= 0 && logical.charAt(idx) == '\\') { bs++; idx--; }
+        return bs % 2 == 1; // odd means the last backslash is not escaped
+    }
+
+    private static String leadingWhitespace(String s) {
+        int i = 0; while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++; return s.substring(0, i);
+    }
+
+    private static byte[] mutateLinesMulti(byte[] originalBytes, FileInfo info, String targetKey, String expectedOldValue, String newValue, boolean removeLine) {
+        String content = new String(originalBytes, info.offset, originalBytes.length - info.offset, info.charset);
+        List<String> lines = splitLines(content);
+
+        Pattern kvPattern = Pattern.compile("^(\\s*)([^:=\\s\\\\]+)(\\s*[=:]\\s*)(.*)$");
+
+        for (int i = 0; i < lines.size(); i++) {
+            String fullLine = lines.get(i);
+            String logical = stripEol(fullLine);
+            String eol = fullLine.substring(logical.length());
+
+            String trimmed = logical.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) continue;
+
+            Matcher kv = kvPattern.matcher(logical);
+            if (!kv.find()) continue;
+
+            String key = kv.group(2).trim();
+            if (!key.equals(targetKey)) continue;
+
+            String indent = kv.group(1);
+            String separator = kv.group(3);
+            String valueAndRest = kv.group(4);
+
+            int commentIdx = findInlineComment(valueAndRest);
+            String valuePart = commentIdx >= 0 ? valueAndRest.substring(0, commentIdx) : valueAndRest;
+            String commentPart = commentIdx >= 0 ? valueAndRest.substring(commentIdx) : "";
+
+            int trailingSpaces = countTrailingSpaces(valuePart);
+            String spaces = " ".repeat(trailingSpaces);
+
+            // Determine continuation block extent
+            int endIdx = i;
+            while (endIdx < lines.size()) {
+                String curLogical = stripEol(lines.get(endIdx));
+                if (endsWithContinuation(curLogical)) {
+                    endIdx++;
+                } else {
+                    break;
+                }
+            }
+
+            // Aggregate existing value for expectedOldValue comparison (optional)
+            if (expectedOldValue != null) {
+                StringBuilder agg = new StringBuilder();
+                // first value fragment (strip possible trailing backslash and spaces)
+                agg.append(valuePart.replaceAll("\\\\\\s*$", ""));
+                for (int j = i + 1; j <= endIdx; j++) {
+                    String l = stripEol(lines.get(j));
+                    String segment = l.trim();
+                    segment = segment.replaceAll("\\\\\\s*$", ""); // remove trailing backslash and spaces
+                    agg.append(segment);
+                }
+                if (!agg.toString().trim().equals(expectedOldValue)) continue; // mismatch
+            }
+
+            if (removeLine) { // delete whole block
+                lines.subList(i, endIdx + 1).clear();
+                return assemble(lines, info);
+            }
+
+            // Build replacement lines
+            List<String> newLines = new ArrayList<>();
+
+            String indentContinuation;
+            if (endIdx > i) {
+                indentContinuation = leadingWhitespace(stripEol(lines.get(i + 1)));
+            } else {
+                indentContinuation = indent.isEmpty() ? " " : indent;
+            }
+
+            if (newValue.contains("\n")) {
+                String[] parts = newValue.split("\\n", -1);
+                // first line
+                String firstLineLogical = indent + key + separator + parts[0] + " \\" + spaces + commentPart;
+                newLines.add(firstLineLogical + eol);
+
+                for (int idx = 1; idx < parts.length; idx++) {
+                    boolean last = idx == parts.length - 1;
+                    String cont = indentContinuation + parts[idx] + (last ? "" : " \\") ;
+                    newLines.add(cont + eol);
+                }
+            } else {
+                // single-line value; collapse any previous continuation
+                String singleLogical = indent + key + separator + newValue + spaces + commentPart;
+                newLines.add(singleLogical + eol);
+            }
+
+            // Replace in list
+            lines.subList(i, endIdx + 1).clear();
+            lines.addAll(i, newLines);
+
+            return assemble(lines, info);
+        }
+        throw new IllegalArgumentException("Key not found (or value mismatch): " + targetKey);
     }
 
     /* --- Encoding & EOL detection utilities (copied) -------------------- */

@@ -130,5 +130,24 @@ class PropertiesInPlaceEditorCombinedTest {
         assertTrue(results.contains(expectedCRemoved));
     }
 
+    @Test
+    @DisplayName("Multi-line value replace – UTF-8 simple sample")
+    void multiLineReplace(@TempDir Path tmp) throws IOException {
+        String original = "desc=Line1 \\" + "\n" +
+                        " Line2\n" +
+                        "other=123\n";
+        Path f = tmp.resolve("multi.properties");
+        Files.writeString(f, original, StandardCharsets.UTF_8);
+
+        // Replace desc with two-line value
+        PropertiesInPlaceEditor.setValue(f.toFile(), "desc", null, "New1\nNew2", null);
+
+        String expected = "desc=New1 \\" + "\n" +
+                        " New2\n" +
+                        "other=123\n";
+        String after = Files.readString(f, StandardCharsets.UTF_8);
+        assertEquals(expected, after);
+    }
+
     private static boolean startsWith(byte[] arr, byte[] prefix){ if(arr.length<prefix.length) return false; for(int i=0;i<prefix.length;i++){ if(arr[i]!=prefix[i]) return false;} return true; }
 } 
