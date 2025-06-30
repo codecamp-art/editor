@@ -31,6 +31,8 @@ class PropertiesInPlaceEditorCombinedTest {
                 "# Global comment\r\n" +
                 " username = admin\r" +
                 "password=123   # pass\n" +
+                "desc=Line1 \\\n" +
+                " Line2\n" +
                 "! system comment\r\n" +
                 "url:https://example.com\n" +
                 "timeout=30  \r" +
@@ -49,11 +51,15 @@ class PropertiesInPlaceEditorCombinedTest {
         PropertiesInPlaceEditor.setValue(f.toFile(), "cache", "enabled", null, null);
         // 4. Remove entire line
         PropertiesInPlaceEditor.removeLine(f.toFile(), "url", "https://example.com");
+        // 5. Replace a multi-line property value
+        PropertiesInPlaceEditor.setValue(f.toFile(), "desc", null, "New1\nNew2", null);
 
         String expected =
                 "# Global comment\r\n" +
                 " username = root\r" +
                 "password=123   # pass\n" +
+                "desc=New1 \\\n" +
+                " New2\n" +
                 "! system comment\r\n" +
                 "timeout=60  \r" +
                 "cache=\r\n" +
@@ -73,6 +79,8 @@ class PropertiesInPlaceEditorCombinedTest {
                 "# 配置说明\r\n" +
                 "用户名=张三\r" +
                 "密码 : 123 # 密码\n" +
+                "描述=第一行 \\\n" +
+                " 第二行\n" +
                 "! 注释\r\n" +
                 "地址=北京\r" +
                 "超时 = 30\r\n" +
@@ -87,11 +95,15 @@ class PropertiesInPlaceEditorCombinedTest {
         PropertiesInPlaceEditor.setValue(f.toFile(), "超时", "30", "60", "GBK");
         PropertiesInPlaceEditor.setValue(f.toFile(), "缓存", "启用", null, "GBK");
         PropertiesInPlaceEditor.removeLineWithEncoding(f.toFile(), "GBK", "地址", "北京");
+        // 5. Replace multi-line property in GBK file
+        PropertiesInPlaceEditor.setValue(f.toFile(), "描述", null, "新1\n新2", "GBK");
 
         String expected =
                 "# 配置说明\r\n" +
                 "用户名=李四\r" +
                 "密码 : 123 # 密码\n" +
+                "描述=新1 \\\n" +
+                " 新2\n" +
                 "! 注释\r\n" +
                 "超时 = 60\r\n" +
                 "缓存=\n" +
@@ -128,25 +140,6 @@ class PropertiesInPlaceEditorCombinedTest {
         assertTrue(results.contains(expectedA));
         assertTrue(results.contains(expectedB));
         assertTrue(results.contains(expectedCRemoved));
-    }
-
-    @Test
-    @DisplayName("Multi-line value replace – UTF-8 simple sample")
-    void multiLineReplace(@TempDir Path tmp) throws IOException {
-        String original = "desc=Line1 \\" + "\n" +
-                        " Line2\n" +
-                        "other=123\n";
-        Path f = tmp.resolve("multi.properties");
-        Files.writeString(f, original, StandardCharsets.UTF_8);
-
-        // Replace desc with two-line value
-        PropertiesInPlaceEditor.setValue(f.toFile(), "desc", null, "New1\nNew2", null);
-
-        String expected = "desc=New1 \\" + "\n" +
-                        " New2\n" +
-                        "other=123\n";
-        String after = Files.readString(f, StandardCharsets.UTF_8);
-        assertEquals(expected, after);
     }
 
     private static boolean startsWith(byte[] arr, byte[] prefix){ if(arr.length<prefix.length) return false; for(int i=0;i<prefix.length;i++){ if(arr[i]!=prefix[i]) return false;} return true; }
