@@ -92,8 +92,7 @@ class IniInPlaceEditorAllTest {
         List<String> lineCmt = List.of("#", ";");
         List<String[]> blk = Collections.singletonList(new String[]{"/*", "*/"});
         Charset gbk = Charset.forName("GBK");
-        String body = "" +
-                "; Global comment 名称 = 张三\r\n" +
+        String body = "; Global comment 名称 = 张三\r\n" +
                 "/* blk */\r\n" +
                 "/* comment start\n" +
                 "comment end */\r\n" +
