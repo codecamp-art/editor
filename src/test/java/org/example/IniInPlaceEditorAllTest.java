@@ -89,15 +89,15 @@ class IniInPlaceEditorAllTest {
     @Test
     @DisplayName("GBK file – multiple edits preserve formatting")
     void gbkMultiOps(@TempDir Path tmp) throws IOException {
-        List<String> lineCmt = List.of("#", ";");
+        List<String> lineCmt = List.of("#", "//");
         List<String[]> blk = Collections.singletonList(new String[]{"/*", "*/"});
         Charset gbk = Charset.forName("GBK");
-        String body = "; Global comment 名称 = 张三\r\n" +
+        String body = "// Global comment 名称 = 张三\r\n" +
                 "/* blk */\r\n" +
                 "/* comment start\n" +
                 "comment end */\r\n" +
                 "[信息]\r\n" +
-                "名称 = 张三 ; 名称 = 张三\r\n" +
+                "名称 = 张三 // 名称 = 张三\r\n" +
                 "年龄 = 30    # cmt\n" +
                 "年龄1=30    # cmt\n" +
                 "地址 = 上海\r\n" +
@@ -115,12 +115,12 @@ class IniInPlaceEditorAllTest {
         IniInPlaceEditor.deleteLine(f.toFile(), "信息/空值", null, "GBK", lineCmt, blk);
 
         String expected = "" +
-                "; Global comment 名称 = 张三\r\n" +
+                "// Global comment 名称 = 张三\r\n" +
                 "/* blk */\r\n" +
                 "/* comment start\n" +
                 "comment end */\r\n" +
                 "[信息]\r\n" +
-                "名称 = 李四 ; 名称 = 张三\r\n" +
+                "名称 = 李四 // 名称 = 张三\r\n" +
                 "年龄 =     # cmt\n" + 
                 "年龄1=    # cmt\n" + 
                 "地址 = 北京\r\n" + 
