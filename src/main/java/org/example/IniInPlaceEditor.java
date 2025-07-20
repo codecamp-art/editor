@@ -5,6 +5,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -15,23 +16,23 @@ public final class IniInPlaceEditor {
     
     /** Utility class – no instances allowed */
     private IniInPlaceEditor() { }
-    
-    // Constants for better maintainability
-    private static final Pattern EOL_PATTERN = Pattern.compile("(\r\n|\r|\n)");
-    
-    // BOM detection constants
-    private static final byte[] UTF8_BOM = {(byte)0xEF, (byte)0xBB, (byte)0xBF};
-    private static final byte[] UTF16BE_BOM = {(byte)0xFE, (byte)0xFF};
-    private static final byte[] UTF16LE_BOM = {(byte)0xFF, (byte)0xFE};
 
     /**
      * Encapsulates file encoding and line ending information
      */
     private record FileInfo(Charset charset, String eol, List<String> originalEols, boolean lastLineNoEol, byte[] bom, int offset) {
+        static FileInfo get(byte[] content, String encodingHint) {
+            if (encodingHint == null || encodingHint.isEmpty()) {
+                return detect(content);
+            }
+            FileInfo base = detect(content);
+            Charset cs = Charset.forName(encodingHint);
+            return new FileInfo(cs, base.eol, base.originalEols, base.lastLineNoEol, base.bom, base.offset);
+        }
         static FileInfo detect(byte[] content) {
-            var encodingInfo = EncodingUtil.detectEncoding(content);
-            var eolInfo = EolUtil.detectLineEndings(content, encodingInfo.charset());
-            return new FileInfo(encodingInfo.charset(), eolInfo.eol(), eolInfo.originalEols(), eolInfo.lastLineNoEol(), encodingInfo.bom(), encodingInfo.offset());
+            EncodingInfo enc = EncodingUtil.detectEncoding(content);
+            EolInfo eol = EolUtil.detectLineEndings(content, enc.charset);
+            return new FileInfo(enc.charset, eol.eol, eol.originalEols, eol.lastLineNoEol, enc.bom, enc.offset);
         }
     }
 
@@ -446,21 +447,18 @@ public final class IniInPlaceEditor {
      * Encoding detection utility
      */
     private static final class EncodingUtil {
-        static EncodingInfo detectEncoding(byte[] content) {
-            // Check BOM
-            if (content.length >= 3 && Arrays.equals(Arrays.copyOfRange(content, 0, 3), UTF8_BOM)) {
-                return new EncodingInfo(StandardCharsets.UTF_8, UTF8_BOM, 3);
-            } else if (content.length >= 2) {
-                if (Arrays.equals(Arrays.copyOfRange(content, 0, 2), UTF16BE_BOM)) {
-                    return new EncodingInfo(Charset.forName("UTF-16BE"), UTF16BE_BOM, 2);
-                } else if (Arrays.equals(Arrays.copyOfRange(content, 0, 2), UTF16LE_BOM)) {
-                    return new EncodingInfo(Charset.forName("UTF-16LE"), UTF16LE_BOM, 2);
-                }
-            }
-            
-            // Default to UTF-8, but could be enhanced with GBK detection
-            return new EncodingInfo(StandardCharsets.UTF_8, null, 0);
+        private static final byte[] UTF8_BOM = {(byte)0xEF,(byte)0xBB,(byte)0xBF};
+        private static final byte[] UTF16BE_BOM = {(byte)0xFE,(byte)0xFF};
+        private static final byte[] UTF16LE_BOM = {(byte)0xFF,(byte)0xFE};
+        static IniInPlaceEditor.EncodingInfo detectEncoding(byte[] content) {
+            if (startsWith(content, UTF8_BOM)) return new IniInPlaceEditor.EncodingInfo(StandardCharsets.UTF_8, UTF8_BOM, 3);
+            if (startsWith(content, UTF16BE_BOM)) return new IniInPlaceEditor.EncodingInfo(StandardCharsets.UTF_16BE, UTF16BE_BOM, 2);
+            if (startsWith(content, UTF16LE_BOM)) return new IniInPlaceEditor.EncodingInfo(StandardCharsets.UTF_16LE, UTF16LE_BOM, 2);
+            // Fallback – try UTF-8 else GBK
+            try { new String(content, StandardCharsets.UTF_8); return new IniInPlaceEditor.EncodingInfo(StandardCharsets.UTF_8, new byte[0], 0);} catch(Exception ignored){}
+            return new IniInPlaceEditor.EncodingInfo(Charset.forName("GBK"), new byte[0], 0);
         }
+        private static boolean startsWith(byte[] src, byte[] prefix){ if(src.length<prefix.length) return false; for(int i=0;i<prefix.length;i++) if(src[i]!=prefix[i]) return false; return true; }
     }
     
     private record EncodingInfo(Charset charset, byte[] bom, int offset) {}
@@ -469,35 +467,15 @@ public final class IniInPlaceEditor {
      * Line ending detection utility
      */
     private static final class EolUtil {
-        static EolInfo detectLineEndings(byte[] content, Charset charset) {
-            String text = new String(content, charset);
-            String[] lines = EOL_PATTERN.split(text, -1);
-            
-            List<String> originalEols = new ArrayList<>();
-            String dominantEol = "\n"; // Default
-            
-            // Analyze line endings
-            for (int i = 0; i < lines.length - 1; i++) {
-                String line = lines[i];
-                int lineEndIndex = text.indexOf(line) + line.length();
-                if (lineEndIndex < text.length()) {
-                    String eol = text.substring(lineEndIndex, Math.min(lineEndIndex + 2, text.length()));
-                    if (eol.startsWith("\r\n")) {
-                        originalEols.add("\r\n");
-                        dominantEol = "\r\n";
-                    } else if (eol.startsWith("\r")) {
-                        originalEols.add("\r");
-                        dominantEol = "\r";
-                    } else if (eol.startsWith("\n")) {
-                        originalEols.add("\n");
-                        dominantEol = "\n";
-                    }
-                }
-            }
-            
-            boolean lastLineNoEol = text.isEmpty() || !text.endsWith("\n") && !text.endsWith("\r");
-            
-            return new EolInfo(dominantEol, originalEols, lastLineNoEol);
+        private static final Pattern P = Pattern.compile("(\\r\\n|\\r|\\n)");
+        static IniInPlaceEditor.EolInfo detectLineEndings(byte[] content, Charset cs){
+            String t = new String(content, cs);
+            Matcher m = P.matcher(t);
+            List<String> eols = new ArrayList<>();
+            while (m.find()) eols.add(m.group());
+            String dominant = eols.stream().findFirst().orElse("\n");
+            boolean noEol = t.isEmpty() || (!t.endsWith("\n") && !t.endsWith("\r"));
+            return new IniInPlaceEditor.EolInfo(dominant, eols, noEol);
         }
     }
     
