@@ -137,40 +137,38 @@ public final class YamlInPlaceEditor {
     }
 
     /**
-     * Set a value in YAML file in-place. If newValue is null or empty, clears the value but keeps the key.
-     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * Search a path in file.
+     *
      * @param file YAML file to update
      * @param yamlPath Slash-separated path (e.g. "root/child/key")
      * @throws IOException on I/O error
      */
-    public static boolean pathAndValueExists(File file, String yamlPath) throws IOException {
-        return pathAndValueExists(file, yamlPath, null, null);
+    public static boolean search(File file, String yamlPath) throws IOException {
+        return search(file, yamlPath, null, null);
     }
 
     /**
-     * Set a value in YAML file in-place, only if current value matches expected value.
-     * If newValue is null or empty, clears the value but keeps the key.
-     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * Search a path and value in file.
+     *
      * @param file YAML file to update
      * @param yamlPath Slash-separated path (e.g. "root/child/key")
      * @param value Current value that must match (null for unconditional)
      * @throws IOException on I/O error
      */
-    public static boolean pathAndValueExists(File file, String yamlPath, String value) throws IOException {
-        return pathAndValueExists(file, yamlPath, value, null);
+    public static boolean search(File file, String yamlPath, String value) throws IOException {
+        return search(file, yamlPath, value, null);
     }
 
     /**
-     * Set a value in YAML file in-place with encoding hint, only if current value matches expected value.
-     * If newValue is null or empty, clears the value but keeps the key.
-     * <p>Preserves all formatting, comments, indentation, EOLs, and BOM. Thread-safe and stateless.
+     * Search a path and value in file.
+     *
      * @param file YAML file to update
      * @param yamlPath Slash-separated path (e.g. "root/child/key")
      * @param value Current value that must match (null for unconditional)
      * @param encodingHint Character encoding hint (e.g. "GBK", "UTF-8")
      * @throws IOException on I/O error
      */
-    public static boolean pathAndValueExists(File file, String yamlPath, String value, String encodingHint) throws IOException {
+    public static boolean search(File file, String yamlPath, String value, String encodingHint) throws IOException {
         Objects.requireNonNull(file, "file must not be null");
         Objects.requireNonNull(yamlPath, "yamlPath must not be null");
 
@@ -182,35 +180,33 @@ public final class YamlInPlaceEditor {
     }
 
     /**
-     * Set a value in YAML content from InputStream. If newValue is null or empty, clears the value but keeps the key.
-     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * Search a path in InputStream.
+     *
      * @param inputStream InputStream containing YAML data
      * @param yamlPath Slash-separated path (e.g. "root/child/key")
      * @return Modified YAML content as bytes
      * @throws IOException on I/O error
      */
-    public static boolean pathAndValueExists(InputStream inputStream, String yamlPath) throws IOException {
-        return pathAndValueExists(inputStream, yamlPath, null, null);
+    public static boolean search(InputStream inputStream, String yamlPath) throws IOException {
+        return search(inputStream, yamlPath, null, null);
     }
 
     /**
-     * Set a value in YAML content from InputStream, only if current value matches expected value.
-     * If newValue is null or empty, clears the value but keeps the key.
-     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * Search a path and value in InputStream.
+     *
      * @param inputStream InputStream containing YAML data
      * @param yamlPath Slash-separated path (e.g. "root/child/key")
      * @param value Current value that must match (null for unconditional)
      * @return Modified YAML content as bytes
      * @throws IOException on I/O error
      */
-    public static boolean pathAndValueExists(InputStream inputStream, String yamlPath, String value) throws IOException {
-        return pathAndValueExists(inputStream, yamlPath, value, null);
+    public static boolean search(InputStream inputStream, String yamlPath, String value) throws IOException {
+        return search(inputStream, yamlPath, value, null);
     }
 
     /**
-     * Set a value in YAML content from InputStream with encoding hint, only if current value matches expected value.
-     * If newValue is null or empty, clears the value but keeps the key.
-     * <p>Preserves all formatting, comments, indentation, EOLs, and BOM. Thread-safe and stateless.
+     * Search a path and value in InputStream.
+     *
      * @param inputStream InputStream containing YAML data
      * @param yamlPath Slash-separated path (e.g. "root/child/key")
      * @param value Current value that must match (null for unconditional)
@@ -218,7 +214,7 @@ public final class YamlInPlaceEditor {
      * @return Modified YAML content as bytes
      * @throws IOException on I/O error
      */
-    public static boolean pathAndValueExists(InputStream inputStream, String yamlPath, String value, String encodingHint) throws IOException {
+    public static boolean search(InputStream inputStream, String yamlPath, String value, String encodingHint) throws IOException {
         byte[] originalBytes = inputStream.readAllBytes();
         FileInfo fileInfo = getFileInfo(originalBytes, encodingHint);
 
@@ -363,8 +359,7 @@ public final class YamlInPlaceEditor {
             rawLines.add(m.group(1));
         }
 
-//        List<String> updatedLines = updateLines(rawLines, path, value);
-        return false;
+        return searchLines(rawLines, path, value);
 
     }
 
@@ -666,6 +661,154 @@ public final class YamlInPlaceEditor {
             }
         }
         throw new IllegalArgumentException("Path not found or does not correspond to an inline scalar value: " + String.join("/", path));
+    }
+
+    private static boolean searchLines(List<String> lines, List<String> path, String value) {
+        // Stack representing current path components (mapping keys or sequence indices)
+        Deque<PathEntry> stack = new ArrayDeque<>();
+        // Sequence index counters per indent level
+        int[] seqIdx = new int[64];          // enlarge if ever needed
+        Arrays.fill(seqIdx, -1);
+
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            String logicalLine = line.replaceAll("(\\r\\n|\\r|\\n)$", "");
+            String eol = line.substring(logicalLine.length());
+
+            String trimmed = logicalLine.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue; // skip blank & comment
+            }
+
+            // Determine indent (spaces before first non-space char)
+            int indent = 0;
+            while (indent < logicalLine.length() && logicalLine.charAt(indent) == ' ') indent++;
+
+            // Pop stack levels deeper or equal to current indent
+            while (!stack.isEmpty() && stack.peekLast().indent() >= indent) {
+                stack.pollLast();
+            }
+            // Clear sequence counters deeper than current indent
+            final int currentIndent = indent;
+            seqIdx[currentIndent+1] = -1;               // cheap "reset deeper levels"
+
+            Matcher mSeqKv = SEQ_KV_PATTERN.matcher(logicalLine);
+            boolean matchedSeqKv = mSeqKv.find();
+            Matcher mSeqScalar = SEQ_SCALAR_PATTERN.matcher(logicalLine);
+            boolean matchedSeqScalar = !matchedSeqKv && mSeqScalar.find();
+            Matcher mMapKv = MAP_KV_PATTERN.matcher(logicalLine);
+
+            if (matchedSeqKv) {
+                // Sequence item with inline key-value ("- key: value")
+                int seqIndent = mSeqKv.group(1).length();
+                int index = ++seqIdx[seqIndent];
+                seqIdx[seqIndent+1] = -1;               // cheap "reset deeper levels"
+
+                stack.addLast(new PathEntry(seqIndent, String.valueOf(index)));
+
+                String key = mSeqKv.group(2).trim();
+                String afterColonSpaces = mSeqKv.group(3);
+                String valueAndComment = mSeqKv.group(4);
+
+                // Prepare candidate path
+                List<String> candidate = new ArrayList<>();
+                for (PathEntry p : stack) candidate.add(p.key());
+                candidate.add(key);
+
+                if (candidate.equals(path)) {
+                    int cIdx = findCommentIndex(valueAndComment);
+                    String commentPart = cIdx>=0 ? valueAndComment.substring(cIdx):"";
+                    String valuePrefix = cIdx>=0 ? valueAndComment.substring(0,cIdx):valueAndComment;
+
+                    boolean isBlock = valuePrefix.trim().startsWith("|") || valuePrefix.trim().startsWith(">");
+
+                    if (isBlock) {
+                        // locate block end
+
+                    }
+
+                    String valuePart = valuePrefix;
+
+                    // Check the expected value
+                    if (value != null && !valuePart.trim().equals(value)) {
+                        // value mismatch – skip
+                        return false;
+                    }
+                    return true;
+                }
+
+            } else if (matchedSeqScalar) {
+                // Sequence item with scalar ("- value")
+                int seqIndent = mSeqScalar.group(1).length();
+                int index = ++seqIdx[seqIndent];
+                seqIdx[seqIndent+1] = -1;               // cheap "reset deeper levels"
+
+                stack.addLast(new PathEntry(seqIndent, String.valueOf(index)));
+
+                String valueAndComment = mSeqScalar.group(2);
+
+                List<String> candidate = new ArrayList<>();
+                for (PathEntry p : stack) candidate.add(p.key());
+
+                if (candidate.equals(path)) {
+                    if (valueAndComment.startsWith("|") || valueAndComment.startsWith(">") || valueAndComment.isEmpty()) {
+                        throw new IllegalArgumentException("Path points to non-scalar or multi-line value which is not supported by in-place editor.");
+                    }
+
+                    int commentIdx = findCommentIndex(valueAndComment);
+                    String valuePart;
+                    String commentPart = "";
+                    if (commentIdx >= 0) {
+                        valuePart = valueAndComment.substring(0, commentIdx);
+                        commentPart = valueAndComment.substring(commentIdx);
+                    } else {
+                        valuePart = valueAndComment;
+                    }
+
+                    // Check if value matches expected (if specified)
+                    if (value != null && !valuePart.trim().equals(value)) {
+                        continue; // Not the occurrence we want
+                    }
+                    return true;
+                }
+
+            } else if (mMapKv.find()) {
+                // Standard mapping key-value
+                String indentStr = mMapKv.group(1);
+                String key = mMapKv.group(2).trim();
+                String afterColonSpaces = mMapKv.group(3);
+                String valueAndComment = mMapKv.group(4);
+
+                stack.addLast(new PathEntry(indent, key));
+
+                List<String> candidate = new ArrayList<>();
+                for (PathEntry p : stack) candidate.add(p.key());
+
+                if (candidate.equals(path)) {
+                    // split comment from value string (if any)
+                    int cIdx = findCommentIndex(valueAndComment);
+                    String commentPart = cIdx>=0 ? valueAndComment.substring(cIdx):"";
+                    String valuePrefix = cIdx>=0 ? valueAndComment.substring(0,cIdx):valueAndComment;
+
+                    boolean isBlock = valuePrefix.trim().startsWith("|") || valuePrefix.trim().startsWith(">");
+
+                    if (isBlock) {
+
+                    }
+
+                    // ---- Inline scalar handling (original logic) ----
+                    String valuePart = valuePrefix;
+
+                    // Check the expected value
+                    if (value != null && !valuePart.trim().equals(value)) {
+                        // value mismatch – skip
+                        return false;
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

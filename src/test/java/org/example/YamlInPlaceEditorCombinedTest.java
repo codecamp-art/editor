@@ -82,14 +82,19 @@ class YamlInPlaceEditorCombinedTest {
         File file = createFile("complex_utf8.yml", withBom);
 
         /* Perform a suite of operations */
-        // Replace scalar
+        // Replaces scalar
+        assertTrue(YamlInPlaceEditor.search(file, "app/version"));
         YamlInPlaceEditor.setValue(file, "app/version", "2.0.0");
-        // Conditional replace
+        // Conditionally replace
+        assertTrue(YamlInPlaceEditor.search(file, "app/debug", "true"));
         YamlInPlaceEditor.setValue(file, "app/debug", "true", "false");
         // Clear value
+        assertTrue(YamlInPlaceEditor.search(file, "app/database/password"));
         YamlInPlaceEditor.setValue(file, "app/database/password", "");
         // Replace inside sequence
+        assertTrue(YamlInPlaceEditor.search(file, "app/features/1/ttl"));
         YamlInPlaceEditor.setValue(file, "app/features/1/ttl", "7200");
+        assertTrue(YamlInPlaceEditor.search(file, "app/features/1/description"));
         YamlInPlaceEditor.setValue(file, "app/features/1/description", "Updated desc line1\nUpdated line2");
         // Delete a line
         YamlInPlaceEditor.deleteLine(file, "app/features/0/enabled");
@@ -126,6 +131,7 @@ class YamlInPlaceEditorCombinedTest {
                 "service:\n" +
                 "  port: 9090 # to be changed\n";
 
+        assertTrue(YamlInPlaceEditor.search(file, "app/features/1/ttl", "7200"));
         String txt = new String(result, 3, result.length - 3, StandardCharsets.UTF_8);
         assertEquals(expectedUtf8, txt);
     }
@@ -166,10 +172,19 @@ class YamlInPlaceEditorCombinedTest {
         File file = createFile("complex_gbk.yml", yaml.getBytes(gbk));
 
         // Perform the same suite of operations as UTF-8 version, using encoding hint
+        assertTrue(YamlInPlaceEditor.search(file, "app/version", null, "GBK"));
         YamlInPlaceEditor.setValue(file, "app/version", null, "2.0.0", "GBK");
+
+        assertTrue(YamlInPlaceEditor.search(file, "app/debug", "true", "GBK"));
         YamlInPlaceEditor.setValue(file, "app/debug", "true", "false", "GBK");
+
+        assertTrue(YamlInPlaceEditor.search(file, "app/database/password", null, "GBK"));
         YamlInPlaceEditor.setValue(file, "app/database/password", null, "", "GBK");
+
+        assertTrue(YamlInPlaceEditor.search(file, "app/features/1/ttl", "3600", "GBK"));
         YamlInPlaceEditor.setValue(file, "app/features/1/ttl", null, "7200", "GBK");
+
+        assertTrue(YamlInPlaceEditor.search(file, "app/features/1/description", null, "GBK"));
         YamlInPlaceEditor.setValue(file, "app/features/1/description", null, "Updated desc line1\nUpdated line2", "GBK");
         YamlInPlaceEditor.deleteLine(file, "app/features/0/enabled", null, "GBK");
         YamlInPlaceEditor.setValue(file, "service/port", null, "9090", "GBK");
@@ -201,6 +216,7 @@ class YamlInPlaceEditorCombinedTest {
                 "service:\n" +
                 "  port: 9090 # 待修改\n";
 
+        assertTrue(YamlInPlaceEditor.search(file, "app/features/1/ttl", "7200", "GBK"));
         String txt = new String(Files.readAllBytes(file.toPath()), gbk);
         assertEquals(expectedGbk, txt);
     }

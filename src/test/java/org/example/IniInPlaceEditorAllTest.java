@@ -55,10 +55,10 @@ class IniInPlaceEditorAllTest {
             os.write(body.getBytes(StandardCharsets.UTF_8));
         }
 
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "server/host", "localhost"));
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "server/port", "8080"));
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "database/password", "secret"));
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "database/obsolete"));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "server/host", "localhost"));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "server/port", "8080"));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "database/password", "secret"));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "database/obsolete"));
 
         IniInPlaceEditor.setValue(f.toFile(), "server/host", "example.com");
         IniInPlaceEditor.setValue(f.toFile(), "server/port", "9090", "8080", null, null, null);
@@ -85,8 +85,8 @@ class IniInPlaceEditorAllTest {
         byte[] bytes = Files.readAllBytes(f);
         assertTrue(startsWith(bytes, BOM));
         String finalBody = new String(bytes, BOM.length, bytes.length - BOM.length, StandardCharsets.UTF_8);
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "server/host", "example.com"));
-        assertFalse(IniInPlaceEditor.pathAndValueExists(f.toFile(), "server/host", "localhost"));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "server/host", "example.com"));
+        assertFalse(IniInPlaceEditor.search(f.toFile(), "server/host", "localhost"));
         assertEquals(expected, finalBody);
     }
 
@@ -114,11 +114,11 @@ class IniInPlaceEditorAllTest {
         Path f = tmp.resolve("gbk.ini");
         Files.write(f, body.getBytes(gbk));
 
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "信息/名称", "张三", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "信息/年龄", "30", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "信息/地址", "上海", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "信息/地址1", "上海", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "信息/空值", null, "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/名称", "张三", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/年龄", "30", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/地址", "上海", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/地址1", "上海", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/空值", null, "GBK", lineCmt, blk));
 
         IniInPlaceEditor.setValue(f.toFile(), "信息/名称", "李四", null, "GBK", lineCmt, blk);
         IniInPlaceEditor.setValue(f.toFile(), "信息/年龄", "", "30", "GBK", lineCmt, blk);
@@ -140,7 +140,7 @@ class IniInPlaceEditorAllTest {
                 "地址1=北京\r\n";
 
         String content = Files.readString(f, gbk);
-        assertTrue(IniInPlaceEditor.pathAndValueExists(f.toFile(), "信息/地址", "北京", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/地址", "北京", "GBK", lineCmt, blk));
         assertEquals(expected, content);
     }
 

@@ -645,7 +645,7 @@ public final class IniInPlaceEditor {
      * Search function.
      * Set {@code expectedOld} for optimistic concurrency; set {@code encodingHint} (e.g. "GBK") to override charset.
      */
-    public static boolean pathAndValueExists(File file,
+    public static boolean search(File file,
                                 String iniPath,
                                 String value,
                                 String encodingHint,
@@ -655,12 +655,12 @@ public final class IniInPlaceEditor {
     }
 
     // Convenience overloads
-    public static boolean pathAndValueExists(File file, String iniPath) throws IOException {
-        return pathAndValueExists(file, iniPath, null, null, null, null);
+    public static boolean search(File file, String iniPath) throws IOException {
+        return search(file, iniPath, null, null, null, null);
     }
 
-    public static boolean pathAndValueExists(File file, String iniPath, String value) throws IOException {
-        return pathAndValueExists(file, iniPath, value, null, null, null);
+    public static boolean search(File file, String iniPath, String value) throws IOException {
+        return search(file, iniPath, value, null, null, null);
     }
 
     /** Delete entire key-value line */
@@ -701,7 +701,7 @@ public final class IniInPlaceEditor {
                 expectedOld, linePrefixes, blockPrefixes, Op.REPLACE);
     }
 
-    public static boolean pathAndValueExists(InputStream in,
+    public static boolean search(InputStream in,
                                   String iniPath,
                                   String value,
                                   String encodingHint,
