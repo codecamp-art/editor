@@ -137,6 +137,95 @@ public final class YamlInPlaceEditor {
     }
 
     /**
+     * Set a value in YAML file in-place. If newValue is null or empty, clears the value but keeps the key.
+     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * @param file YAML file to update
+     * @param yamlPath Slash-separated path (e.g. "root/child/key")
+     * @throws IOException on I/O error
+     */
+    public static boolean pathAndValueExists(File file, String yamlPath) throws IOException {
+        return pathAndValueExists(file, yamlPath, null, null);
+    }
+
+    /**
+     * Set a value in YAML file in-place, only if current value matches expected value.
+     * If newValue is null or empty, clears the value but keeps the key.
+     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * @param file YAML file to update
+     * @param yamlPath Slash-separated path (e.g. "root/child/key")
+     * @param value Current value that must match (null for unconditional)
+     * @throws IOException on I/O error
+     */
+    public static boolean pathAndValueExists(File file, String yamlPath, String value) throws IOException {
+        return pathAndValueExists(file, yamlPath, value, null);
+    }
+
+    /**
+     * Set a value in YAML file in-place with encoding hint, only if current value matches expected value.
+     * If newValue is null or empty, clears the value but keeps the key.
+     * <p>Preserves all formatting, comments, indentation, EOLs, and BOM. Thread-safe and stateless.
+     * @param file YAML file to update
+     * @param yamlPath Slash-separated path (e.g. "root/child/key")
+     * @param value Current value that must match (null for unconditional)
+     * @param encodingHint Character encoding hint (e.g. "GBK", "UTF-8")
+     * @throws IOException on I/O error
+     */
+    public static boolean pathAndValueExists(File file, String yamlPath, String value, String encodingHint) throws IOException {
+        Objects.requireNonNull(file, "file must not be null");
+        Objects.requireNonNull(yamlPath, "yamlPath must not be null");
+
+        byte[] originalBytes = Files.readAllBytes(file.toPath());
+        FileInfo fileInfo = getFileInfo(originalBytes, encodingHint);
+
+
+        return searchYamlInternal(originalBytes, fileInfo, toPathList(yamlPath), value);
+    }
+
+    /**
+     * Set a value in YAML content from InputStream. If newValue is null or empty, clears the value but keeps the key.
+     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * @param inputStream InputStream containing YAML data
+     * @param yamlPath Slash-separated path (e.g. "root/child/key")
+     * @return Modified YAML content as bytes
+     * @throws IOException on I/O error
+     */
+    public static boolean pathAndValueExists(InputStream inputStream, String yamlPath) throws IOException {
+        return pathAndValueExists(inputStream, yamlPath, null, null);
+    }
+
+    /**
+     * Set a value in YAML content from InputStream, only if current value matches expected value.
+     * If newValue is null or empty, clears the value but keeps the key.
+     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * @param inputStream InputStream containing YAML data
+     * @param yamlPath Slash-separated path (e.g. "root/child/key")
+     * @param value Current value that must match (null for unconditional)
+     * @return Modified YAML content as bytes
+     * @throws IOException on I/O error
+     */
+    public static boolean pathAndValueExists(InputStream inputStream, String yamlPath, String value) throws IOException {
+        return pathAndValueExists(inputStream, yamlPath, value, null);
+    }
+
+    /**
+     * Set a value in YAML content from InputStream with encoding hint, only if current value matches expected value.
+     * If newValue is null or empty, clears the value but keeps the key.
+     * <p>Preserves all formatting, comments, indentation, EOLs, and BOM. Thread-safe and stateless.
+     * @param inputStream InputStream containing YAML data
+     * @param yamlPath Slash-separated path (e.g. "root/child/key")
+     * @param value Current value that must match (null for unconditional)
+     * @param encodingHint Character encoding hint (e.g. "GBK", "UTF-8")
+     * @return Modified YAML content as bytes
+     * @throws IOException on I/O error
+     */
+    public static boolean pathAndValueExists(InputStream inputStream, String yamlPath, String value, String encodingHint) throws IOException {
+        byte[] originalBytes = inputStream.readAllBytes();
+        FileInfo fileInfo = getFileInfo(originalBytes, encodingHint);
+
+        return searchYamlInternal(originalBytes, fileInfo, toPathList(yamlPath), value);
+    }
+
+    /**
      * Delete the entire line containing the key-value pair.
      * @param file YAML file to update
      * @param yamlPath Slash-separated path
@@ -261,6 +350,22 @@ public final class YamlInPlaceEditor {
             return withBom;
         }
         return bytes;
+    }
+
+    private static boolean searchYamlInternal(byte[] originalBytes, FileInfo fileInfo, List<String> path, String value) {
+        String content = new String(originalBytes, fileInfo.offset(), originalBytes.length - fileInfo.offset(), fileInfo.charset());
+
+        // Split keeping trailing empty lines.
+        List<String> rawLines = new ArrayList<>();
+        Matcher m = LINE_SPLIT_PATTERN.matcher(content);
+        while (m.find()) {
+            if (m.group(1).isEmpty()) break; // Last empty match
+            rawLines.add(m.group(1));
+        }
+
+//        List<String> updatedLines = updateLines(rawLines, path, value);
+        return false;
+
     }
 
     /**

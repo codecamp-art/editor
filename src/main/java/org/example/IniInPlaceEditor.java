@@ -77,6 +77,32 @@ public final class IniInPlaceEditor {
         Files.write(file.toPath(), modified);
     }
 
+    /*
+     * Centralised worker that every public overload eventually calls. Having a single place greatly improves
+     * maintainability and eliminates the earlier copy-pasted code paths for GBK vs UTF-8 vs BOM cases.
+     */
+    private static boolean doSearch(File file,
+                               String encodingHint,       // null / "" ⇒ auto/BOM detect
+                               String iniPath,
+                               String expectedOldValue,   // null ⇒ unconditional
+                               List<String> linePrefixes,
+                               List<String[]> blockPrefixes) throws IOException {
+
+        byte[] original = Files.readAllBytes(file.toPath());
+
+        // Determine effective FileInfo respecting optional override charset.
+        FileInfo base = FileInfo.detect(original);
+        FileInfo eff;
+        if (encodingHint == null || encodingHint.isEmpty()) {
+            eff = base;
+        } else {
+            Charset cs = Charset.forName(encodingHint);
+            eff = new FileInfo(cs, base.eol(), base.originalEols(), base.lastLineNoEol(), base.bom(), base.offset());
+        }
+
+        return searchIniInternal(original, eff, iniPath, expectedOldValue, linePrefixes, blockPrefixes);
+    }
+
     /* ------------------------------------------------------------------
      * Thin public facades – keep old signatures for compatibility
      * ------------------------------------------------------------------ */
@@ -181,7 +207,24 @@ public final class IniInPlaceEditor {
         return body;
     }
 
-    /** Convert slash-separated path into { section, key }. Empty section implies global scope. */
+    private static boolean searchIniInternal(byte[] originalBytes,
+                                          FileInfo fileInfo,
+                                          String iniPath,
+                                          String value,
+                                          List<String> lineCommentPrefixes,
+                                          List<String[]> blockCommentDelimiters) throws IOException {
+
+        String[] parts = parseIniPath(iniPath);
+        String section = parts[0];
+        String key = parts[1];
+
+        byte[] slice = Arrays.copyOfRange(originalBytes, fileInfo.offset(), originalBytes.length);
+        List<IniLine> lines = parseIniContent(slice, fileInfo.charset(), lineCommentPrefixes, blockCommentDelimiters);
+
+        return processSearch(lines, section, key, value);
+    }
+
+    /** Convert a slash-separated path into a { section, key }. Empty section implies global scope. */
     private static String[] parseIniPath(String path) {
         if (path.startsWith("/")) path = path.substring(1);
         String[] parts = path.split("/", 2);
@@ -294,23 +337,21 @@ public final class IniInPlaceEditor {
         boolean keyUpdated = false;
         boolean sectionFound = (targetSection == null || targetSection.isEmpty());
         int insertIndex = -1;
-        
-        for (int i = 0; i < lines.size(); i++) {
-            IniLine line = lines.get(i);
-            
+
+        for (IniLine line : lines) {
             switch (line.type()) {
                 case SECTION -> {
                     // Check if we should insert the key before this section
                     if (inTargetSection && !keyUpdated && sectionFound && insertIndex == -1) {
                         insertIndex = result.size();
                     }
-                    
+
                     currentSection = line.section();
                     inTargetSection = targetSection != null && targetSection.equals(currentSection);
                     if (inTargetSection) sectionFound = true;
                     result.add(line);
                 }
-                
+
                 case KEY_VALUE -> {
                     if (inTargetSection && line.key().equals(targetKey) && !keyUpdated) {
                         boolean valueMatches = expectedOldValue == null || (line.value() != null && line.value().trim().equals(expectedOldValue));
@@ -338,7 +379,7 @@ public final class IniInPlaceEditor {
                         result.add(line);
                     }
                 }
-                
+
                 default -> result.add(line);
             }
         }
@@ -350,6 +391,40 @@ public final class IniInPlaceEditor {
         }
         
         return result;
+    }
+
+    /**
+     * Process the edit operation
+     */
+    private static boolean processSearch(List<IniLine> lines, String targetSection, String targetKey, String value) {
+        String currentSection = "";
+        boolean inTargetSection = (targetSection == null || targetSection.isEmpty());
+        boolean found = false;
+
+        for (IniLine line : lines) {
+            switch (line.type()) {
+                case SECTION -> {
+                    currentSection = line.section();
+                    inTargetSection = targetSection != null && targetSection.equals(currentSection);
+                }
+
+                case KEY_VALUE -> {
+                    if (inTargetSection && line.key().equals(targetKey)) {
+                        boolean valueMatches = value == null || (line.value() != null && line.value().trim().equals(value));
+                        if (!valueMatches) {
+                            continue;
+                        }
+                        // Found the target key
+                        found = true;
+                    }
+                }
+            }
+            if (found) {
+                break;
+            }
+        }
+
+        return found;
     }
 
     /**
@@ -485,7 +560,7 @@ public final class IniInPlaceEditor {
      * Back-compat overload using default comment prefixes (';') and no block comments.
      */
     public static void editIni(File file, String section, String key, String newValue) throws IOException {
-        editIni(file, section, key, newValue, Arrays.asList(";"), null);
+        editIni(file, section, key, newValue, List.of(";"), null);
     }
 
     /**
@@ -566,6 +641,28 @@ public final class IniInPlaceEditor {
         setValue(file, iniPath, newValue, null, null, null, null);
     }
 
+    /**
+     * Search function.
+     * Set {@code expectedOld} for optimistic concurrency; set {@code encodingHint} (e.g. "GBK") to override charset.
+     */
+    public static boolean pathAndValueExists(File file,
+                                String iniPath,
+                                String value,
+                                String encodingHint,
+                                List<String> linePrefixes,
+                                List<String[]> blockPrefixes) throws IOException {
+        return doSearch(file, encodingHint, iniPath, value, linePrefixes, blockPrefixes);
+    }
+
+    // Convenience overloads
+    public static boolean pathAndValueExists(File file, String iniPath) throws IOException {
+        return pathAndValueExists(file, iniPath, null, null, null, null);
+    }
+
+    public static boolean pathAndValueExists(File file, String iniPath, String value) throws IOException {
+        return pathAndValueExists(file, iniPath, value, null, null, null);
+    }
+
     /** Delete entire key-value line */
     public static void deleteLine(File file,
                                   String iniPath,
@@ -602,6 +699,24 @@ public final class IniInPlaceEditor {
         }
         return editIniInternal(original, eff, iniPath, newValue == null ? "" : newValue,
                 expectedOld, linePrefixes, blockPrefixes, Op.REPLACE);
+    }
+
+    public static boolean pathAndValueExists(InputStream in,
+                                  String iniPath,
+                                  String value,
+                                  String encodingHint,
+                                  List<String> linePrefixes,
+                                  List<String[]> blockPrefixes) throws IOException {
+        byte[] original = in.readAllBytes();
+        FileInfo base = FileInfo.detect(original);
+        FileInfo eff;
+        if (encodingHint == null || encodingHint.isEmpty()) {
+            eff = base;
+        } else {
+            eff = new FileInfo(Charset.forName(encodingHint), base.eol(), base.originalEols(),
+                    base.lastLineNoEol(), base.bom(), base.offset());
+        }
+        return searchIniInternal(original, eff, iniPath, value, linePrefixes, blockPrefixes);
     }
 
     public static byte[] deleteLine(InputStream in,
