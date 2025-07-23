@@ -39,12 +39,12 @@ class JsonInPlaceEditorCombinedTest {
                 "  \"server\" : {\r" +
                 "    \"host\" : \"localhost\", // inline\n" +
                 "    \"port\" : 8080, // cmt\r\n" +
+                "    \"time\" : \"10\", \"address\": \"192.168.1.1\"\r\n" +
                 "  },\n" +
                 "\n" +
                 "  \"database\" : {\r\n" +
                 "    \"user\" : \"admin\",\n" +
-                "    \"password\" : \"secret\",\r" +
-                "    \"obsolete\" : \"remove\"\n" +
+                "    \"password\" : \"secret\", \"obsolete\" : \"remove\"\n" +
                 "  },\n" +
                 "\n" +
                 "  \"paths\" : {\r\n" +
@@ -61,6 +61,7 @@ class JsonInPlaceEditorCombinedTest {
         // mutations
         JsonInPlaceEditor.setValue(f.toFile(), "server/host", "\"example.com\"");
         JsonInPlaceEditor.setValue(f.toFile(), "server/port", "8080", "9090", null);
+        JsonInPlaceEditor.setValue(f.toFile(), "server/time", "10", "11", null);
         JsonInPlaceEditor.setValue(f.toFile(), "database/password", "secret", null, null);
         JsonInPlaceEditor.deleteLine(f.toFile(), "database/obsolete", "remove", null);
 
@@ -74,11 +75,12 @@ class JsonInPlaceEditorCombinedTest {
                 "  \"server\" : {\r" +
                 "    \"host\" : \"example.com\", // inline\n" +
                 "    \"port\" : 9090, // cmt\r\n" +
+                "    \"time\" : \"11\", \"address\": \"192.168.1.1\"\r\n" +
                 "  },\n" +
                 "\n" +
                 "  \"database\" : {\r\n" +
                 "    \"user\" : \"admin\",\n" +
-                "    \"password\" : \"\",\r" +
+                "    \"password\" : \"\",\n" +
                 "  },\n" +
                 "\n" +
                 "  \"paths\" : {\r\n" +
@@ -105,10 +107,10 @@ class JsonInPlaceEditorCombinedTest {
                 "  \"服务器\" : {\r" +
                 "    \"地址\" : \"本地主机\", // 注释\n" +
                 "    \"端口\" : 8080, // 注释\r\n" +
+                "    \"时间\" : \"10点\", \"地址\": \"192.168.1.1\"\r\n" +
                 "  },\n" +
                 "  \"删除\" : \"移除\",\n" +
-                "  \"路径\" : {\r\n" +
-                "    \"根\" : \"/var/www\"\r\n" +
+                "  \"路径\" : { \"根\" : \"/var/www\"\r\n" +
                 "  }\n" +
                 "}\n";
         Path f = tmp.resolve("cn.json");
@@ -117,8 +119,9 @@ class JsonInPlaceEditorCombinedTest {
         // Replace address to "远程" (unconditional)
         JsonInPlaceEditor.setValue(f.toFile(), "服务器/地址", null, "\"远程\"", "GBK");
         JsonInPlaceEditor.setValue(f.toFile(), "服务器/端口", "8080", "9090", "GBK");
+        JsonInPlaceEditor.setValue(f.toFile(), "服务器/时间", "10点", "11点", "GBK");
         JsonInPlaceEditor.deleteLine(f.toFile(), "删除", "移除", "GBK");
-        JsonInPlaceEditor.setValue(f.toFile(), "路径/根", null, null, "GBK");
+        JsonInPlaceEditor.setValue(f.toFile(), "路径/根", "/var/www", "/var", "GBK");
 
         String expected = "" +
                 "// 配置\r\n" +
@@ -126,9 +129,9 @@ class JsonInPlaceEditorCombinedTest {
                 "  \"服务器\" : {\r" +
                 "    \"地址\" : \"远程\", // 注释\n" +
                 "    \"端口\" : 9090, // 注释\r\n" +
+                "    \"时间\" : \"11点\", \"地址\": \"192.168.1.1\"\r\n" +
                 "  },\n" +
-                "  \"路径\" : {\r\n" +
-                "    \"根\" : \"\"\r\n" +
+                "  \"路径\" : { \"根\" : \"/var\"\r\n" +
                 "  }\n" +
                 "}\n";
 
