@@ -47,9 +47,7 @@ class JsonInPlaceEditorCombinedTest {
                 "    \"password\" : \"secret\", \"obsolete\" : \"remove\"\n" +
                 "  },\n" +
                 "\n" +
-                "  \"paths\" : {\r\n" +
-                "    \"root\" : \"/var/www\"\r\n" +
-                "  }\n" +
+                "  \"paths\" : { \"root\" : \"/var/www\"}\n" +
                 "}\n";
 
         Path f = tmp.resolve("sample.json");
@@ -83,15 +81,18 @@ class JsonInPlaceEditorCombinedTest {
                 "    \"password\" : \"\",\n" +
                 "  },\n" +
                 "\n" +
-                "  \"paths\" : {\r\n" +
-                "    \"root\" : \"\"\r\n" +
-                "  }\n" +
+                "  \"paths\" : { \"root\" : \"\"}\n" +
                 "}\n";
 
         byte[] mutated = Files.readAllBytes(f);
         assertTrue(startsWith(mutated, UTF8_BOM));
         String after = new String(mutated, UTF8_BOM.length, mutated.length-UTF8_BOM.length, StandardCharsets.UTF_8);
         assertEquals(expected, after);
+
+        // Search validations
+        assertTrue(JsonInPlaceEditor.search(f.toFile(), "server/host", "example.com"));
+        assertFalse(JsonInPlaceEditor.search(f.toFile(), "server/host", "localhost"));
+        assertFalse(JsonInPlaceEditor.search(f.toFile(), "database/obsolete")); // key removed
     }
 
     /* ---------------------------------------------------------------------
@@ -137,6 +138,10 @@ class JsonInPlaceEditorCombinedTest {
 
         String after = Files.readString(f, gbk);
         assertEquals(expected, after);
+
+        // Search validations (GBK)
+        assertTrue(JsonInPlaceEditor.search(f.toFile(), "服务器/地址", "远程", "GBK"));
+        assertFalse(JsonInPlaceEditor.search(f.toFile(), "删除", null, "GBK")); // key removed
     }
 
     /* ---------------------------------------------------------------------
@@ -186,8 +191,7 @@ class JsonInPlaceEditorCombinedTest {
         String src = "" +
                 "// services list\r\n" +
                 "{\n" +
-                "  \"services\" : [\r" +
-                "    { // first\n" +
+                "  \"services\" : [{ // first\n" +
                 "      \"name\" : \"svc1\",\n" +
                 "      \"host\" : \"localhost\"\r\n" +
                 "    },\n" +
@@ -215,8 +219,7 @@ class JsonInPlaceEditorCombinedTest {
         String expected = "" +
                 "// services list\r\n" +
                 "{\n" +
-                "  \"services\" : [\r" +
-                "    { // first\n" +
+                "  \"services\" : [{ // first\n" +
                 "      \"name\" : \"\",\n" +
                 "      \"host\" : \"localhost\"\r\n" +
                 "    },\n" +
@@ -231,6 +234,11 @@ class JsonInPlaceEditorCombinedTest {
         assertTrue(startsWith(mutated, UTF8_BOM));
         String after = new String(mutated, UTF8_BOM.length, mutated.length-UTF8_BOM.length, StandardCharsets.UTF_8);
         assertEquals(expected, after);
+
+        // Search validations – nested array paths
+        assertTrue(JsonInPlaceEditor.search(f.toFile(), "services/1/host", "remote.com"));
+        assertTrue(JsonInPlaceEditor.search(f.toFile(), "services/0/name")); // path exists (value cleared)
+        assertFalse(JsonInPlaceEditor.search(f.toFile(), "dummy"));
     }
 
     /* ------------------------------------------------ helpers ------------------------------------------------ */

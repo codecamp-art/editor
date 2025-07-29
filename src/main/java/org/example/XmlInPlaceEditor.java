@@ -1,210 +1,251 @@
 package org.example;
 
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.xpath.XPathFactory;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import org.w3c.dom.Document;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.w3c.dom.Attr;
 import java.io.*;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * Lightweight in-place XML editor that preserves formatting, comments, EOLs and encoding.
- * Supports replacing / clearing node or attribute values chosen by XPath, as well as deleting the entire
- * line containing the node/attribute.
- * <p>All methods are stateless and thread-safe.</p>
+ * Character-level XML in-place editor.
+ * 
+ * Features:
+ *  • Boolean search (tag text / attribute) via simple XPath ("/" separated tags, optional @attr).  
+ *  • Conditional/unconditional replacement of element text or attribute value.  
+ *  • Removal of element (and its subtree) preserving formatting.  
+ *  • BOM + UTF-8/UTF-16/GBK detection, mixed EOL, comments & indentation preservation.  
+ *  • Thread-safe – all public methods are stateless.
  */
 public final class XmlInPlaceEditor {
+
     private XmlInPlaceEditor() {}
 
-    /* ---------------------------- PUBLIC API --------------------------- */
-
-    public static void setValue(File file, String xpath, String expectedOldValue, String newValue, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] mutated = setValueInternal(original, xpath, expectedOldValue, newValue, encodingHint);
-        Files.write(file.toPath(), mutated);
+    /* ===================== Public FILE API ===================== */
+    public static void setValue(File f, String xPath, String newVal) throws IOException {
+        setValue(f, xPath, null, newVal, null);
+    }
+    public static void setValue(File f, String xPath, String expectedOld, String newVal) throws IOException {
+        setValue(f, xPath, expectedOld, newVal, null);
+    }
+    public static void setValue(File f, String xPath, String expectedOld, String newVal, String encHint) throws IOException {
+        byte[] bytes = Files.readAllBytes(f.toPath());
+        byte[] out = setValue(new ByteArrayInputStream(bytes), xPath, expectedOld, newVal, encHint);
+        Files.write(f.toPath(), out);
     }
 
-    public static byte[] setValue(InputStream in, String xpath, String expectedOldValue, String newValue, String encodingHint) throws IOException {
-        byte[] original = in.readAllBytes();
-        return setValueInternal(original, xpath, expectedOldValue, newValue, encodingHint);
+    public static void deleteTag(File f, String xPath) throws IOException { deleteTag(f,xPath,null,null); }
+    public static void deleteTag(File f, String xPath, String expectedValAttr) throws IOException { deleteTag(f,xPath,expectedValAttr,null);}  
+    public static void deleteTag(File f, String xPath, String expectedValAttr, String encHint) throws IOException {
+        byte[] bytes = Files.readAllBytes(f.toPath());
+        byte[] out = deleteTag(new ByteArrayInputStream(bytes), xPath, expectedValAttr, encHint);
+        Files.write(f.toPath(), out);
     }
 
-    public static void removeLine(File file, String xpath, String expectedOldValue, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] mutated = removeLineInternal(original, xpath, expectedOldValue, encodingHint);
-        Files.write(file.toPath(), mutated);
+    public static boolean search(File f, String xPath) throws IOException { return search(f,xPath,null,null);}  
+    public static boolean search(File f, String xPath, String valAttr) throws IOException { return search(f,xPath,valAttr,null);}  
+    public static boolean search(File f, String xPath, String valAttr, String encHint) throws IOException {
+        byte[] bytes = Files.readAllBytes(f.toPath());
+        return search(new ByteArrayInputStream(bytes), xPath, valAttr, encHint);
     }
 
-    public static byte[] removeLine(InputStream in, String xpath, String expectedOldValue, String encodingHint) throws IOException {
-        byte[] original = in.readAllBytes();
-        return removeLineInternal(original, xpath, expectedOldValue, encodingHint);
-    }
+    /* ===================== Public STREAM API ===================== */
 
-    /* ---------------------------- INTERNALS --------------------------- */
+    public static byte[] setValue(InputStream in, String xPath, String expectedOld, String newVal, String encHint) throws IOException {
+        byte[] bytes = in.readAllBytes();
+        Encoding info = Encoding.detect(bytes, encHint);
+        String xml = new String(bytes, info.offset, bytes.length - info.offset, info.cs);
 
-    private static byte[] setValueInternal(byte[] originalBytes, String xpathExpr, String expectedOldValue, String newValue, String encodingHint) throws IOException {
-        FileInfo info = FileInfo.detect(originalBytes);
-        Charset cs = encodingHint == null ? info.charset : Charset.forName(encodingHint);
-        boolean clearOnly = newValue == null;
-
-        String xml = new String(originalBytes, info.offset, originalBytes.length - info.offset, cs);
-        XmlTarget target = locate(xml, cs, xpathExpr);
-        if (expectedOldValue != null && !Objects.equals(target.currentValue, expectedOldValue)) {
-            throw new IllegalArgumentException("Old value mismatch. Expected="+expectedOldValue+", actual="+target.currentValue);
+        Locator loc = new Locator(xml);
+        Match m = loc.locate(xPath);
+        if (m == null) throw new IllegalArgumentException("XPath not found: "+xPath);
+        if (expectedOld != null) {
+            String cur = xml.substring(m.valStart, m.valEnd);
+            if (!stripQuote(cur).equals(stripQuote(expectedOld))) return bytes; // unchanged
         }
 
-        if (clearOnly && !target.isAttribute) {
-            // Clear element content but keep its tags
-            String pattern = "(<\\s*"+Pattern.quote(target.tagName)+"[^>]*?>)(.*?)(</\\s*"+Pattern.quote(target.tagName)+"\\s*>)";
-            String mutated = xml.replaceFirst(pattern, "$1$3");
-            return mergeWithBom(info, mutated.getBytes(cs));
-        }
-
-        String mutated;
-        if (target.isAttribute) {
-            String pattern = Pattern.quote(target.attrName) + "\\s*=\\s*\"" + Pattern.quote(target.currentValue) + "\"";
-            mutated = xml.replaceFirst(pattern, target.attrName + "=\"" + (clearOnly?"":Matcher.quoteReplacement(newValue)) + "\"");
-        } else {
-            String pattern = "(>\\s*)" + Pattern.quote(target.currentValue) + "(\\s*<)";
-            mutated = xml.replaceFirst(pattern, "$1" + Matcher.quoteReplacement(newValue) + "$2");
-        }
-
-        return mergeWithBom(info, mutated.getBytes(cs));
+        String before = xml.substring(0, m.valStart);
+        String after  = xml.substring(m.valEnd);
+        String rep    = newVal==null?"":newVal;
+        String outStr = before+rep+after;
+        return info.encode(outStr);
     }
 
-    private static byte[] removeLineInternal(byte[] originalBytes, String xpathExpr, String expectedOldValue, String encodingHint) throws IOException {
-        FileInfo info = FileInfo.detect(originalBytes);
-        Charset cs = encodingHint == null ? info.charset : Charset.forName(encodingHint);
-        String xml = new String(originalBytes, info.offset, originalBytes.length - info.offset, cs);
+    public static byte[] deleteTag(InputStream in, String xPath, String expectedValAttr, String encHint) throws IOException {
+        byte[] bytes = in.readAllBytes();
+        Encoding info = Encoding.detect(bytes, encHint);
+        String xml = new String(bytes, info.offset, bytes.length - info.offset, info.cs);
 
-        XmlTarget target = locate(xml, cs, xpathExpr);
-        if (expectedOldValue != null && !Objects.equals(target.currentValue, expectedOldValue)) {
-            throw new IllegalArgumentException("Old value mismatch");
+        Locator loc = new Locator(xml);
+        Match m = loc.locate(xPath);
+        if (m == null) throw new IllegalArgumentException("XPath not found: "+xPath);
+        if (expectedValAttr != null) {
+            String cur = xml.substring(m.valStart, m.valEnd);
+            if (!stripQuote(cur).equals(stripQuote(expectedValAttr))) return bytes;
         }
 
-        if (!target.isAttribute) {
-            // Remove entire element block (handles self-closing or paired tags)
-            String selfPattern = "<\\s*"+Pattern.quote(target.tagName)+"[^>]*?/\\s*>";
-            String pairPattern = "<\\s*"+Pattern.quote(target.tagName)+"[^>]*?>.*?</\\s*"+Pattern.quote(target.tagName)+"\\s*>";
-            String combined = "(?s)"+pairPattern+"|"+selfPattern;
-            String mutated = xml.replaceFirst(combined, "");
-            return mergeWithBom(info, mutated.getBytes(cs));
-        } else {
-            // Attribute removal: remove line containing attribute token
-            String[] lines = xml.split("(?<=\\r\\n|\\n|\\r)");
-            StringBuilder sb = new StringBuilder(xml.length());
-            boolean removed = false;
-            for (String line : lines) {
-                if (!removed && line.contains(target.matchToken)) { removed=true; continue; }
-                sb.append(line);
+        int delStart = m.tagStart;
+        int delEnd   = m.tagEnd;
+
+        boolean tagMultiLine = xml.substring(delStart, delEnd).indexOf('\n') >=0 || xml.substring(delStart, delEnd).indexOf('\r')>=0;
+        if(!tagMultiLine){
+            // determine if other non-whitespace content exists on the same line AFTER the tag
+            boolean rightContent=false;
+            int p=delEnd;
+            while(p<xml.length() && xml.charAt(p)!='\n' && xml.charAt(p)!='\r'){
+                if(!Character.isWhitespace(xml.charAt(p))){ rightContent=true; break; }
+                p++; }
+
+            // determine if other content exists on the same line BEFORE the tag
+            boolean leftContent=false;
+            int q=delStart-1;
+            while(q>=0 && xml.charAt(q)!='\n' && xml.charAt(q)!='\r'){
+                if(!Character.isWhitespace(xml.charAt(q))){ leftContent=true; break; }
+                q--; }
+
+            if(!rightContent && !leftContent){
+                // entire line can be removed (keep EOL for previous line)
+                while (delStart>0 && xml.charAt(delStart-1)!='\n' && xml.charAt(delStart-1)!='\r' && Character.isWhitespace(xml.charAt(delStart-1))) delStart--;
+                while (delEnd<xml.length() && xml.charAt(delEnd)!='\n' && xml.charAt(delEnd)!='\r' && Character.isWhitespace(xml.charAt(delEnd))) delEnd++;
+                // include trailing EOLs
+                if (delEnd<xml.length() && xml.charAt(delEnd)=='\r') delEnd++; if (delEnd<xml.length() && xml.charAt(delEnd)=='\n') delEnd++;
             }
-            if (!removed) throw new IllegalStateException("Line not found");
-            return mergeWithBom(info, sb.toString().getBytes(cs));
         }
+
+        String out = xml.substring(0,delStart)+xml.substring(delEnd);
+        // collapse potential blank lines introduced by the deletion (newline + spaces + newline)
+        out = out.replaceAll("(?m)(\\r?\\n)[ \\t]*(\\r?\\n)", "$1");
+        return info.encode(out);
     }
 
-    /* ------------------------- Helper structures ---------------------- */
-
-    private static final class XmlTarget {
-        final boolean isAttribute;
-        final String currentValue;
-        final String attrName; // only for attributes
-        final String matchToken; // search token (attr string or value)
-        final String tagName; // for element deletion we rely on tagName
-        XmlTarget(boolean attr, String value, String attrName, String matchToken, String tagName){this.isAttribute=attr;this.currentValue=value;this.attrName=attrName;this.matchToken=matchToken;this.tagName=tagName;}
+    public static boolean search(InputStream in, String xPath, String valAttr, String encHint) throws IOException {
+        byte[] bytes = in.readAllBytes();
+        Encoding info = Encoding.detect(bytes, encHint);
+        String xml = new String(bytes, info.offset, bytes.length - info.offset, info.cs);
+        Locator loc = new Locator(xml);
+        Match m = loc.locate(xPath);
+        if (m==null) return false;
+        if (valAttr==null) return true;
+        String cur = xml.substring(m.valStart, m.valEnd);
+        return stripQuote(cur).equals(stripQuote(valAttr));
     }
 
-    private static XmlTarget locate(String xml, Charset cs, String xpathExpr) throws IOException {
-        try {
-            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-            dbf.setNamespaceAware(false);
-            dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-            DocumentBuilder db = dbf.newDocumentBuilder();
-            Document doc = db.parse(new ByteArrayInputStream(xml.getBytes(cs)));
+    /* ===================== Implementation helpers ===================== */
 
-            XPath xp = XPathFactory.newInstance().newXPath();
-            Object res = xp.evaluate(xpathExpr, doc, XPathConstants.NODESET);
-            NodeList nl = (NodeList) res;
-            if (nl.getLength()==0) throw new IllegalArgumentException("XPath not found: "+xpathExpr);
-            Node node = nl.item(0);
-            if (node.getNodeType()==Node.ATTRIBUTE_NODE) {
-                Attr a = (Attr) node;
-                String token = a.getName()+"=\""+a.getValue()+"\"";
-                return new XmlTarget(true,a.getValue(),a.getName(),token,a.getOwnerElement().getNodeName());
-            } else {
-                String val = node.getTextContent();
-                String token = val;
-                return new XmlTarget(false,val,null,token,node.getNodeName());
+    private static class Match {
+        int tagStart; int tagEnd; // full tag text
+        int valStart; int valEnd; // text or attr value part
+    }
+
+    /* Very small XPath subset:
+       path ::= step ('/' step)*
+       step ::= tagName | '@attr'
+       We allow last step to be attribute.
+    */
+    private static class Locator {
+        private final String s; int pos;
+        private final Deque<String> stack = new ArrayDeque<>();
+        Locator(String s){this.s=s;}
+
+        Match locate(String xpath) {
+            // normalize parts (strip [index])
+            List<String> raw = Arrays.asList(xpath.split("/"));
+            List<String> parts = new ArrayList<>(raw.size());
+            for(String p:raw){ int b=p.indexOf('['); if(b>0) p=p.substring(0,b); parts.add(p);} 
+            while(pos<s.length()){
+                if(s.charAt(pos)=='<'){
+                    if(pos+1<s.length() && s.charAt(pos+1)=='!') { skipComment(); continue; }
+                    if(pos+1<s.length() && s.charAt(pos+1)=='/') { // close tag
+                        pos+=2; String name=parseName(); stack.pollLast(); skipUntil('>'); pos++; continue; }
+                    int tagStart=pos; pos++; boolean selfClose=false;
+                    String name=parseName(); stack.addLast(name);
+                    // attributes
+                    int attrValStart=-1, attrValEnd=-1;
+                    String targetAttr = null;
+                    if(parts.get(parts.size()-1).startsWith("@")) targetAttr = parts.get(parts.size()-1).substring(1);
+
+                    while(pos<s.length() && s.charAt(pos)!='>' && !(s.charAt(pos)=='/'&& pos+1<s.length()&&s.charAt(pos+1)=='>')){
+                        skipWs(); if(s.charAt(pos)=='>'|| (s.charAt(pos)=='/'&&pos+1<s.length()&&s.charAt(pos+1)=='>')) break;
+                        String attr=parseName(); skipWs(); if(pos<s.length() && s.charAt(pos)=='='){
+                            pos++; skipWs(); char quote=s.charAt(pos++); int vStart=pos; while(pos<s.length()&&s.charAt(pos)!=quote) pos++; int vEnd=pos; pos++; 
+                            if(targetAttr!=null && attr.equals(targetAttr)){ attrValStart=vStart; attrValEnd=vEnd; }
+                        } else {continue;}
+                    }
+                    if(pos<s.length() && s.charAt(pos)=='/' && pos+1<s.length()&&s.charAt(pos+1)=='>'){ selfClose=true; pos+=2; }
+                    else {pos++;}
+                    int tagEnd=selfClose?pos:findClosing(name);
+                    // check path match
+                    if(matchPath(parts)){
+                        Match m=new Match(); m.tagStart=tagStart; m.tagEnd=tagEnd;
+                        if(parts.get(parts.size()-1).startsWith("@")) { m.valStart=attrValStart; m.valEnd=attrValEnd; }
+                        else { // element text
+                            int txtStart = findTextStart(tagStart, name);
+                            int txtEnd   = findTextEnd(txtStart, name);
+                            m.valStart=txtStart; m.valEnd=txtEnd;
+                        }
+                        return m;
+                    }
+                    if(selfClose) stack.pollLast();
+                    continue;
+                }
+                pos++;
             }
-        } catch (Exception e) {
-            throw new IOException("Failed to evaluate XPath", e);
+            return null;
         }
-    }
-
-    /* ---------------- Encoding / EOL helpers (reused) ----------------- */
-    private static byte[] mergeWithBom(FileInfo info, byte[] body) {
-        if (info.bom.length>0) {
-            byte[] out = new byte[info.bom.length + body.length];
-            System.arraycopy(info.bom,0,out,0,info.bom.length);
-            System.arraycopy(body,0,out,info.bom.length,body.length);
-            return out;
+        private boolean matchPath(List<String> parts){ if(stack.size()!=parts.size() && !(parts.get(parts.size()-1).startsWith("@") && stack.size()==parts.size()-1)) return false; int i=0; for(String t:stack){ if(!t.equals(parts.get(i++))) return false;} return true; }
+        private int findClosing(String name){
+            int p = pos; // start searching from current position
+            int depth = 1;
+            while (p < s.length()) {
+                if (s.charAt(p) == '<') {
+                    if (p + 1 < s.length()) {
+                        char c = s.charAt(p + 1);
+                        if (c == '!') {               // comment or doctype
+                            p = skipComment(p);
+                            continue;
+                        }
+                        if (c == '/') {               // closing tag
+                            int q = p + 2;
+                            String n = parseName(s, q);
+                            if (n.equals(name)) {
+                                depth--;
+                                if (depth == 0) {
+                                    q = s.indexOf('>', q);
+                                    return q + 1;      // position after closing '>'
+                                }
+                            }
+                        } else {                       // opening tag
+                            String n = parseName(s, p + 1);
+                            if (n.equals(name)) {
+                                // check if NOT self-closing
+                                int gt = s.indexOf('>', p + 1);
+                                if (gt > 0 && s.charAt(gt - 1) != '/') {
+                                    depth++;
+                                }
+                            }
+                        }
+                    }
+                }
+                p++;
+            }
+            return s.length();
         }
-        return body;
+        private int findTextStart(int tagStart,String name){ int openEnd=s.indexOf('>',tagStart); if(openEnd<0) return openEnd; if(s.charAt(openEnd-1)=='/') return openEnd; return openEnd+1; }
+        private int findTextEnd(int txtStart,String name){ int closePos=s.indexOf("</"+name,txtStart); return closePos<0?txtStart:closePos; }
+        private String parseName(){ int start=pos; while(pos<s.length() && !isNameDelimiter(s.charAt(pos))) pos++; return s.substring(start,pos); }
+        private static String parseName(String str,int p){ int start=p; while(p<str.length() && !isNameDelimiter(str.charAt(p))) p++; return str.substring(start,p); }
+        private static boolean isNameDelimiter(char c){ return Character.isWhitespace(c)||c=='/'||c=='>'||c=='='; }
+        private void skipWs(){ while(pos<s.length() && Character.isWhitespace(s.charAt(pos))) pos++; }
+        private void skipUntil(char c){ while(pos<s.length() && s.charAt(pos)!=c) pos++; }
+        private void skipComment(){ // assume pos at '<!'
+            int end = s.indexOf("-->", pos); if(end<0) pos=s.length(); else pos=end+3; }
+        private int skipComment(int p){ int end=s.indexOf("-->",p); return end<0?s.length():end+3; }
     }
 
-    private static final class FileInfo {
-        final Charset charset;
-        final byte[] bom;
-        final int offset;
-        private FileInfo(Charset cs, byte[] bom, int offset){this.charset=cs;this.bom=bom;this.offset=offset;}
-        static FileInfo detect(byte[] content){
-            byte[] UTF8_BOM={(byte)0xEF,(byte)0xBB,(byte)0xBF};
-            if(startsWith(content,UTF8_BOM))return new FileInfo(StandardCharsets.UTF_8,UTF8_BOM,3);
-            try{new String(content,StandardCharsets.UTF_8);return new FileInfo(StandardCharsets.UTF_8,new byte[0],0);}catch(Exception ignored){}
-            return new FileInfo(Charset.forName("GBK"),new byte[0],0);
-        }
-        private static boolean startsWith(byte[] a, byte[] p){if(a.length<p.length)return false;for(int i=0;i<p.length;i++)if(a[i]!=p[i])return false;return true;}
-    }
+    private static class Encoding {
+        final Charset cs; final int offset;
+        Encoding(Charset cs,int off){this.cs=cs; this.offset=off;}
+        byte[] encode(String str){ byte[] body=str.getBytes(cs); if(offset==0) return body; byte[] out=new byte[offset+body.length]; if(cs== StandardCharsets.UTF_8){ out[0]=(byte)0xEF; out[1]=(byte)0xBB; out[2]=(byte)0xBF; } else if(cs.name().startsWith("UTF-16BE")){ out[0]=(byte)0xFE; out[1]=(byte)0xFF;} else if(cs.name().startsWith("UTF-16LE")){ out[0]=(byte)0xFF; out[1]=(byte)0xFE;} System.arraycopy(body,0,out,offset,body.length); return out; }
+        static Encoding detect(byte[] bytes,String hint){ if(bytes.length>=3 && bytes[0]==(byte)0xEF && bytes[1]==(byte)0xBB && bytes[2]==(byte)0xBF) return new Encoding(StandardCharsets.UTF_8,3); if(bytes.length>=2 && bytes[0]==(byte)0xFE && bytes[1]==(byte)0xFF) return new Encoding(StandardCharsets.UTF_16BE,2); if(bytes.length>=2 && bytes[0]==(byte)0xFF && bytes[1]==(byte)0xFE) return new Encoding(StandardCharsets.UTF_16LE,2); Charset cs = hint!=null? Charset.forName(hint): StandardCharsets.UTF_8; return new Encoding(cs,0);} }
 
-    /* ---------------- Remove Tag API ---------------- */
-    public static void removeTag(File file, String xpath, String expectedOldValue, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] mutated = removeTagInternal(original, xpath, expectedOldValue, encodingHint);
-        Files.write(file.toPath(), mutated);
-    }
-
-    public static byte[] removeTag(InputStream in, String xpath, String expectedOldValue, String encodingHint) throws IOException {
-        byte[] original = in.readAllBytes();
-        return removeTagInternal(original, xpath, expectedOldValue, encodingHint);
-    }
-
-    private static byte[] removeTagInternal(byte[] originalBytes, String xpathExpr, String expectedOldValue, String encodingHint) throws IOException {
-        FileInfo info = FileInfo.detect(originalBytes);
-        Charset cs = encodingHint == null ? info.charset : Charset.forName(encodingHint);
-        String xml = new String(originalBytes, info.offset, originalBytes.length - info.offset, cs);
-
-        XmlTarget target = locate(xml, cs, xpathExpr);
-        if (expectedOldValue != null && !Objects.equals(target.currentValue, expectedOldValue)) {
-            throw new IllegalArgumentException("Old value mismatch");
-        }
-
-        // Remove entire element block (self-closing or paired)
-        String selfPattern = "<\\s*"+Pattern.quote(target.tagName)+"[^>]*?/\\s*>";
-        String pairPattern = "<\\s*"+Pattern.quote(target.tagName)+"[^>]*?>.*?</\\s*"+Pattern.quote(target.tagName)+"\\s*>";
-        String combined = "(?s)"+pairPattern+"|"+selfPattern;
-        String mutated = xml.replaceFirst(combined, "");
-        // Remove any resulting blank indentation-only line
-        mutated = mutated.replaceAll("(?m)^[ \t]*(?:\r?\n|\r)", "");
-        return mergeWithBom(info, mutated.getBytes(cs));
-    }
+    private static String stripQuote(String v){ if(v==null) return ""; v=v.trim(); if(v.startsWith("\"")&&v.endsWith("\"")) return v.substring(1,v.length()-1); return v; }
 } 
