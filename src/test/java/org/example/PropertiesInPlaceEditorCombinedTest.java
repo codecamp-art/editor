@@ -33,6 +33,8 @@ class PropertiesInPlaceEditorCombinedTest {
                 "password=123   # pass\n" +
                 "desc=Line1 \\\n" +
                 " Line2\n" +
+                "desc2=test1 \\\n"+
+                " test2 \r\n" +
                 "! system comment\r\n" +
                 "url:https://example.com\n" +
                 "timeout=30  \r" +
@@ -53,6 +55,7 @@ class PropertiesInPlaceEditorCombinedTest {
         PropertiesInPlaceEditor.removeLine(f.toFile(), "url", "https://example.com");
         // 5. Replace a multi-line property value
         PropertiesInPlaceEditor.setValue(f.toFile(), "desc", null, "New1\nNew2", null);
+        PropertiesInPlaceEditor.setValue(f.toFile(), "desc2", null, "test3", null);
 
         String expected =
                 "# Global comment\r\n" +
@@ -60,6 +63,7 @@ class PropertiesInPlaceEditorCombinedTest {
                 "password=123   # pass\n" +
                 "desc=New1 \\\n" +
                 " New2\n" +
+                "desc2=test3\r\n"+
                 "! system comment\r\n" +
                 "timeout=60  \r" +
                 "cache=\r\n" +

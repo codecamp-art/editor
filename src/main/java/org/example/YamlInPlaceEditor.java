@@ -7,9 +7,9 @@ import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Character-by-character YAML in-place editor that preserves all formatting.
@@ -194,7 +194,7 @@ public final class YamlInPlaceEditor {
         // Delete the entire line including indentation and EOL
         int lineStart = findLineStart(content, loc.keyStart);
         int lineEnd = findLineEnd(content, loc.afterValue);
-        
+
         String before = content.substring(0, lineStart);
         String after = content.substring(lineEnd);
         String modified = before + after;
@@ -363,7 +363,7 @@ public final class YamlInPlaceEditor {
                             // Multi-line value - continue to next line for nested structure
                             skipToNextLine();
                             skipWhitespaceAndComments(true);
-                            
+
                             // Check if the next non-whitespace character indicates a sequence
                             if (pos < content.length() && content.charAt(pos) == '-') {
                                 Location result = locateInSequence(path, depth + 1);
@@ -402,7 +402,7 @@ public final class YamlInPlaceEditor {
                 // Inline sequence
                 pos++; // Skip '['
                 int index = 0;
-                
+
                 while (pos < content.length()) {
                     skipWhitespaceAndComments(true);
                     if (pos >= content.length() || content.charAt(pos) == ']') break;
@@ -415,7 +415,7 @@ public final class YamlInPlaceEditor {
                             loc.keyStart = pos;
                             loc.valueStart = pos;
                             loc.isSequenceItem = true;
-                            
+
                             parseValue(true);
                             loc.valueEnd = pos;
                             loc.afterValue = pos;
@@ -446,7 +446,7 @@ public final class YamlInPlaceEditor {
             } else {
                 // Block sequence - find sequence items marked with '-'
                 int index = 0;
-                
+
                 while (pos < content.length()) {
                     skipWhitespaceAndComments(true);
                     if (pos >= content.length()) break;
@@ -454,7 +454,7 @@ public final class YamlInPlaceEditor {
                     // Look for sequence item marker '-' directly at current position or on current line
                     // First check if we're already at a '-' after skipping whitespace
                     boolean foundSequenceMarker = false;
-                    
+
                     if (pos < content.length() && content.charAt(pos) == '-') {
                         // We're positioned directly at a sequence marker
                         pos++; // Skip '-'
@@ -464,12 +464,12 @@ public final class YamlInPlaceEditor {
                         // Look for '-' at the beginning of the current line
                         int lineStart = findLineStart(content, pos);
                         int currentPos = lineStart;
-                        
+
                         // Skip indentation
                         while (currentPos < content.length() && (content.charAt(currentPos) == ' ' || content.charAt(currentPos) == '\t')) {
                             currentPos++;
                         }
-                        
+
                         // Check if this line starts with '-'
                         if (currentPos < content.length() && content.charAt(currentPos) == '-') {
                             // Skip to the dash marker
@@ -478,7 +478,7 @@ public final class YamlInPlaceEditor {
                             foundSequenceMarker = true;
                         }
                     }
-                    
+
                     if (foundSequenceMarker) {
 
                         // Check if this index matches our path
@@ -489,7 +489,7 @@ public final class YamlInPlaceEditor {
                                 loc.keyStart = pos;
                                 loc.valueStart = pos;
                                 loc.isSequenceItem = true;
-                                
+
                                 parseValue();
                                 loc.valueEnd = pos;
                                 loc.afterValue = pos;
@@ -531,7 +531,7 @@ public final class YamlInPlaceEditor {
 
         private Location locateInInlineMapping(List<String> path, int depth) {
             pos++; // Skip '{'
-            
+
             while (pos < content.length()) {
                 skipWhitespaceAndComments(true);
                 if (pos >= content.length() || content.charAt(pos) == '}') break;
@@ -552,7 +552,7 @@ public final class YamlInPlaceEditor {
                         Location loc = new Location();
                         loc.keyStart = pos;
                         loc.valueStart = pos;
-                        
+
                         parseValue(true);
                         loc.valueEnd = pos;
                         loc.afterValue = pos;
@@ -578,7 +578,7 @@ public final class YamlInPlaceEditor {
                     pos++;
                 }
             }
-            
+
             if (pos < content.length() && content.charAt(pos) == '}') {
                 pos++;
             }
@@ -636,7 +636,7 @@ public final class YamlInPlaceEditor {
         private void parseValue() {
             parseValue(false);
         }
-        
+
         private void parseValue(boolean inInlineContext) {
             if (pos >= content.length()) return;
 
@@ -721,40 +721,40 @@ public final class YamlInPlaceEditor {
         private void parseMultiLineString() {
             pos++; // Skip '|' or '>'
             skipToNextLine();
-            
+
             // Simple approach: skip lines until we find one that looks like a YAML key
             // Multi-line content is typically indented, keys are at the left margin or consistently indented
             while (pos < content.length()) {
                 int lineStart = pos;
-                
+
                 // Skip any indentation
                 while (pos < content.length() && (content.charAt(pos) == ' ' || content.charAt(pos) == '\t')) {
                     pos++;
                 }
-                
+
                 // If empty line, continue
                 if (pos < content.length() && (content.charAt(pos) == '\n' || content.charAt(pos) == '\r')) {
                     skipToNextLine();
                     continue;
                 }
-                
+
                 // Check if this line looks like a YAML key (has a colon followed by space/EOL)
                 boolean isKey = false;
                 int tempPos = pos;
                 while (tempPos < content.length() && content.charAt(tempPos) != '\n' && content.charAt(tempPos) != '\r') {
                     if (content.charAt(tempPos) == ':') {
                         int afterColon = tempPos + 1;
-                        if (afterColon >= content.length() || 
-                            Character.isWhitespace(content.charAt(afterColon)) || 
-                            content.charAt(afterColon) == '\n' || 
-                            content.charAt(afterColon) == '\r') {
+                        if (afterColon >= content.length() ||
+                                Character.isWhitespace(content.charAt(afterColon)) ||
+                                content.charAt(afterColon) == '\n' ||
+                                content.charAt(afterColon) == '\r') {
                             isKey = true;
                             break;
                         }
                     }
                     tempPos++;
                 }
-                
+
                 if (isKey) {
                     // This looks like a YAML key, position at the end of the previous line
                     // so that the mapping parser's skipToNextLine() will correctly move to this key
@@ -763,7 +763,7 @@ public final class YamlInPlaceEditor {
                     if (pos < 0) pos = 0;
                     break;
                 }
-                
+
                 // This line is part of the multi-line content, skip it
                 skipToNextLine();
             }
@@ -778,7 +778,7 @@ public final class YamlInPlaceEditor {
                 }
                 pos++;
             }
-            
+
             // Trim trailing whitespace from the scalar value
             while (pos > 0) {
                 int prevPos = pos - 1;
@@ -797,7 +797,7 @@ public final class YamlInPlaceEditor {
 
         private int getCurrentIndent() {
             int lineStart = findLineStart(content, pos);
-            
+
             int indent = 0;
             while (lineStart + indent < content.length()) {
                 char c = content.charAt(lineStart + indent);
@@ -939,13 +939,13 @@ public final class YamlInPlaceEditor {
 
         // Handle different scalar types
         if (isYamlBoolean(current)) {
-            if (!(expected instanceof Boolean) && !isYamlBoolean((String)expected)) {
+            if (!(expected instanceof Boolean) && !isYamlBoolean((String) expected)) {
                 return false;
             }
             if (expected instanceof Boolean) {
                 return parseYamlBoolean(current) == (Boolean) expected;
             }
-            return parseYamlBoolean(current) == parseYamlBoolean((String)expected);
+            return parseYamlBoolean(current) == parseYamlBoolean((String) expected);
 
         } else if (isYamlNull(current)) {
             return expected == null;
@@ -975,7 +975,7 @@ public final class YamlInPlaceEditor {
         } else if (value instanceof Number) {
             return value.toString();
         } else if (value instanceof String) {
-            return "\"" + escapeYamlString((String)value) + "\"";
+            return "\"" + escapeYamlString((String) value) + "\"";
         }
         return "\"" + escapeYamlString(String.valueOf(value)) + "\"";
     }
@@ -990,16 +990,16 @@ public final class YamlInPlaceEditor {
 
     private static String escapeYamlString(String str) {
         return str.replace("\\", "\\\\")
-                 .replace("\"", "\\\"")
-                 .replace("\n", "\\n")
-                 .replace("\r", "\\r")
-                 .replace("\t", "\\t");
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
     private static boolean isYamlBoolean(String s) {
         s = s.trim().toLowerCase();
         return "true".equals(s) || "false".equals(s) || "yes".equals(s) || "no".equals(s) ||
-               "on".equals(s) || "off".equals(s);
+                "on".equals(s) || "off".equals(s);
     }
 
     private static boolean parseYamlBoolean(String s) {
@@ -1021,8 +1021,8 @@ public final class YamlInPlaceEditor {
         } catch (NumberFormatException e) {
             // Check for special YAML number formats
             return s.matches("^[+-]?\\d+$") || // Integer
-                   s.matches("^[+-]?\\d*\\.\\d+$") || // Decimal
-                   s.matches("^[+-]?\\d+(?:\\.\\d*)?[eE][+-]?\\d+$"); // Scientific
+                    s.matches("^[+-]?\\d*\\.\\d+$") || // Decimal
+                    s.matches("^[+-]?\\d+(?:\\.\\d*)?[eE][+-]?\\d+$"); // Scientific
         }
     }
 

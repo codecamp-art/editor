@@ -53,8 +53,8 @@ public final class IniInPlaceEditor {
     private static void doEdit(File file,
                                String encodingHint,       // null / "" ⇒ auto/BOM detect
                                String iniPath,
-                               String newValue,
-                               String expectedOldValue,   // null ⇒ unconditional
+                               String expectedOldValue,
+                               String newValue, // null ⇒ unconditional
                                Op op,
                                List<String> linePrefixes,
                                List<String[]> blockPrefixes) throws IOException {
@@ -71,7 +71,7 @@ public final class IniInPlaceEditor {
             eff = new FileInfo(cs, base.eol(), base.originalEols(), base.lastLineNoEol(), base.bom(), base.offset());
         }
 
-        byte[] modified = editIniInternal(original, eff, iniPath, newValue, expectedOldValue,
+        byte[] modified = editIniInternal(original, eff, iniPath, expectedOldValue, newValue,
                 linePrefixes, blockPrefixes, op);
 
         Files.write(file.toPath(), modified);
@@ -168,8 +168,8 @@ public final class IniInPlaceEditor {
     private static byte[] editIniInternal(byte[] originalBytes,
                                           FileInfo fileInfo,
                                           String iniPath,
-                                          String newValue,
                                           String expectedOldValue,
+                                          String newValue,
                                           List<String> lineCommentPrefixes,
                                           List<String[]> blockCommentDelimiters,
                                           Op op) throws IOException {
@@ -183,7 +183,7 @@ public final class IniInPlaceEditor {
         byte[] slice = Arrays.copyOfRange(originalBytes, fileInfo.offset(), originalBytes.length);
         List<IniLine> lines = parseIniContent(slice, fileInfo.charset(), lineCommentPrefixes, blockCommentDelimiters);
 
-        List<IniLine> result = processEdit(lines, section, key, newValue, expectedOldValue, lineCommentPrefixes, op);
+        List<IniLine> result = processEdit(lines, section, key, expectedOldValue, newValue, lineCommentPrefixes, op);
 
         // Build updated content preserving original line endings & BOM
         StringBuilder sb = new StringBuilder(slice.length);
@@ -329,8 +329,8 @@ public final class IniInPlaceEditor {
     /**
      * Process the edit operation
      */
-    private static List<IniLine> processEdit(List<IniLine> lines, String targetSection, String targetKey, 
-                                           String newValue, String expectedOldValue, List<String> lineCommentPrefixes, Op op) {
+    private static List<IniLine> processEdit(List<IniLine> lines, String targetSection, String targetKey,
+                                             String expectedOldValue, String newValue, List<String> lineCommentPrefixes, Op op) {
         List<IniLine> result = new ArrayList<>();
         String currentSection = "";
         boolean inTargetSection = (targetSection == null || targetSection.isEmpty());
@@ -574,7 +574,7 @@ public final class IniInPlaceEditor {
                                            List<String> lineCommentPrefixes,
                                            List<String[]> blockCommentDelimiters) throws IOException {
         String path = (section == null || section.isEmpty()) ? key : section + "/" + key;
-        doEdit(file, encoding, path, newValue, null, Op.REPLACE, lineCommentPrefixes, blockCommentDelimiters);
+        doEdit(file, encoding, path, null, newValue, Op.REPLACE, lineCommentPrefixes, blockCommentDelimiters);
     }
 
     /*
@@ -627,18 +627,18 @@ public final class IniInPlaceEditor {
      */
     public static void setValue(File file,
                                 String iniPath,
-                                String newValue,
                                 String expectedOld,
+                                String newValue,
                                 String encodingHint,
                                 List<String> linePrefixes,
                                 List<String[]> blockPrefixes) throws IOException {
-        doEdit(file, encodingHint, iniPath, newValue == null ? "" : newValue,
-                expectedOld, Op.REPLACE, linePrefixes, blockPrefixes);
+        doEdit(file, encodingHint, iniPath, expectedOld, newValue == null ? "" : newValue,
+                Op.REPLACE, linePrefixes, blockPrefixes);
     }
 
     // Convenience overloads
     public static void setValue(File file, String iniPath, String newValue) throws IOException {
-        setValue(file, iniPath, newValue, null, null, null, null);
+        setValue(file, iniPath, null, newValue, null, null, null);
     }
 
     /**
@@ -683,8 +683,8 @@ public final class IniInPlaceEditor {
 
     public static byte[] setValue(InputStream in,
                                   String iniPath,
-                                  String newValue,
                                   String expectedOld,
+                                  String newValue,
                                   String encodingHint,
                                   List<String> linePrefixes,
                                   List<String[]> blockPrefixes) throws IOException {
@@ -697,8 +697,8 @@ public final class IniInPlaceEditor {
             eff = new FileInfo(Charset.forName(encodingHint), base.eol(), base.originalEols(),
                     base.lastLineNoEol(), base.bom(), base.offset());
         }
-        return editIniInternal(original, eff, iniPath, newValue == null ? "" : newValue,
-                expectedOld, linePrefixes, blockPrefixes, Op.REPLACE);
+        return editIniInternal(original, eff, iniPath, expectedOld, newValue == null ? "" : newValue,
+                linePrefixes, blockPrefixes, Op.REPLACE);
     }
 
     public static boolean search(InputStream in,
