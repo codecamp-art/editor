@@ -82,16 +82,16 @@ class YamlInPlaceEditorTest {
         YamlInPlaceEditor.setValue(f.toFile(), "server/ssl", false, true, null);
         YamlInPlaceEditor.setValue(f.toFile(), "database/password", "secret", "new_password", null);
         YamlInPlaceEditor.setValue(f.toFile(), "database/settings/pool_size", 10, 20, null);
-        YamlInPlaceEditor.deleteKey(f.toFile(), "database/settings/obsolete", "remove_me", null);
+        YamlInPlaceEditor.deleteLine(f.toFile(), "database/settings/obsolete", "remove_me", null);
         YamlInPlaceEditor.setValue(f.toFile(), "services/0/enabled", true, false, null);
         YamlInPlaceEditor.setValue(f.toFile(), "services/1/port", 9090, 9091, null);
-        YamlInPlaceEditor.setValue(f.toFile(), "metadata/version", "1.0", "2.0", null);
+        YamlInPlaceEditor.setValue(f.toFile(), "metadata/version", 1.0, "2.0", null);
 
         String expected = "" +
                 "# Global configuration\r\n" +
                 "---\n" +
                 "server:\r" +
-                "  host: production.example.com  # inline comment\n" +
+                "  host: \"production.example.com\"  # inline comment\n" +
                 "  port: 9080       # server port\r\n" +
                 "  ssl: true\r\n" +
                 "  timeouts:        # nested object\r" +
@@ -105,7 +105,6 @@ class YamlInPlaceEditorTest {
                 "  settings:\r\n" +
                 "    pool_size: 20\n" +
                 "    timeout: 30\r\n" +
-                "\n" +
                 "services:           # array of services\r\n" +
                 "  - name: web\n" +
                 "    port: 8080\r\n" +
@@ -147,7 +146,7 @@ class YamlInPlaceEditorTest {
                 "# 配置文件\r\n" +
                 "---\n" +
                 "服务器:\r" +
-                "  地址: 本地主机      # 服务器地址\n" +
+                "  地址: \"本地主机\"      # 服务器地址\n" +
                 "  端口: 8080         # 端口号\r\n" +
                 "  启用: true\r\n" +
                 "  配置:\r" +
@@ -182,16 +181,16 @@ class YamlInPlaceEditorTest {
         YamlInPlaceEditor.setValue(f.toFile(), "服务器/端口", 8080, 9080, "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "数据库/密码", "秘密", "新密码", "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "数据库/设置/连接池大小", 10, 20, "GBK");
-        YamlInPlaceEditor.deleteKey(f.toFile(), "数据库/设置/废弃选项", "删除我", "GBK");
+        YamlInPlaceEditor.deleteLine(f.toFile(), "数据库/设置/废弃选项", "删除我", "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "服务列表/0/启用", true, false, "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "服务列表/1/端口", 9090, 9091, "GBK");
-        YamlInPlaceEditor.setValue(f.toFile(), "元数据/版本", "1.0", "2.0", "GBK");
+        YamlInPlaceEditor.setValue(f.toFile(), "元数据/版本", 1.0, "2.0", "GBK");
 
         String expected = "" +
                 "# 配置文件\r\n" +
                 "---\n" +
                 "服务器:\r" +
-                "  地址: 生产服务器      # 服务器地址\n" +
+                "  地址: \"生产服务器\"      # 服务器地址\n" +
                 "  端口: 9080         # 端口号\r\n" +
                 "  启用: true\r\n" +
                 "  配置:\r" +
@@ -205,7 +204,6 @@ class YamlInPlaceEditorTest {
                 "  设置:\r\n" +
                 "    连接池大小: 20\n" +
                 "    超时时间: 30\r\n" +
-                "\n" +
                 "服务列表:           # 服务数组\r\n" +
                 "  - 名称: 网页服务\n" +
                 "    端口: 8080\r\n" +
@@ -316,7 +314,7 @@ class YamlInPlaceEditorTest {
                 "  temp_dir: ~\r" +
                 "  optional_field:\n" +
                 "  \r\n" +
-                "\n" +
+                "  # Values to be deleted\r" +
                 "# Inline structures\r\n" +
                 "inline_array: [1, 2, 3, \"test\"]\n" +
                 "inline_object: {key1: value1, key2: 100, key3: true}\r\n";
@@ -359,7 +357,7 @@ class YamlInPlaceEditorTest {
         byte[] result = Files.readAllBytes(utf8File);
         assertTrue(startsWith(result, new byte[]{(byte)0xEF, (byte)0xBB, (byte)0xBF}));
         String content = new String(result, 3, result.length - 3, StandardCharsets.UTF_8);
-        assertTrue(content.contains("name: updated"));
+        assertTrue(content.contains("name: \"updated\""));
 
         // Test UTF-16BE BOM
         Path utf16beFile = tmp.resolve("utf16be-bom.yaml");
@@ -368,11 +366,11 @@ class YamlInPlaceEditorTest {
             out.write(yamlContent.getBytes(StandardCharsets.UTF_16BE));
         }
 
-        YamlInPlaceEditor.setValue(utf16beFile.toFile(), "app/version", "1.0", "2.0");
+        YamlInPlaceEditor.setValue(utf16beFile.toFile(), "app/version", 1.0, 2.0);
         result = Files.readAllBytes(utf16beFile);
         assertTrue(startsWith(result, new byte[]{(byte)0xFE, (byte)0xFF}));
         content = new String(result, 2, result.length - 2, StandardCharsets.UTF_16BE);
-        assertTrue(content.contains("version: \"2.0\""));
+        assertTrue(content.contains("version: 2.0"));
 
         // Test UTF-16LE BOM
         Path utf16leFile = tmp.resolve("utf16le-bom.yaml");
@@ -453,7 +451,7 @@ class YamlInPlaceEditorTest {
         // Test setValue with byte array
         byte[] modified1 = YamlInPlaceEditor.setValue(original, "config/server", "localhost", "production");
         String result1 = new String(modified1, StandardCharsets.UTF_8);
-        assertTrue(result1.contains("server: production"));
+        assertTrue(result1.contains("server: \"production\""));
         
         // Test search with byte array  
         assertTrue(YamlInPlaceEditor.search(modified1, "config/server", "production"));
@@ -464,7 +462,7 @@ class YamlInPlaceEditorTest {
         byte[] modified3 = YamlInPlaceEditor.setValue(modified2, "config/debug", false, true);
         
         String finalResult = new String(modified3, StandardCharsets.UTF_8);
-        assertTrue(finalResult.contains("server: production"));
+        assertTrue(finalResult.contains("server: \"production\""));
         assertTrue(finalResult.contains("port: 9090"));
         assertTrue(finalResult.contains("debug: true"));
     }

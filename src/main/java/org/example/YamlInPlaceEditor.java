@@ -939,10 +939,14 @@ public final class YamlInPlaceEditor {
 
         // Handle different scalar types
         if (isYamlBoolean(current)) {
+            if (!(expected instanceof Boolean) && !isYamlBoolean((String)expected)) {
+                return false;
+            }
             if (expected instanceof Boolean) {
                 return parseYamlBoolean(current) == (Boolean) expected;
             }
-            return false;
+            return parseYamlBoolean(current) == parseYamlBoolean((String)expected);
+
         } else if (isYamlNull(current)) {
             return expected == null;
         } else if (isYamlNumber(current)) {
@@ -971,12 +975,7 @@ public final class YamlInPlaceEditor {
         } else if (value instanceof Number) {
             return value.toString();
         } else if (value instanceof String) {
-            String str = (String) value;
-            // Check if we need quotes
-            if (str.isEmpty() || needsQuoting(str)) {
-                return "\"" + escapeYamlString(str) + "\"";
-            }
-            return str;
+            return "\"" + escapeYamlString((String)value) + "\"";
         }
         return "\"" + escapeYamlString(String.valueOf(value)) + "\"";
     }
