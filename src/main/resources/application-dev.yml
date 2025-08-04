@@ -1,0 +1,56 @@
+# Development Environment Configuration
+
+spring:
+  mail:
+    host: localhost
+    port: 1025  # MailHog for development
+    username: 
+    password: 
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+logging:
+  level:
+    org.example.comparison: DEBUG
+    org.springframework.jdbc: DEBUG
+    org.springframework.mail: DEBUG
+    com.jcraft.jsch: DEBUG
+
+comparison:
+  # Development Database Configuration
+  primary:
+    url: jdbc:oracle:thin:@localhost:1521:XEPDB1
+    username: dev_primary_user
+    password: dev_primary_password
+    driver-class-name: oracle.jdbc.OracleDriver
+  
+  secondary:
+    url: jdbc:oracle:thin:@localhost:1521:XEPDB1
+    username: dev_secondary_user
+    password: dev_secondary_password
+    driver-class-name: oracle.jdbc.OracleDriver
+  
+  # Development SFTP Configuration
+  sftp:
+    host: localhost
+    port: 2222
+    username: dev_user
+    password: dev_password
+    remote-directory: /home/dev_user/fix_logs
+  
+  # Development Email Configuration
+  email:
+    from: dev-fix-comparison@localhost
+    to:
+      - developer@localhost
+    cc: []
+    subject: "[DEV] Daily FIX Log Comparison Report"
+  
+  # Development Report Configuration
+  report:
+    output-directory: ./dev-reports
+    keep-reports-for-days: 7

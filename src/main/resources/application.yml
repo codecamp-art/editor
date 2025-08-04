@@ -1,0 +1,86 @@
+# FIX Log Comparison Application Configuration
+
+spring:
+  application:
+    name: fix-log-comparison
+  
+  # Email Configuration
+  mail:
+    host: smtp.company.com
+    port: 587
+    username: ${MAIL_USERNAME:fix-comparison@company.com}
+    password: ${MAIL_PASSWORD:password}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  # Logging Configuration
+logging:
+  level:
+    org.example.comparison: INFO
+    org.springframework.mail: DEBUG
+    com.jcraft.jsch: WARN
+  pattern:
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/fix-comparison.log
+
+# Application Specific Configuration
+comparison:
+  # Primary Database Configuration (TT_CUST_DONE)
+  primary:
+    url: jdbc:oracle:thin:@${PRIMARY_DB_HOST:localhost}:${PRIMARY_DB_PORT:1521}:${PRIMARY_DB_SID:XE}
+    username: ${PRIMARY_DB_USER:primary_user}
+    password: ${PRIMARY_DB_PASSWORD:primary_password}
+    driver-class-name: oracle.jdbc.OracleDriver
+  
+  # Secondary Database Configuration (FIX_EXEC_RPT)
+  secondary:
+    url: jdbc:oracle:thin:@${SECONDARY_DB_HOST:localhost}:${SECONDARY_DB_PORT:1521}:${SECONDARY_DB_SID:XE}
+    username: ${SECONDARY_DB_USER:secondary_user}
+    password: ${SECONDARY_DB_PASSWORD:secondary_password}
+    driver-class-name: oracle.jdbc.OracleDriver
+  
+  # SFTP Configuration
+  sftp:
+    host: ${SFTP_HOST:sftp.company.com}
+    port: ${SFTP_PORT:22}
+    username: ${SFTP_USER:fix_user}
+    password: ${SFTP_PASSWORD:fix_password}
+    remote-directory: ${SFTP_REMOTE_DIR:/fix_logs}
+    connection-timeout: 30000
+    session-timeout: 30000
+  
+  # Email Configuration
+  email:
+    from: ${EMAIL_FROM:fix-comparison@company.com}
+    to:
+      - ${EMAIL_TO_1:trading-ops@company.com}
+      - ${EMAIL_TO_2:risk-management@company.com}
+    cc:
+      - ${EMAIL_CC_1:it-support@company.com}
+    subject: "Daily FIX Log Comparison Report"
+  
+  # Report Configuration
+  report:
+    output-directory: ${REPORT_OUTPUT_DIR:./reports}
+    excel-file-name: "fix_comparison_report_{date}.xlsx"
+    delete-old-reports: true
+    keep-reports-for-days: 30
+
+# Management endpoints (for monitoring)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized

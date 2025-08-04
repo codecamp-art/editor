@@ -1,0 +1,55 @@
+# Test Environment Configuration
+
+spring:
+  mail:
+    host: localhost
+    port: 1025
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+logging:
+  level:
+    org.example.comparison: DEBUG
+    org.springframework: WARN
+    com.jcraft.jsch: WARN
+
+comparison:
+  # Test Database Configuration
+  primary:
+    url: jdbc:h2:mem:primary_test_db;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  
+  secondary:
+    url: jdbc:h2:mem:secondary_test_db;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  
+  # Test SFTP Configuration
+  sftp:
+    host: localhost
+    port: 2222
+    username: test_user
+    password: test_password
+    remote-directory: /test/fix_logs
+  
+  # Test Email Configuration
+  email:
+    from: test-fix-comparison@localhost
+    to:
+      - test-recipient@localhost
+    cc: []
+    subject: "[TEST] Daily FIX Log Comparison Report"
+  
+  # Test Report Configuration
+  report:
+    output-directory: ./test-reports
+    excel-file-name: "test_fix_comparison_report_{date}.xlsx"
+    delete-old-reports: false
+    keep-reports-for-days: 1

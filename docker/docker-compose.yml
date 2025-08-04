@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  fix-comparison:
+    build: 
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: fix-log-comparison
+    environment:
+      # Spring Profile
+      - SPRING_PROFILES_ACTIVE=docker
+      
+      # Database Configuration
+      - PRIMARY_DB_HOST=${PRIMARY_DB_HOST:-oracle-primary}
+      - PRIMARY_DB_PORT=${PRIMARY_DB_PORT:-1521}
+      - PRIMARY_DB_SID=${PRIMARY_DB_SID:-XE}
+      - PRIMARY_DB_USER=${PRIMARY_DB_USER}
+      - PRIMARY_DB_PASSWORD=${PRIMARY_DB_PASSWORD}
+      
+      - SECONDARY_DB_HOST=${SECONDARY_DB_HOST:-oracle-secondary}
+      - SECONDARY_DB_PORT=${SECONDARY_DB_PORT:-1521}
+      - SECONDARY_DB_SID=${SECONDARY_DB_SID:-XE}
+      - SECONDARY_DB_USER=${SECONDARY_DB_USER}
+      - SECONDARY_DB_PASSWORD=${SECONDARY_DB_PASSWORD}
+      
+      # SFTP Configuration
+      - SFTP_HOST=${SFTP_HOST}
+      - SFTP_PORT=${SFTP_PORT:-22}
+      - SFTP_USER=${SFTP_USER}
+      - SFTP_PASSWORD=${SFTP_PASSWORD}
+      - SFTP_REMOTE_DIR=${SFTP_REMOTE_DIR:-/fix_logs}
+      
+      # Email Configuration
+      - MAIL_HOST=${MAIL_HOST:-smtp.company.com}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - EMAIL_TO_1=${EMAIL_TO_1}
+      - EMAIL_TO_2=${EMAIL_TO_2}
+      - EMAIL_CC_1=${EMAIL_CC_1}
+      
+      # Report Configuration
+      - REPORT_OUTPUT_DIR=${REPORT_OUTPUT_DIR:-./reports}
+      
+      # Java Options
+      - JAVA_OPTS=-Xmx2g -Xms512m -Djava.awt.headless=true
+    
+    volumes:
+      # Mount volumes for persistent data
+      - fix-logs:/opt/fix-comparison/logs
+      - fix-reports:/opt/fix-comparison/reports
+      - fix-temp:/opt/fix-comparison/temp
+    
+    networks:
+      - fix-network
+    
+    restart: unless-stopped
+    
+    # Run daily at 8:00 AM (adjust timezone as needed)
+    # This requires external scheduler like cron or Kubernetes CronJob
+    
+    # For one-time execution, use:
+    # docker-compose run --rm fix-comparison 20231201
+
+  # Optional: Oracle Database for testing
+  oracle-primary:
+    image: container-registry.oracle.com/database/express:21.3.0-xe
+    profiles: ["with-db"]
+    container_name: oracle-primary-db
+    environment:
+      - ORACLE_PWD=${ORACLE_PWD:-Oracle123}
+      - ORACLE_CHARACTERSET=AL32UTF8
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle-primary-data:/opt/oracle/oradata
+    networks:
+      - fix-network
+
+  oracle-secondary:
+    image: container-registry.oracle.com/database/express:21.3.0-xe
+    profiles: ["with-db"]
+    container_name: oracle-secondary-db
+    environment:
+      - ORACLE_PWD=${ORACLE_PWD:-Oracle123}
+      - ORACLE_CHARACTERSET=AL32UTF8
+    ports:
+      - "1522:1521"
+    volumes:
+      - oracle-secondary-data:/opt/oracle/oradata
+    networks:
+      - fix-network
+
+  # Optional: SFTP Server for testing
+  sftp-server:
+    image: atmoz/sftp:latest
+    profiles: ["with-sftp"]
+    container_name: sftp-test-server
+    command: ${SFTP_USER:-testuser}:${SFTP_PASSWORD:-testpass}:1001
+    ports:
+      - "2222:22"
+    volumes:
+      - sftp-data:/home/${SFTP_USER:-testuser}
+    networks:
+      - fix-network
+
+  # Optional: Mail Server for testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    profiles: ["with-mail"]
+    container_name: mailhog-server
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - fix-network
+
+volumes:
+  fix-logs:
+    driver: local
+  fix-reports:
+    driver: local
+  fix-temp:
+    driver: local
+  oracle-primary-data:
+    driver: local
+  oracle-secondary-data:
+    driver: local
+  sftp-data:
+    driver: local
+
+networks:
+  fix-network:
+    driver: bridge
