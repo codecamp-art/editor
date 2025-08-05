@@ -33,12 +33,14 @@ public class ComparisonConfig {
     public static class DatabaseConfig {
         @NotBlank
         private String url;
-        @NotBlank
-        private String username;
-        @NotBlank
-        private String password;
+        private String username;  // Optional for Kerberos authentication
+        private String password;  // Optional for Kerberos authentication
         @NotBlank
         private String driverClassName;
+        private boolean useKerberos = false;  // Flag to enable Kerberos authentication
+        private String serviceName;  // Oracle service name for Kerberos
+        private String realm;  // Kerberos realm (optional)
+        private boolean mutualAuthentication = true;  // Kerberos mutual authentication
 
         // Getters and Setters
         public String getUrl() { return url; }
@@ -49,6 +51,14 @@ public class ComparisonConfig {
         public void setPassword(String password) { this.password = password; }
         public String getDriverClassName() { return driverClassName; }
         public void setDriverClassName(String driverClassName) { this.driverClassName = driverClassName; }
+        public boolean isUseKerberos() { return useKerberos; }
+        public void setUseKerberos(boolean useKerberos) { this.useKerberos = useKerberos; }
+        public String getServiceName() { return serviceName; }
+        public void setServiceName(String serviceName) { this.serviceName = serviceName; }
+        public String getRealm() { return realm; }
+        public void setRealm(String realm) { this.realm = realm; }
+        public boolean isMutualAuthentication() { return mutualAuthentication; }
+        public void setMutualAuthentication(boolean mutualAuthentication) { this.mutualAuthentication = mutualAuthentication; }
     }
 
     public static class SftpConfig {

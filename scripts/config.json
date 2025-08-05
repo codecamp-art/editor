@@ -1,0 +1,64 @@
+{
+  "servers": [
+    {
+      "name": "PROD-FIX-01",
+      "hostname": "prod-fix-server-01.company.com",
+      "fixLogPath": "D:\\Trading\\FIX_Logs",
+      "enabled": true,
+      "description": "Primary production FIX server"
+    },
+    {
+      "name": "PROD-FIX-02", 
+      "hostname": "prod-fix-server-02.company.com",
+      "fixLogPath": "D:\\Trading\\FIX_Logs",
+      "enabled": true,
+      "description": "Secondary production FIX server"
+    },
+    {
+      "name": "UAT-FIX-01",
+      "hostname": "uat-fix-server-01.company.com", 
+      "fixLogPath": "C:\\fix_logs",
+      "enabled": false,
+      "description": "UAT FIX server"
+    }
+  ],
+  "settings": {
+    "localOutputPath": "C:\\FIX_Analysis",
+    "filePatterns": ["out.dat", "*.fix"],
+    "extractFixMessages": true,
+    "bufferSize": 65536,
+    "retryAttempts": 3,
+    "timeoutSeconds": 300
+  },
+  "fixMessageFields": {
+    "8": "BeginString",
+    "9": "BodyLength", 
+    "35": "MsgType",
+    "49": "SenderCompID",
+    "56": "TargetCompID",
+    "52": "SendingTime",
+    "11": "ClOrdID",
+    "17": "ExecID",
+    "55": "Symbol",
+    "54": "Side",
+    "38": "OrderQty",
+    "44": "Price",
+    "31": "LastPx",
+    "32": "LastQty",
+    "150": "ExecType",
+    "39": "OrdStatus"
+  },
+  "messageTypes": {
+    "D": "NewOrderSingle",
+    "8": "ExecutionReport", 
+    "G": "OrderCancelReplaceRequest",
+    "F": "OrderCancelRequest",
+    "9": "OrderCancelReject",
+    "A": "Logon",
+    "5": "Logout",
+    "0": "Heartbeat",
+    "1": "TestRequest",
+    "2": "ResendRequest",
+    "4": "SequenceReset"
+  }
+}

@@ -5,9 +5,12 @@ spring:
     name: fix-log-comparison
   
   # Email Configuration
+  # Can be overridden via:
+  # - Command line: --spring.mail.host=backup-mail.company.com
+  # - Environment variables: MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD
   mail:
-    host: smtp.company.com
-    port: 587
+    host: ${MAIL_HOST:smtp.company.com}
+    port: ${MAIL_PORT:587}
     username: ${MAIL_USERNAME:fix-comparison@company.com}
     password: ${MAIL_PASSWORD:password}
     properties:
@@ -35,20 +38,31 @@ logging:
 # Application Specific Configuration
 comparison:
   # Primary Database Configuration (TT_CUST_DONE)
+  # Can be overridden via:
+  # - Command line: --comparison.primary.url=jdbc:oracle:thin:@backup-db:1521:XE
+  # - Environment variables: PRIMARY_DB_HOST, PRIMARY_DB_PORT, PRIMARY_DB_SID, PRIMARY_DB_USER, PRIMARY_DB_PASSWORD
+  # - Full URL override: PRIMARY_DB_URL
   primary:
-    url: jdbc:oracle:thin:@${PRIMARY_DB_HOST:localhost}:${PRIMARY_DB_PORT:1521}:${PRIMARY_DB_SID:XE}
+    url: ${PRIMARY_DB_URL:jdbc:oracle:thin:@${PRIMARY_DB_HOST:localhost}:${PRIMARY_DB_PORT:1521}:${PRIMARY_DB_SID:XE}}
     username: ${PRIMARY_DB_USER:primary_user}
     password: ${PRIMARY_DB_PASSWORD:primary_password}
     driver-class-name: oracle.jdbc.OracleDriver
   
   # Secondary Database Configuration (FIX_EXEC_RPT)
+  # Can be overridden via:
+  # - Command line: --comparison.secondary.url=jdbc:oracle:thin:@backup-db:1521:XE
+  # - Environment variables: SECONDARY_DB_HOST, SECONDARY_DB_PORT, SECONDARY_DB_SID, SECONDARY_DB_USER, SECONDARY_DB_PASSWORD
+  # - Full URL override: SECONDARY_DB_URL
   secondary:
-    url: jdbc:oracle:thin:@${SECONDARY_DB_HOST:localhost}:${SECONDARY_DB_PORT:1521}:${SECONDARY_DB_SID:XE}
+    url: ${SECONDARY_DB_URL:jdbc:oracle:thin:@${SECONDARY_DB_HOST:localhost}:${SECONDARY_DB_PORT:1521}:${SECONDARY_DB_SID:XE}}
     username: ${SECONDARY_DB_USER:secondary_user}
     password: ${SECONDARY_DB_PASSWORD:secondary_password}
     driver-class-name: oracle.jdbc.OracleDriver
   
   # SFTP Configuration
+  # Can be overridden via:
+  # - Command line: --comparison.sftp.host=backup-sftp.company.com
+  # - Environment variables: SFTP_HOST, SFTP_PORT, SFTP_USER, SFTP_PASSWORD, SFTP_REMOTE_DIR
   sftp:
     host: ${SFTP_HOST:sftp.company.com}
     port: ${SFTP_PORT:22}

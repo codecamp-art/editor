@@ -1,5 +1,6 @@
 package org.example.comparison;
 
+import org.example.comparison.config.ComparisonConfig;
 import org.example.comparison.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,20 +25,84 @@ public class FixLogComparisonApplication {
     private static final Logger logger = LoggerFactory.getLogger(FixLogComparisonApplication.class);
 
     public static void main(String[] args) {
-        SpringApplication.run(FixLogComparisonApplication.class, args);
+        // Check for help argument before starting Spring
+        if (args.length > 0 && (args[0].equals("--help") || args[0].equals("-h"))) {
+            printUsageAndExit();
+        }
+        
+        SpringApplication app = new SpringApplication(FixLogComparisonApplication.class);
+        
+        // Enable property override logging
+        System.setProperty("logging.level.org.springframework.boot.context.config", "INFO");
+        
+        app.run(args);
+    }
+
+    /**
+     * Prints usage information and exits
+     */
+    private static void printUsageAndExit() {
+        System.out.println("\nFIX Log Comparison Application");
+        System.out.println("Usage: java -jar fix-log-comparison.jar [DATE] [OPTIONS]");
+        System.out.println("\nArguments:");
+        System.out.println("  DATE                     Comparison date in yyyyMMdd or yyyy-MM-dd format");
+        System.out.println("                           (optional, defaults to yesterday)");
+        System.out.println("\nConfiguration Override Options:");
+        System.out.println("  --comparison.primary.url=URL               Override primary database URL");
+        System.out.println("  --comparison.secondary.url=URL             Override secondary database URL");
+        System.out.println("  --comparison.sftp.host=HOSTNAME             Override SFTP server hostname");
+        System.out.println("  --spring.mail.host=HOSTNAME                 Override mail server hostname");
+        System.out.println("  --comparison.primary.username=USER          Override primary DB username");
+        System.out.println("  --comparison.primary.password=PASS          Override primary DB password");
+        System.out.println("  --comparison.secondary.username=USER        Override secondary DB username");
+        System.out.println("  --comparison.secondary.password=PASS        Override secondary DB password");
+        System.out.println("  --comparison.sftp.username=USER             Override SFTP username");
+        System.out.println("  --comparison.sftp.password=PASS             Override SFTP password");
+        System.out.println("  -h, --help                                  Show this help message");
+        System.out.println("\nEnvironment Variables (alternative to command line):");
+        System.out.println("  PRIMARY_DB_HOST, PRIMARY_DB_PORT, PRIMARY_DB_SID");
+        System.out.println("  SECONDARY_DB_HOST, SECONDARY_DB_PORT, SECONDARY_DB_SID");
+        System.out.println("  SFTP_HOST, SFTP_PORT, SFTP_USER, SFTP_PASSWORD");
+        System.out.println("  MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD");
+        System.out.println("\nExamples:");
+        System.out.println("  # Run with default configuration");
+        System.out.println("  java -jar fix-log-comparison.jar");
+        System.out.println("");
+        System.out.println("  # Run with specific date");
+        System.out.println("  java -jar fix-log-comparison.jar 20231201");
+        System.out.println("");
+        System.out.println("  # Override primary database URL");
+        System.out.println("  java -jar fix-log-comparison.jar \\");
+        System.out.println("    --comparison.primary.url=jdbc:oracle:thin:@backup-db:1521:XE");
+        System.out.println("");
+        System.out.println("  # Override SFTP server hostname");
+        System.out.println("  java -jar fix-log-comparison.jar 20231201 \\");
+        System.out.println("    --comparison.sftp.host=backup-sftp.company.com");
+        System.out.println("");
+        System.out.println("  # Override multiple settings");
+        System.out.println("  java -jar fix-log-comparison.jar \\");
+        System.out.println("    --comparison.primary.url=jdbc:oracle:thin:@backup-db:1521:XE \\");
+        System.out.println("    --comparison.sftp.host=backup-sftp.company.com \\");
+        System.out.println("    --spring.mail.host=backup-mail.company.com");
+        System.out.println("");
+        System.exit(0);
     }
 
     @Bean
     public CommandLineRunner commandLineRunner(ComparisonService comparisonService,
                                              ExcelReportService excelReportService,
                                              EmailNotificationService emailNotificationService,
-                                             SftpService sftpService) {
+                                             SftpService sftpService,
+                                             ComparisonConfig comparisonConfig) {
         return args -> {
             logger.info("Starting FIX Log Comparison Application");
             
             try {
                 // Parse command line arguments
                 LocalDate comparisonDate = parseComparisonDate(args);
+                
+                // Log current configuration (masking sensitive information)
+                logCurrentConfiguration(comparisonConfig);
                 
                 // Test connections before starting
                 if (!testConnections(sftpService)) {
@@ -100,6 +165,54 @@ public class FixLogComparisonApplication {
         
         logger.info("Comparison date: {}", comparisonDate);
         return comparisonDate;
+    }
+
+    /**
+     * Logs current configuration with sensitive information masked
+     */
+    private void logCurrentConfiguration(ComparisonConfig config) {
+        logger.info("=== CURRENT CONFIGURATION ===");
+        
+        // Database configuration
+        logger.info("Primary Database:");
+        logger.info("  URL: {}", maskSensitiveUrl(config.getPrimary().getUrl()));
+        logger.info("  Username: {}", config.getPrimary().getUsername());
+        logger.info("  Driver: {}", config.getPrimary().getDriverClassName());
+        
+        logger.info("Secondary Database:");
+        logger.info("  URL: {}", maskSensitiveUrl(config.getSecondary().getUrl()));
+        logger.info("  Username: {}", config.getSecondary().getUsername());
+        logger.info("  Driver: {}", config.getSecondary().getDriverClassName());
+        
+        // SFTP configuration
+        logger.info("SFTP Configuration:");
+        logger.info("  Host: {}", config.getSftp().getHost());
+        logger.info("  Port: {}", config.getSftp().getPort());
+        logger.info("  Username: {}", config.getSftp().getUsername());
+        logger.info("  Remote Directory: {}", config.getSftp().getRemoteDirectory());
+        
+        // Email configuration
+        logger.info("Email Configuration:");
+        logger.info("  From: {}", config.getEmail().getFrom());
+        logger.info("  To: {}", config.getEmail().getTo());
+        logger.info("  Subject: {}", config.getEmail().getSubject());
+        
+        // Report configuration
+        logger.info("Report Configuration:");
+        logger.info("  Output Directory: {}", config.getReport().getOutputDirectory());
+        logger.info("  Excel File Name: {}", config.getReport().getExcelFileName());
+        logger.info("  Keep Reports For Days: {}", config.getReport().getKeepReportsForDays());
+        
+        logger.info("=============================");
+    }
+
+    /**
+     * Masks sensitive information in URLs for logging
+     */
+    private String maskSensitiveUrl(String url) {
+        if (url == null) return "null";
+        // Hide password if present in URL
+        return url.replaceAll("://([^:]+):([^@]+)@", "://$1:****@");
     }
 
     /**

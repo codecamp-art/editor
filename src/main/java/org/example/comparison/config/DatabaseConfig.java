@@ -12,6 +12,7 @@ import javax.sql.DataSource;
 
 /**
  * Database configuration for multiple Oracle database connections
+ * Supports both traditional username/password and Kerberos authentication
  */
 @Configuration
 public class DatabaseConfig {
@@ -26,28 +27,8 @@ public class DatabaseConfig {
     @Primary
     @Qualifier("primaryDataSource")
     public DataSource primaryDataSource() {
-        HikariConfig config = new HikariConfig();
         ComparisonConfig.DatabaseConfig dbConfig = comparisonConfig.getPrimary();
-        
-        config.setJdbcUrl(dbConfig.getUrl());
-        config.setUsername(dbConfig.getUsername());
-        config.setPassword(dbConfig.getPassword());
-        config.setDriverClassName(dbConfig.getDriverClassName());
-        
-        // Connection pool settings
-        config.setMaximumPoolSize(10);
-        config.setMinimumIdle(2);
-        config.setConnectionTimeout(30000);
-        config.setIdleTimeout(600000);
-        config.setMaxLifetime(1800000);
-        config.setLeakDetectionThreshold(60000);
-        
-        // Oracle specific settings
-        config.addDataSourceProperty("oracle.jdbc.useThreadLocalBufferCache", "true");
-        config.addDataSourceProperty("oracle.jdbc.implicitStatementCacheSize", "20");
-        config.addDataSourceProperty("oracle.jdbc.defaultExecuteBatch", "20");
-        
-        return new HikariDataSource(config);
+        return createDataSource(dbConfig, "primary");
     }
 
     @Bean
