@@ -28,7 +28,7 @@ public class DatabaseConfig {
     @Qualifier("primaryDataSource")
     public DataSource primaryDataSource() {
         ComparisonConfig.DatabaseConfig dbConfig = comparisonConfig.getPrimary();
-        return createDataSource(dbConfig, "primary");
+        return new HikariDataSource();
     }
 
     @Bean

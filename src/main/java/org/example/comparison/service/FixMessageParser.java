@@ -25,7 +25,7 @@ public class FixMessageParser {
     // FIX message pattern to extract sequence number and message content
     // Pattern matches: sequence_number followed by multiple spaces and FIX fields until next sequence number or end
     private static final Pattern FIX_LOG_PATTERN = Pattern.compile(
-        "(\\d+)\\s+(.*?)(?=\\d+\\s+|$)", 
+        "(\\d+)( {14})(.*?)(?=\\d+\\s+|$)",
         Pattern.DOTALL
     );
     
@@ -63,10 +63,7 @@ public class FixMessageParser {
         }
 
         try {
-            // Clean up the log content by removing extra whitespace and line breaks
-            String cleanedContent = logContent.replaceAll("\\s+", " ").trim();
-            
-            Matcher matcher = FIX_LOG_PATTERN.matcher(cleanedContent);
+            Matcher matcher = FIX_LOG_PATTERN.matcher(logContent);
             
             while (matcher.find()) {
                 String sequenceNumber = matcher.group(1);
