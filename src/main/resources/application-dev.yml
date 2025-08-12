@@ -48,7 +48,7 @@ comparison:
     to:
       - developer@localhost
     cc: []
-    subject: "[DEV] Daily FIX Log Comparison Report"
+    subject: "[DEV] Daily FIX EOD Reconciliation Report"
   
   # Development Report Configuration
   report:

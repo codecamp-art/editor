@@ -52,6 +52,25 @@ public final class TextInPlaceEditor {
     }
 
     /**
+     * Replace the first occurrence of a pattern (regex or literal) in an InputStream. Returns the modified bytes.
+     * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
+     * @param in InputStream containing text data
+     * @param pattern Regex or literal pattern to match
+     * @param replacement Replacement string
+     * @param isRegex If true, pattern is regex; if false, literal
+     * @return Modified content as bytes
+     * @throws IOException on I/O error
+     */
+    public static byte[] replace(byte[] data, String pattern, String replacement, boolean isRegex, String encoding) throws IOException {
+        FileInfo info = FileInfo.detect(data);
+        if (isValidEncoding(encoding)) {
+            info = new FileInfo(Charset.forName(encoding), info.eol, info.originalEols, info.lastLineNoEol, info.bom, info.offset);
+        }
+        Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
+        return replaceInternal(data, info, compiled, replacement, true);
+    }
+
+    /**
      * Replace the first occurrence of a pattern (regex or literal) in a file, with explicit encoding.
      * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
      * @param file Text file to edit
@@ -97,6 +116,19 @@ public final class TextInPlaceEditor {
         FileInfo info = FileInfo.detect(original);
         Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
         return removeLineInternal(original, info, compiled);
+    }
+
+    /**
+     * Remove (delete) the first line that matches the given pattern in an InputStream. Returns the modified bytes.
+     * <p>Preserves all formatting, EOLs, encoding, and BOM.</p>
+     */
+    public static byte[] removeLine(byte[] data, String pattern, boolean isRegex, String encoding) throws IOException {
+        FileInfo info = FileInfo.detect(data);
+        if (isValidEncoding(encoding)) {
+            info = new FileInfo(Charset.forName(encoding), info.eol, info.originalEols, info.lastLineNoEol, info.bom, info.offset);
+        }
+        Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
+        return removeLineInternal(data, info, compiled);
     }
 
     /**
@@ -186,6 +218,16 @@ public final class TextInPlaceEditor {
             return withBom;
         }
         return out;
+    }
+
+    private static boolean isValidEncoding(String encoding) {
+        if (encoding == null) return false;
+        try {
+            Charset.forName(encoding);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // --- Encoding & EOL detection (copied from IniInPlaceEditor) ---

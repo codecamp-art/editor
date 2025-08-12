@@ -22,57 +22,6 @@ public final class PropertiesInPlaceEditor {
     private PropertiesInPlaceEditor() {
     }
 
-    /* --- Public API ---------------------------------------------------- */
-
-    /**
-     * Edit the value of a property key in a .properties file in-place.
-     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param file Properties file to edit
-     * @param key Property key to replace
-     * @param newValue Replacement value
-     * @throws IOException on I/O error
-     */
-    public static void editProperty(File file, String key, String newValue) throws IOException {
-        Objects.requireNonNull(file, "file");
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo info = FileInfo.detect(original);
-        byte[] modified = editInternal(original, info, key, newValue);
-        Files.write(file.toPath(), modified);
-    }
-
-    /**
-     * Edit the value of a property key from an InputStream, returning the modified bytes.
-     * <p>Preserves all formatting, comments, indentation, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param in InputStream containing properties data
-     * @param key Property key to replace
-     * @param newValue Replacement value
-     * @return Modified properties content as bytes
-     * @throws IOException on I/O error
-     */
-    public static byte[] editProperty(InputStream in, String key, String newValue) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo info = FileInfo.detect(original);
-        return editInternal(original, info, key, newValue);
-    }
-
-    /**
-     * Edit the value of a property key in a file with explicit encoding (e.g. "GBK").
-     * <p>Preserves all formatting, comments, indentation, EOLs, and BOM. Thread-safe and stateless.
-     * @param file Properties file to edit
-     * @param encoding Character encoding (e.g. "GBK")
-     * @param key Property key to replace
-     * @param newValue Replacement value
-     * @throws IOException on I/O error
-     */
-    public static void editPropertyWithEncoding(File file, String encoding, String key, String newValue) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo base = FileInfo.detect(original);
-        Charset cs = Charset.forName(encoding);
-        FileInfo overridden = new FileInfo(cs, base.eol, base.originalEols, base.lastLineNoEol, base.bom, base.offset);
-        byte[] modified = editInternal(original, overridden, key, newValue);
-        Files.write(file.toPath(), modified);
-    }
-
     /**
      * Unified API to replace value (or clear when newValue==null). If encodingHint is null, auto-detect encoding else override.
      */
@@ -101,20 +50,20 @@ public final class PropertiesInPlaceEditor {
                 : replaceInternal(original, info, key, expectedOldValue, newValue);
     }
 
-    public static void removeLine(File file, String key, String expectedOldValue) throws IOException {
+    public static void deleteKey(File file, String key, String expectedOldValue) throws IOException {
         byte[] original = Files.readAllBytes(file.toPath());
         FileInfo info = FileInfo.detect(original);
         byte[] modified = removeLineInternal(original, info, key, expectedOldValue);
         Files.write(file.toPath(), modified);
     }
 
-    public static byte[] removeLine(InputStream in, String key, String expectedOldValue) throws IOException {
+    public static byte[] deleteKey(InputStream in, String key, String expectedOldValue) throws IOException {
         byte[] original = in.readAllBytes();
         FileInfo info = FileInfo.detect(original);
         return removeLineInternal(original, info, key, expectedOldValue);
     }
 
-    public static void removeLineWithEncoding(File file, String encoding, String key, String expectedOldValue) throws IOException {
+    public static void deleteKey(File file, String encoding, String key, String expectedOldValue) throws IOException {
         byte[] original = Files.readAllBytes(file.toPath());
         FileInfo base = FileInfo.detect(original);
         Charset cs = Charset.forName(encoding);
@@ -124,63 +73,6 @@ public final class PropertiesInPlaceEditor {
     }
 
     /* --- Internals ----------------------------------------------------- */
-
-    private static byte[] editInternal(byte[] originalBytes, FileInfo info, String targetKey, String newValue) {
-        String content = new String(originalBytes, info.offset, originalBytes.length - info.offset, info.charset);
-
-        // Split into lines while preserving EOL tokens.
-        List<String> lines = new ArrayList<>();
-        Matcher m = Pattern.compile("(.*?(?:\r\n|\r|\n|$))", Pattern.DOTALL).matcher(content);
-        while (m.find()) {
-            if (m.group(1).isEmpty()) break; // final empty match
-            lines.add(m.group(1));
-        }
-
-        // Regex to match a properties key-value line (without line continuations).
-        Pattern kvPattern = Pattern.compile("^(\\s*)([^:=\\s\\\\]+)(\\s*[=:]\\s*)(.*)$");
-
-        for (int i = 0; i < lines.size(); i++) {
-            String fullLine = lines.get(i);
-            // Separate logical line and EOL.
-            String logical = fullLine.replaceAll("(\r\n|\r|\n)$", "");
-            String eol = fullLine.substring(logical.length());
-
-            String trimmed = logical.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) {
-                continue; // comment/blank
-            }
-
-            Matcher kv = kvPattern.matcher(logical);
-            if (kv.find()) {
-                String key = kv.group(2).trim();
-                if (key.equals(targetKey)) {
-                    String indent = kv.group(1);
-                    String separator = kv.group(3);
-                    String valueAndRest = kv.group(4); // includes any spaces after value and inline comment
-
-                    // Preserve inline comment, if present (# or !) not inside value.
-                    int commentIdx = findInlineComment(valueAndRest);
-                    String valuePart;
-                    String commentPart = "";
-                    if (commentIdx >= 0) {
-                        valuePart = valueAndRest.substring(0, commentIdx);
-                        commentPart = valueAndRest.substring(commentIdx);
-                    } else {
-                        valuePart = valueAndRest;
-                    }
-
-                    // Preserve trailing spaces before comment.
-                    int trailingSpaces = countTrailingSpaces(valuePart);
-                    String spaces = " ".repeat(trailingSpaces);
-
-                    String newLogical = indent + key + separator + newValue + spaces + commentPart;
-                    lines.set(i, newLogical + eol);
-                    return assemble(lines, info);
-                }
-            }
-        }
-        throw new IllegalArgumentException("Key not found: " + targetKey);
-    }
 
     private static int findInlineComment(String s) {
         boolean inEscape = false;
@@ -267,6 +159,7 @@ public final class PropertiesInPlaceEditor {
             int endIdx = i;
             while (endIdx < lines.size()) {
                 String curLogical = stripEol(lines.get(endIdx));
+                eol = lines.get(endIdx).substring(curLogical.length());
                 if (endsWithContinuation(curLogical)) {
                     endIdx++;
                 } else {

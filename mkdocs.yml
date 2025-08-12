@@ -1,0 +1,30 @@
+site_name: FIX EOD Reconciliation Docs
+site_description: Documentation for the Daily FIX End-of-Day Reconciliation system
+site_url: https://example.com
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - FIX EOD Reconciliation: fix-eod-recon.md
+  - Operational Runbook: operational-runbook.md
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - tables
+  - fenced_code
+
+repo_url: https://example.com/your/repo
+edit_uri: ''

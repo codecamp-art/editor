@@ -4,6 +4,7 @@ import org.example.comparison.config.ComparisonConfig;
 import org.example.comparison.domain.ComparisonResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -14,6 +15,7 @@ import jakarta.mail.internet.MimeMessage;
 import java.io.File;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -28,10 +30,12 @@ public class EmailNotificationService {
     
     private final JavaMailSender mailSender;
     private final ComparisonConfig.EmailConfig emailConfig;
+    private final Environment environment;
 
-    public EmailNotificationService(JavaMailSender mailSender, ComparisonConfig comparisonConfig) {
+    public EmailNotificationService(JavaMailSender mailSender, ComparisonConfig comparisonConfig, Environment environment) {
         this.mailSender = mailSender;
         this.emailConfig = comparisonConfig.getEmail();
+        this.environment = environment;
     }
 
     /**
@@ -66,7 +70,7 @@ public class EmailNotificationService {
         if (emailConfig.getCc() != null && !emailConfig.getCc().isEmpty()) {
             helper.setCc(emailConfig.getCc().toArray(new String[0]));
         }
-        helper.setSubject(emailConfig.getSubject() + " - Discrepancies Found");
+        helper.setSubject(getEnvironmentSubject(emailConfig.getSubject()) + " - Discrepancies Found");
 
         // Email body
         String htmlContent = buildDiscrepancyEmailContent(summary);
@@ -96,7 +100,7 @@ public class EmailNotificationService {
         if (emailConfig.getCc() != null && !emailConfig.getCc().isEmpty()) {
             helper.setCc(emailConfig.getCc().toArray(new String[0]));
         }
-        helper.setSubject(emailConfig.getSubject() + " - No Discrepancies");
+        helper.setSubject(getEnvironmentSubject(emailConfig.getSubject()) + " - No Discrepancies");
 
         // Email body
         String htmlContent = buildNoDiscrepancyEmailContent(summary);
@@ -123,11 +127,13 @@ public class EmailNotificationService {
             .append("</style></head><body>");
 
         // Header
-        html.append("<h2 class='alert'>⚠️ FIX Log Comparison - Discrepancies Found</h2>");
+        html.append("<h2 class='alert'>⚠️ Daily FIX EOD Reconciliation Report - Discrepancies Found</h2>");
 
         // Summary section
         html.append("<div class='summary'>")
             .append("<h3>Summary</h3>")
+            .append("<p><strong>Report Type:</strong> Daily FIX End-of-Day Reconciliation Report</p>")
+            .append("<p><strong>Scope:</strong> This report compares only <strong>fulfilled and partial fulfilled orders</strong> between database records and FIX log messages.</p>")
             .append("<p><strong>Comparison Date:</strong> ").append(summary.getComparisonDate().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))).append("</p>")
             .append("<p><strong>Total Database Records:</strong> ").append(summary.getTotalDbRecords()).append("</p>")
             .append("<p><strong>Total FIX Log Files:</strong> ").append(summary.getTotalFixLogFiles()).append("</p>")
@@ -190,7 +196,7 @@ public class EmailNotificationService {
 
         // Footer
         html.append("<p><strong>Action Required:</strong> Please review the attached Excel report for detailed analysis.</p>")
-            .append("<p><em>This is an automated notification from the FIX Log Comparison System.</em></p>")
+            .append("<p><em>This is an automated notification from the Daily FIX EOD Reconciliation System.</em></p>")
             .append("</body></html>");
 
         return html.toString();
@@ -211,11 +217,13 @@ public class EmailNotificationService {
             .append("</style></head><body>");
 
         // Header
-        html.append("<h2 class='success'>✅ FIX Log Comparison - No Discrepancies Found</h2>");
+        html.append("<h2 class='success'>✅ Daily FIX EOD Reconciliation Report - No Discrepancies Found</h2>");
 
         // Summary section
         html.append("<div class='summary'>")
             .append("<h3>Summary</h3>")
+            .append("<p><strong>Report Type:</strong> Daily FIX End-of-Day Reconciliation Report</p>")
+            .append("<p><strong>Scope:</strong> This report compares only <strong>fulfilled and partial fulfilled orders</strong> between database records and FIX log messages.</p>")
             .append("<p><strong>Comparison Date:</strong> ").append(summary.getComparisonDate().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))).append("</p>")
             .append("<p><strong>Total Database Records:</strong> ").append(summary.getTotalDbRecords()).append("</p>")
             .append("<p><strong>Total FIX Log Files:</strong> ").append(summary.getTotalFixLogFiles()).append("</p>")
@@ -225,12 +233,33 @@ public class EmailNotificationService {
             .append("</div>");
 
         // Success message
-        html.append("<p class='success'><strong>All database records match perfectly with FIX log messages!</strong></p>")
+        html.append("<p class='success'><strong>All fulfilled and partial fulfilled orders match perfectly between database records and FIX log messages!</strong></p>")
             .append("<p>No action is required at this time.</p>")
-            .append("<p><em>This is an automated notification from the FIX Log Comparison System.</em></p>")
+            .append("<p><em>This is an automated notification from the Daily FIX EOD Reconciliation System.</em></p>")
             .append("</body></html>");
 
         return html.toString();
+    }
+
+    /**
+     * Gets the environment-specific subject with appropriate prefix
+     */
+    private String getEnvironmentSubject(String baseSubject) {
+        String[] activeProfiles = environment.getActiveProfiles();
+        
+        // Check for specific environments and add appropriate prefix
+        if (Arrays.asList(activeProfiles).contains("dev")) {
+            return "[DEV] " + baseSubject;
+        } else if (Arrays.asList(activeProfiles).contains("test")) {
+            return "[TEST] " + baseSubject;
+        } else if (Arrays.asList(activeProfiles).contains("docker")) {
+            return "[DOCKER] " + baseSubject;
+        } else if (Arrays.asList(activeProfiles).contains("prod")) {
+            return "[PROD] " + baseSubject;
+        }
+        
+        // For production or default environment, return as is
+        return baseSubject;
     }
 
     /**

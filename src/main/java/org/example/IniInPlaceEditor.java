@@ -664,17 +664,17 @@ public final class IniInPlaceEditor {
     }
 
     /** Delete entire key-value line */
-    public static void deleteLine(File file,
-                                  String iniPath,
-                                  String expectedOld,
-                                  String encodingHint,
-                                  List<String> linePrefixes,
-                                  List<String[]> blockPrefixes) throws IOException {
+    public static void deleteKey(File file,
+                                 String iniPath,
+                                 String expectedOld,
+                                 String encodingHint,
+                                 List<String> linePrefixes,
+                                 List<String[]> blockPrefixes) throws IOException {
         doEdit(file, encodingHint, iniPath, null, expectedOld, Op.DELETE_LINE, linePrefixes, blockPrefixes);
     }
 
-    public static void deleteLine(File file, String iniPath) throws IOException {
-        deleteLine(file, iniPath, null, null, null, null);
+    public static void deleteKey(File file, String iniPath) throws IOException {
+        deleteKey(file, iniPath, null, null, null, null);
     }
 
     /* =====================================================
@@ -719,12 +719,12 @@ public final class IniInPlaceEditor {
         return searchIniInternal(original, eff, iniPath, value, linePrefixes, blockPrefixes);
     }
 
-    public static byte[] deleteLine(InputStream in,
-                                    String iniPath,
-                                    String expectedOld,
-                                    String encodingHint,
-                                    List<String> linePrefixes,
-                                    List<String[]> blockPrefixes) throws IOException {
+    public static byte[] deleteKey(InputStream in,
+                                   String iniPath,
+                                   String expectedOld,
+                                   String encodingHint,
+                                   List<String> linePrefixes,
+                                   List<String[]> blockPrefixes) throws IOException {
         byte[] original = in.readAllBytes();
         FileInfo base = FileInfo.detect(original);
         FileInfo eff = (encodingHint == null || encodingHint.isEmpty()) ? base :

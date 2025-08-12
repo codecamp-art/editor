@@ -80,7 +80,7 @@ comparison:
       - ${EMAIL_TO_2:risk-management@company.com}
     cc:
       - ${EMAIL_CC_1:it-support@company.com}
-    subject: "Daily FIX Log Comparison Report"
+    subject: "Daily FIX EOD Reconciliation Report"
   
   # Report Configuration
   report:

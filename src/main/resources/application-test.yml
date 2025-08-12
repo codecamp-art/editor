@@ -45,7 +45,7 @@ comparison:
     to:
       - test-recipient@localhost
     cc: []
-    subject: "[TEST] Daily FIX Log Comparison Report"
+    subject: "[TEST] Daily FIX EOD Reconciliation Report"
   
   # Test Report Configuration
   report:

@@ -127,21 +127,21 @@ class TextInPlaceEditorCombinedTest {
 
         tasks.add(() -> {
             try {
-                byte[] out = TextInPlaceEditor.replace(new ByteArrayInputStream(bytes), "alpha=1", "alpha=A", false);
+                byte[] out = TextInPlaceEditor.replace(bytes, "alpha=1", "alpha=A", false, "UTF-8");
                 synchronized (results) { results.add(new String(out, StandardCharsets.UTF_8)); }
             } catch (IOException ignored) {}
             latch.countDown();
         });
         tasks.add(() -> {
             try {
-                byte[] out = TextInPlaceEditor.replace(new ByteArrayInputStream(bytes), "beta=2", "beta=B", false);
+                byte[] out = TextInPlaceEditor.replace(bytes, "beta=2", "beta=B", false, "UTF-8");
                 synchronized (results) { results.add(new String(out, StandardCharsets.UTF_8)); }
             } catch (IOException ignored) {}
             latch.countDown();
         });
         tasks.add(() -> {
             try {
-                byte[] out = TextInPlaceEditor.removeLine(new ByteArrayInputStream(bytes), "gamma=3", false);
+                byte[] out = TextInPlaceEditor.removeLine(bytes, "gamma=3", false, "UTF-8");
                 synchronized (results) { results.add(new String(out, StandardCharsets.UTF_8)); }
             } catch (IOException ignored) {}
             latch.countDown();

@@ -62,7 +62,7 @@ class IniInPlaceEditorAllTest {
         IniInPlaceEditor.setValue(f.toFile(), "server/host", "example.com");
         IniInPlaceEditor.setValue(f.toFile(), "server/port", "8080", "9090", null, null, null);
         IniInPlaceEditor.setValue(f.toFile(), "database/password", "secret", "", null, null, null);
-        IniInPlaceEditor.deleteLine(f.toFile(), "database/obsolete", "remove", null, null, null);
+        IniInPlaceEditor.deleteKey(f.toFile(), "database/obsolete", "remove", null, null, null);
 
         byte[] after4 = Files.readAllBytes(f);
         byte[] after5 = IniInPlaceEditor.setValue(new ByteArrayInputStream(after4), "paths/root", null, "", null, null, null);
@@ -123,7 +123,7 @@ class IniInPlaceEditorAllTest {
         IniInPlaceEditor.setValue(f.toFile(), "信息/年龄1", "30", "", "GBK", lineCmt, blk);
         IniInPlaceEditor.setValue(f.toFile(), "信息/地址", "上海", "北京", "GBK", lineCmt, blk);
         IniInPlaceEditor.setValue(f.toFile(), "信息/地址1", "上海", "北京", "GBK", lineCmt, blk);
-        IniInPlaceEditor.deleteLine(f.toFile(), "信息/空值", null, "GBK", lineCmt, blk);
+        IniInPlaceEditor.deleteKey(f.toFile(), "信息/空值", "删除", "GBK", lineCmt, blk);
 
         String expected = "// Global comment 名称 = 张三\r\n" +
                 "/* blk */\r\n" +

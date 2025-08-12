@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.env.Environment;
 import org.springframework.mail.javamail.JavaMailSender;
 
 import jakarta.mail.MessagingException;
@@ -39,6 +40,9 @@ class EmailNotificationServiceTest {
     private ComparisonConfig.EmailConfig emailConfig;
 
     @Mock
+    private Environment environment;
+
+    @Mock
     private MimeMessage mimeMessage;
 
     @TempDir
@@ -52,9 +56,12 @@ class EmailNotificationServiceTest {
         when(emailConfig.getFrom()).thenReturn("noreply@company.com");
         when(emailConfig.getTo()).thenReturn(Arrays.asList("test1@company.com", "test2@company.com"));
         when(emailConfig.getCc()).thenReturn(Arrays.asList("cc@company.com"));
-        when(emailConfig.getSubject()).thenReturn("FIX Log Comparison Report");
+        when(emailConfig.getSubject()).thenReturn("Daily FIX EOD Reconciliation Report");
+        
+        // Mock environment to return no active profiles (production)
+        when(environment.getActiveProfiles()).thenReturn(new String[]{});
 
-        emailNotificationService = new EmailNotificationService(mailSender, comparisonConfig);
+        emailNotificationService = new EmailNotificationService(mailSender, comparisonConfig, environment);
     }
 
     @Test

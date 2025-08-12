@@ -62,7 +62,7 @@ comparison:
       - ${EMAIL_TO_2:recipient2@company.com}
     cc:
       - ${EMAIL_CC_1:cc1@company.com}
-    subject: "[DOCKER] Daily FIX Log Comparison Report"
+    subject: "[DOCKER] Daily FIX EOD Reconciliation Report"
   
   # Report Configuration
   report:
