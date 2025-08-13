@@ -11,8 +11,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
-import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +25,11 @@ public class ExcelReportService {
     private static final Logger logger = LoggerFactory.getLogger(ExcelReportService.class);
     
     private final ComparisonConfig.ReportConfig reportConfig;
+
+    private static final String[] DISCREPANCY_DETAILS_HEADERS = {
+            "DONE_NO", "EXEC_ID", "Field", "Database Value", "FIX Value",
+            "Discrepancy Type", "Session ID", "Comparison Time"
+    };
 
     public ExcelReportService(ComparisonConfig comparisonConfig) {
         this.reportConfig = comparisonConfig.getReport();
@@ -56,6 +59,7 @@ public class ExcelReportService {
                 
                 if (summary.hasDiscrepancies()) {
                     createDiscrepancyDetailsSheet(workbook, summary.getDiscrepancies());
+                    createReferenceSheet(workbook);
                     createDiscrepancyByTypeSheet(workbook, summary.getDiscrepancies());
                 }
 
@@ -142,9 +146,8 @@ public class ExcelReportService {
 
         // Create header row
         Row headerRow = sheet.createRow(0);
-        String[] headers = {"DONE_NO", "EXEC_ID", "Field", "Database Value", "FIX Value", 
-                           "Discrepancy Type", "Session ID", "Comparison Time"};
-        
+        String[] headers = DISCREPANCY_DETAILS_HEADERS;
+
         for (int i = 0; i < headers.length; i++) {
             Cell cell = headerRow.createCell(i);
             cell.setCellValue(headers[i]);
@@ -180,6 +183,47 @@ public class ExcelReportService {
 
         // Add filter
         sheet.setAutoFilter(new CellRangeAddress(0, rowNum - 1, 0, headers.length - 1));
+    }
+
+    /**
+     * Creates a reference sheet with Chinese translations for each column in the Discrepancy Details sheet
+     */
+    private void createReferenceSheet(Workbook workbook) {
+        Sheet sheet = workbook.createSheet("Reference");
+
+        CellStyle headerStyle = createHeaderStyle(workbook);
+        CellStyle dataStyle = createDataStyle(workbook);
+
+        // Header
+        Row headerRow = sheet.createRow(0);
+        headerRow.createCell(0).setCellValue("Column (Details Sheet)");
+        headerRow.createCell(1).setCellValue("中文翻译");
+        headerRow.getCell(0).setCellStyle(headerStyle);
+        headerRow.getCell(1).setCellStyle(headerStyle);
+
+        // Translations aligned with DISCREPANCY_DETAILS_HEADERS
+        String[] chineseTranslations = new String[] {
+                "成交编号",      // DONE_NO
+                "执行ID",        // EXEC_ID
+                "字段",          // Field
+                "数据库值",      // Database Value
+                "FIX值",        // FIX Value
+                "差异类型",      // Discrepancy Type
+                "会话ID",        // Session ID
+                "比对时间"       // Comparison Time
+        };
+
+        int rowNum = 1;
+        for (int i = 0; i < DISCREPANCY_DETAILS_HEADERS.length; i++) {
+            Row row = sheet.createRow(rowNum++);
+            row.createCell(0).setCellValue(DISCREPANCY_DETAILS_HEADERS[i]);
+            row.createCell(1).setCellValue(chineseTranslations[i]);
+            row.getCell(0).setCellStyle(dataStyle);
+            row.getCell(1).setCellStyle(dataStyle);
+        }
+
+        sheet.autoSizeColumn(0);
+        sheet.autoSizeColumn(1);
     }
 
     /**

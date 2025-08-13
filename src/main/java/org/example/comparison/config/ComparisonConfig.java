@@ -115,6 +115,17 @@ public class ComparisonConfig {
         private String excelFileName = "fix_comparison_report_{date}.xlsx";
         private boolean deleteOldReports = true;
         private int keepReportsForDays = 30;
+        // Reporting outputs for Jenkins integrations
+        private boolean generateJunit = true;
+        private boolean generateHtml = true;
+        private boolean generateJson = true;
+        private String junitSubdirectory = "junit";
+        private String htmlSubdirectory = "html";
+        private String jsonSubdirectory = "json";
+        private String junitFileName = "TEST-diff-report.xml";
+        private String htmlFileName = "diff-report.html";
+        private String jsonFileName = "diff-report.json";
+        private String junitSuiteName = "EnvironmentDiffs";
 
         // Getters and Setters
         public String getOutputDirectory() { return outputDirectory; }
@@ -125,6 +136,26 @@ public class ComparisonConfig {
         public void setDeleteOldReports(boolean deleteOldReports) { this.deleteOldReports = deleteOldReports; }
         public int getKeepReportsForDays() { return keepReportsForDays; }
         public void setKeepReportsForDays(int keepReportsForDays) { this.keepReportsForDays = keepReportsForDays; }
+        public boolean isGenerateJunit() { return generateJunit; }
+        public void setGenerateJunit(boolean generateJunit) { this.generateJunit = generateJunit; }
+        public boolean isGenerateHtml() { return generateHtml; }
+        public void setGenerateHtml(boolean generateHtml) { this.generateHtml = generateHtml; }
+        public boolean isGenerateJson() { return generateJson; }
+        public void setGenerateJson(boolean generateJson) { this.generateJson = generateJson; }
+        public String getJunitSubdirectory() { return junitSubdirectory; }
+        public void setJunitSubdirectory(String junitSubdirectory) { this.junitSubdirectory = junitSubdirectory; }
+        public String getHtmlSubdirectory() { return htmlSubdirectory; }
+        public void setHtmlSubdirectory(String htmlSubdirectory) { this.htmlSubdirectory = htmlSubdirectory; }
+        public String getJsonSubdirectory() { return jsonSubdirectory; }
+        public void setJsonSubdirectory(String jsonSubdirectory) { this.jsonSubdirectory = jsonSubdirectory; }
+        public String getJunitFileName() { return junitFileName; }
+        public void setJunitFileName(String junitFileName) { this.junitFileName = junitFileName; }
+        public String getHtmlFileName() { return htmlFileName; }
+        public void setHtmlFileName(String htmlFileName) { this.htmlFileName = htmlFileName; }
+        public String getJsonFileName() { return jsonFileName; }
+        public void setJsonFileName(String jsonFileName) { this.jsonFileName = jsonFileName; }
+        public String getJunitSuiteName() { return junitSuiteName; }
+        public void setJunitSuiteName(String junitSuiteName) { this.junitSuiteName = junitSuiteName; }
     }
 
     // Main getters and setters

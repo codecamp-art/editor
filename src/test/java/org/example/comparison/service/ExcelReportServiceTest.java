@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -18,6 +19,10 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 /**
  * Unit tests for ExcelReportService
@@ -104,6 +109,43 @@ class ExcelReportServiceTest {
         // Verify filename contains the date
         String expectedDate = summary.getComparisonDate().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
         assertTrue(reportFile.getName().contains(expectedDate));
+    }
+
+    @Test
+    void testReferenceSheet_Present_WithCorrectTranslations() throws Exception {
+        ComparisonService.ComparisonSummary summary = createSummaryWithDiscrepancies();
+
+        File reportFile = excelReportService.generateReport(summary);
+
+        assertNotNull(reportFile);
+        assertTrue(reportFile.exists());
+
+        try (FileInputStream fis = new FileInputStream(reportFile);
+             XSSFWorkbook workbook = new XSSFWorkbook(fis)) {
+            Sheet referenceSheet = workbook.getSheet("Reference");
+            assertNotNull(referenceSheet, "Reference sheet should exist when discrepancies are present");
+
+            Row header = referenceSheet.getRow(0);
+            assertNotNull(header);
+            assertEquals("Column (Details Sheet)", header.getCell(0).getStringCellValue());
+            assertEquals("中文翻译", header.getCell(1).getStringCellValue());
+
+            String[] expectedHeaders = new String[] {
+                    "DONE_NO", "EXEC_ID", "Field", "Database Value", "FIX Value",
+                    "Discrepancy Type", "Session ID", "Comparison Time"
+            };
+
+            String[] expectedChinese = new String[] {
+                    "成交编号", "执行ID", "字段", "数据库值", "FIX值", "差异类型", "会话ID", "比对时间"
+            };
+
+            for (int i = 0; i < expectedHeaders.length; i++) {
+                Row row = referenceSheet.getRow(i + 1);
+                assertNotNull(row, "Row " + (i + 1) + " should exist in Reference sheet");
+                assertEquals(expectedHeaders[i], row.getCell(0).getStringCellValue());
+                assertEquals(expectedChinese[i], row.getCell(1).getStringCellValue());
+            }
+        }
     }
 
     @Test
