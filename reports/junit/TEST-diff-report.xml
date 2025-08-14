@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<testsuite errors="0" failures="3" name="EnvironmentDiffs" tests="3">
+  <testcase name="Config file diffs">
+    <failure message="Config differences detected (2)"/>
+  </testcase>
+  <testcase name="Binary checksum diffs">
+    <failure message="Binary differences detected (1)"/>
+  </testcase>
+  <testcase name="Database schema diffs">
+    <failure message="DB schema differences detected (1)"/>
+  </testcase>
+</testsuite>

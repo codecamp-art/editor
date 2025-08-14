@@ -1,0 +1,74 @@
+{
+  "title" : "Sample Environment Difference Report",
+  "generatedAt" : "2025-08-14T07:46:46.4780318",
+  "envALabel" : "Env A",
+  "envBLabel" : "Env B",
+  "configDiffs" : [ {
+    "component" : "OrderService",
+    "server" : "app-01",
+    "envAHost" : "a-host",
+    "envBHost" : "b-host",
+    "envAFile" : "/etc/app/config.yaml",
+    "envBFile" : "/etc/app/config.yaml",
+    "location" : "db.pool.size",
+    "envAValue" : "10",
+    "envBValue" : "12",
+    "envA" : "A",
+    "envB" : "B"
+  }, {
+    "component" : "Pricing",
+    "server" : "app-02",
+    "envAHost" : "a2",
+    "envBHost" : "b2",
+    "envAFile" : "/etc/app/pricing.yaml",
+    "envBFile" : "/etc/app/pricing.yaml",
+    "location" : "currency",
+    "envAValue" : "USD",
+    "envBValue" : "HKD",
+    "envA" : "A",
+    "envB" : "B"
+  } ],
+  "binaryDiffs" : [ {
+    "component" : "OrderService",
+    "server" : "app-01",
+    "envA" : "A",
+    "envAHost" : "a-host",
+    "envB" : "B",
+    "envBHost" : "b-host",
+    "envAFile" : "/opt/app/lib/module.jar",
+    "envBFile" : "/opt/app/lib/module.jar",
+    "envAChecksum" : "abc123",
+    "envBChecksum" : "def456"
+  } ],
+  "dbSchemaDiffs" : [ {
+    "objectType" : "TABLE",
+    "objectName" : "ORDERS",
+    "difference" : "Missing column PRICE in Env B",
+    "envAValue" : "Has PRICE",
+    "envBValue" : "No PRICE"
+  } ],
+  "excludedConfig" : [ {
+    "component" : "OrderService",
+    "server" : "app-01",
+    "envA" : "A",
+    "envAHost" : "a-host",
+    "envB" : "B",
+    "envBHost" : "b-host",
+    "envAFile" : "/etc/app/config.yaml",
+    "envBFile" : "/etc/app/config.yaml",
+    "location" : "secrets.apiKey",
+    "envAValue" : "***",
+    "envBValue" : "***"
+  } ],
+  "excludedBinary" : [ {
+    "component" : "Pricing",
+    "server" : "app-02",
+    "envA" : "A",
+    "envAHost" : "a2",
+    "envB" : "B",
+    "envBHost" : "b2",
+    "envAFile" : "/opt/app/lib/optional.jar",
+    "envBFile" : "/opt/app/lib/optional.jar"
+  } ],
+  "passing" : false
+}

@@ -2,6 +2,7 @@ package org.example.comparison.reporting;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.File;
 
@@ -9,7 +10,10 @@ public class JsonDiffReportWriter {
     private final ObjectMapper mapper;
 
     public JsonDiffReportWriter() {
-        this.mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+        this.mapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     public File write(File outputDir, DiffReportModels.DiffReport report, String fileName) {
