@@ -178,7 +178,10 @@ public final class PropertiesInPlaceEditor {
                     segment = segment.replaceAll("\\\\\\s*$", ""); // remove trailing backslash and spaces
                     agg.append(segment);
                 }
-                if (!agg.toString().trim().equals(expectedOldValue)) continue; // mismatch
+                if (expectedOldValue.startsWith("regex:")) {
+                    Pattern p =  Pattern.compile(expectedOldValue.substring("regex:".length()));
+                    if (!p.matcher(agg.toString()).matches()) continue;
+                } else if (!agg.toString().trim().equals(expectedOldValue)) continue; // mismatch
             }
 
             if (removeLine) { // delete whole block

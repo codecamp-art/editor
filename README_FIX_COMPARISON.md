@@ -130,7 +130,7 @@ java -jar target/fix-log-comparison.jar --spring.profiles.active=dev
 #### When No Discrepancies Are Found
 - **Subject**: `[ENV] Daily FIX EOD Reconciliation Report - No Discrepancies`
 - **Content**: 
-  - Confirmation that all fulfilled and partial fulfilled orders match
+  - Confirmation that all fulfilled and partially fulfilled orders match
   - Summary statistics
   - No action required message
 

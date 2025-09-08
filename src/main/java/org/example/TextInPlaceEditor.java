@@ -54,7 +54,6 @@ public final class TextInPlaceEditor {
     /**
      * Replace the first occurrence of a pattern (regex or literal) in an InputStream. Returns the modified bytes.
      * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param in InputStream containing text data
      * @param pattern Regex or literal pattern to match
      * @param replacement Replacement string
      * @param isRegex If true, pattern is regex; if false, literal

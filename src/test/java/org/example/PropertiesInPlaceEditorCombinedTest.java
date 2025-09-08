@@ -38,6 +38,7 @@ class PropertiesInPlaceEditorCombinedTest {
                 "! system comment\r\n" +
                 "url:https://example.com\n" +
                 "timeout=30  \r" +
+                "timeout2=30  \r" +
                 "cache=enabled\r\n" +
                 "debug=true"; // no EOL
 
@@ -49,6 +50,7 @@ class PropertiesInPlaceEditorCombinedTest {
         PropertiesInPlaceEditor.setValue(f.toFile(), "username", null, "root", null);
         // 2. Replace with expected old value
         PropertiesInPlaceEditor.setValue(f.toFile(), "timeout", "30", "60", null);
+        PropertiesInPlaceEditor.setValue(f.toFile(), "timeout2", "regex:.*", "60", null);
         // 3. Clear (remove value) preserving key & line
         PropertiesInPlaceEditor.setValue(f.toFile(), "cache", "enabled", null, null);
         // 4. Remove entire line
@@ -66,6 +68,7 @@ class PropertiesInPlaceEditorCombinedTest {
                 "desc2=test3\r\n"+
                 "! system comment\r\n" +
                 "timeout=60  \r" +
+                "timeout2=60  \r" +
                 "cache=\r\n" +
                 "debug=true";
 
