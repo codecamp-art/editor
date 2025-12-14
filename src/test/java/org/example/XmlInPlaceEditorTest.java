@@ -26,6 +26,9 @@ class XmlInPlaceEditorTest {
                 "  <server host=\"localhost\" port=\"8080\">\r"+
                 "    <timeout>10</timeout> <!-- comment -->\n"+
                 "  </server>\n"+
+                "  <url host=\"localhost\" port=\"8080\">\r"+
+                "    <timeout>10</timeout> <!-- comment -->\n"+
+                "  </url>\n"+
                 "  <database user=\"admin\" password=\"secret\">removeMe</database>\r\n"+
                 "  <paths root=\"/var/www\"/>\n"+
                 "</config>\n";
@@ -39,6 +42,7 @@ class XmlInPlaceEditorTest {
         XmlInPlaceEditor.setValue(f.toFile(), "config/server/@port", "8080", "9090");
         XmlInPlaceEditor.setValue(f.toFile(), "config/server/timeout", "10", "11");
         XmlInPlaceEditor.deleteTag(f.toFile(), "config/database", null);
+        XmlInPlaceEditor.deleteTag(f.toFile(), "config/url", null);
 
         String expected = "" +
                 "<!-- Global -->\r\n"+
@@ -70,6 +74,10 @@ class XmlInPlaceEditorTest {
                 " 地址=\"本地\" 端口=\"8080\">\r"+
                 "    <超时>30</超时>\n"+
                 "  </服务器>\n"+
+                "  <地址 \n" +
+                " 地址=\"本地\" 端口=\"8080\">\r"+
+                "    <超时>30</超时>\n"+
+                "  </地址>\n"+
                 "  <路径 根=\"/data\"/>\n"+
                 "</配置>\n";
         Path f = dir.resolve("配置.xml");
@@ -78,6 +86,7 @@ class XmlInPlaceEditorTest {
         XmlInPlaceEditor.setValue(f.toFile(), "配置/服务器/@地址", null, "远程", "GBK");
         XmlInPlaceEditor.setValue(f.toFile(), "配置/服务器/@端口", "8080", "9090", "GBK");
         XmlInPlaceEditor.setValue(f.toFile(), "配置/服务器/超时", "30", "60", "GBK");
+        XmlInPlaceEditor.deleteTag(f.toFile(), "配置/地址", null, "GBK");
 
         String expected = ""+
                 "<!-- 配置文件 -->\r\n"+

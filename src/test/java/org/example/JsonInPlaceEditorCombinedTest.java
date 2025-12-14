@@ -46,6 +46,10 @@ class JsonInPlaceEditorCombinedTest {
                 "    \"user\" : \"admin\",\n" +
                 "    \"password\" : \"secret\", \"obsolete\" : \"remove\"\n" +
                 "  },\n" +
+                "  \"url\" : {\r\n" +
+                "    \"user\" : \"admin\",\n" +
+                "    \"password\" : \"secret\", \"obsolete\" : \"remove\"\n" +
+                "  },\n" +
                 "\n" +
                 "  \"paths\" : { \"root\" : \"/var/www\"}\n" +
                 "}\n";
@@ -62,6 +66,7 @@ class JsonInPlaceEditorCombinedTest {
         JsonInPlaceEditor.setValue(f.toFile(), "server/time", "10", "11", null);
         JsonInPlaceEditor.setValue(f.toFile(), "database/password", "secret", "", null);
         JsonInPlaceEditor.deleteKey(f.toFile(), "database/obsolete", "remove", null);
+        JsonInPlaceEditor.deleteKey(f.toFile(), "url", null, null);
 
         byte[] after4 = Files.readAllBytes(f);
         byte[] after5 = JsonInPlaceEditor.setValue(new ByteArrayInputStream(after4), "paths/root", null, null, null);

@@ -53,6 +53,15 @@ class YamlInPlaceEditorTest {
                 "    timeout: 30\r\n" +
                 "    obsolete: remove_me  # to be deleted\r" +
                 "\n" +
+                "url:\r\n" +
+                "  user: admin\n" +
+                "  password: 'secret'\r" +
+                "  host: \"db.example.com\"\n" +
+                "  settings:\r\n" +
+                "    pool_size: 10\n" +
+                "    timeout: 30\r\n" +
+                "    obsolete: remove_me  # to be deleted\r" +
+                "\n" +
                 "services:           # array of services\r\n" +
                 "  - name: web\n" +
                 "    port: 8080\r\n" +
@@ -82,7 +91,8 @@ class YamlInPlaceEditorTest {
         YamlInPlaceEditor.setValue(f.toFile(), "server/ssl", false, true, null);
         YamlInPlaceEditor.setValue(f.toFile(), "database/password", "secret", "new_password", null);
         YamlInPlaceEditor.setValue(f.toFile(), "database/settings/pool_size", 10, 20, null);
-        YamlInPlaceEditor.deleteLine(f.toFile(), "database/settings/obsolete", "remove_me", null);
+        YamlInPlaceEditor.deleteKey(f.toFile(), "database/settings/obsolete", "remove_me", null);
+        YamlInPlaceEditor.deleteKey(f.toFile(), "url", null, null);
         YamlInPlaceEditor.setValue(f.toFile(), "services/0/enabled", true, false, null);
         YamlInPlaceEditor.setValue(f.toFile(), "services/1/port", 9090, 9091, null);
         YamlInPlaceEditor.setValue(f.toFile(), "metadata/version", 1.0, "2.0", null);
@@ -181,7 +191,7 @@ class YamlInPlaceEditorTest {
         YamlInPlaceEditor.setValue(f.toFile(), "服务器/端口", 8080, 9080, "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "数据库/密码", "秘密", "新密码", "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "数据库/设置/连接池大小", 10, 20, "GBK");
-        YamlInPlaceEditor.deleteLine(f.toFile(), "数据库/设置/废弃选项", "删除我", "GBK");
+        YamlInPlaceEditor.deleteKey(f.toFile(), "数据库/设置/废弃选项", "删除我", "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "服务列表/0/启用", true, false, "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "服务列表/1/端口", 9090, 9091, "GBK");
         YamlInPlaceEditor.setValue(f.toFile(), "元数据/版本", 1.0, "2.0", "GBK");
@@ -279,10 +289,10 @@ class YamlInPlaceEditorTest {
         YamlInPlaceEditor.setValue(f.toFile(), "config/ssl_enabled", "yes", false);
         YamlInPlaceEditor.setValue(f.toFile(), "config/cache_dir", null, "/tmp/cache");
         
-        // Line deletions
-        YamlInPlaceEditor.deleteLine(f.toFile(), "config/deprecated_option", "remove this");
-        YamlInPlaceEditor.deleteLine(f.toFile(), "config/old_setting", 123);
-        YamlInPlaceEditor.deleteLine(f.toFile(), "config/unused_flag");
+        // Key deletions (removes entire line)
+        YamlInPlaceEditor.deleteKey(f.toFile(), "config/deprecated_option", "remove this");
+        YamlInPlaceEditor.deleteKey(f.toFile(), "config/old_setting", 123);
+        YamlInPlaceEditor.deleteKey(f.toFile(), "config/unused_flag");
 
         // Test inline structures
         YamlInPlaceEditor.setValue(f.toFile(), "inline_object/key2", 42, 100);
@@ -421,7 +431,7 @@ class YamlInPlaceEditorTest {
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
         exec.execute(() -> { try {
-            byte[] out = YamlInPlaceEditor.deleteLine(new ByteArrayInputStream(bytes), "nested/x", 10, null);
+            byte[] out = YamlInPlaceEditor.deleteKey(new ByteArrayInputStream(bytes), "nested/x", 10, null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
 

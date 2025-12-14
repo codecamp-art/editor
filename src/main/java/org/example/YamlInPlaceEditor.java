@@ -59,19 +59,6 @@ public final class YamlInPlaceEditor {
         Files.write(file.toPath(), modified);
     }
 
-    public static void deleteLine(File file, String yamlPath) throws IOException {
-        deleteLine(file, yamlPath, null, null);
-    }
-
-    public static void deleteLine(File file, String yamlPath, Object expectedOld) throws IOException {
-        deleteLine(file, yamlPath, expectedOld, null);
-    }
-
-    public static void deleteLine(File file, String yamlPath, Object expectedOld, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] modified = deleteLine(new ByteArrayInputStream(original), yamlPath, expectedOld, encodingHint);
-        Files.write(file.toPath(), modified);
-    }
 
     public static boolean search(File file, String yamlPath) throws IOException {
         return search(file, yamlPath, null, null);
@@ -155,51 +142,70 @@ public final class YamlInPlaceEditor {
             }
         }
 
-        // Remove the key-value pair but preserve structure
-        String before = content.substring(0, loc.keyStart);
-        String after = content.substring(loc.afterValue);
-        String modified = before + after;
-        return encode(modified, info);
-    }
-
-    public static byte[] deleteLine(InputStream in, String yamlPath) throws IOException {
-        return deleteLine(in, yamlPath, null, null);
-    }
-
-    public static byte[] deleteLine(InputStream in, String yamlPath, Object expectedOld) throws IOException {
-        return deleteLine(in, yamlPath, expectedOld, null);
-    }
-
-    public static byte[] deleteLine(InputStream in, String yamlPath, Object expectedOld, String encodingHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
-        EncodingInfo info = detectEncoding(bytes, encodingHint);
-        String content = new String(bytes, info.bomLength, bytes.length - info.bomLength, info.charset);
-
-        List<String> path = parsePath(yamlPath);
-        Locator locator = new Locator(content);
-        Location loc = locator.locate(path);
-
-        if (loc == null) {
-            throw new IllegalArgumentException("Path not found: " + yamlPath);
-        }
-
-        // Check the expected value if provided
-        if (expectedOld != null) {
-            String currentVal = content.substring(loc.valueStart, loc.valueEnd);
-            if (!valuesMatch(currentVal, expectedOld)) {
-                return bytes; // No change
-            }
-        }
-
         // Delete the entire line including indentation and EOL
         int lineStart = findLineStart(content, loc.keyStart);
-        int lineEnd = findLineEnd(content, loc.afterValue);
+        int keyLineEnd = findLineEnd(content, loc.keyStart);
+        
+        // Check if the key has nested children by looking at the next line
+        boolean hasNestedChildren = false;
+        if (keyLineEnd < content.length()) {
+            int nextLineStart = keyLineEnd;
+            // Skip empty lines and comments
+            while (nextLineStart < content.length()) {
+                int lineEnd = findLineEnd(content, nextLineStart);
+                int lineIndent = 0;
+                int temp = nextLineStart;
+                boolean isEmptyOrComment = true;
+                
+                while (temp < lineEnd && temp < content.length()) {
+                    char c = content.charAt(temp);
+                    if (c == ' ') {
+                        lineIndent++;
+                        temp++;
+                    } else if (c == '\t') {
+                        lineIndent += 8;
+                        temp++;
+                    } else if (c == '\n' || c == '\r') {
+                        // Empty line
+                        break;
+                    } else if (c == '#') {
+                        // Comment line
+                        break;
+                    } else {
+                        // Found content
+                        isEmptyOrComment = false;
+                        if (lineIndent > loc.indentLevel) {
+                            // This line has greater indentation, so it's a nested child
+                            hasNestedChildren = true;
+                        }
+                        break;
+                    }
+                }
+                
+                if (isEmptyOrComment) {
+                    // Skip empty/comment lines and continue
+                    nextLineStart = lineEnd;
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        int deletionEnd;
+        if (hasNestedChildren) {
+            // Find where the parent key's block ends (including all nested children)
+            deletionEnd = findBlockEnd(content, lineStart, loc.indentLevel);
+        } else {
+            // Just delete the single line
+            deletionEnd = keyLineEnd;
+        }
 
         String before = content.substring(0, lineStart);
-        String after = content.substring(lineEnd);
+        String after = content.substring(deletionEnd);
         String modified = before + after;
         return encode(modified, info);
     }
+
 
     public static boolean search(InputStream in, String yamlPath) throws IOException {
         return search(in, yamlPath, null, null);
@@ -1045,5 +1051,58 @@ public final class YamlInPlaceEditor {
             pos++;
         }
         return pos;
+    }
+
+    /**
+     * Finds the end of a parent key's block by looking for the next line with same or less indentation.
+     * This is used when deleting parent keys to remove all nested children.
+     */
+    private static int findBlockEnd(String content, int keyLineStart, int keyIndent) {
+        int pos = findLineEnd(content, keyLineStart);
+        
+        // Look for the next line with same or less indentation (not empty/comment)
+        while (pos < content.length()) {
+            int lineStart = pos;
+            int lineEnd = findLineEnd(content, pos);
+            
+            // Calculate indentation of this line
+            int lineIndent = 0;
+            int temp = lineStart;
+            boolean isEmptyOrComment = true;
+            
+            while (temp < lineEnd && temp < content.length()) {
+                char c = content.charAt(temp);
+                if (c == ' ') {
+                    lineIndent++;
+                    temp++;
+                } else if (c == '\t') {
+                    lineIndent += 8;
+                    temp++;
+                } else if (c == '\n' || c == '\r') {
+                    // Empty line
+                    isEmptyOrComment = true;
+                    break;
+                } else if (c == '#') {
+                    // Comment line
+                    isEmptyOrComment = true;
+                    break;
+                } else {
+                    // Found non-whitespace content
+                    isEmptyOrComment = false;
+                    if (lineIndent <= keyIndent) {
+                        // This line has same or less indentation, block ends here
+                        return lineStart;
+                    }
+                    // This line is still part of the block (greater indentation), continue to next line
+                    break;
+                }
+            }
+            
+            // Move to next line
+            pos = lineEnd;
+        }
+        
+        // Reached end of content
+        return content.length();
     }
 } 
