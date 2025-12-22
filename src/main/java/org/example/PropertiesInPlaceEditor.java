@@ -1,9 +1,8 @@
 package org.example;
 
-import java.io.*;
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -14,7 +13,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>Replace the value of a given key (first occurrence) while leaving every unrelated byte intact.</li>
  *   <li>Preserves indentation, spaces, comments (#/!), mixed EOLs, encoding, and any existing BOM.</li>
- *   <li>Supports both {@link File} and {@link InputStream} sources and explicit encoding override.</li>
+ *   <li>Supports explicit encoding override.</li>
  *   <li>Thread-safe: stateless with only static methods and no shared mutable state.</li>
  * </ul>
  */
@@ -25,51 +24,26 @@ public final class PropertiesInPlaceEditor {
     /**
      * Unified API to replace value (or clear when newValue==null). If encodingHint is null, auto-detect encoding else override.
      */
-    public static void setValue(File file, String key, String expectedOldValue, String newValue, String encodingHint) throws IOException {
-        Objects.requireNonNull(file, "file");
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo base = FileInfo.detect(original);
-        Charset cs = encodingHint == null ? base.charset : Charset.forName(encodingHint);
-        FileInfo info = encodingHint == null ? base : new FileInfo(cs, base.eol, base.originalEols, base.lastLineNoEol, base.bom, base.offset);
-        byte[] modified = (newValue == null)
-                ? clearInternal(original, info, key, expectedOldValue)
-                : replaceInternal(original, info, key, expectedOldValue, newValue);
-        Files.write(file.toPath(), modified);
-    }
-
-    /**
-     * Unified InputStream variant. Returns modified bytes.
-     */
-    public static byte[] setValue(InputStream in, String key, String expectedOldValue, String newValue, String encodingHint) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo base = FileInfo.detect(original);
+    public static byte[] setValue(byte[] bytes, String key, String expectedOldValue, String newValue, String encodingHint) throws IOException {
+        Objects.requireNonNull(bytes, "bytes");
+        FileInfo base = FileInfo.detect(bytes);
         Charset cs = encodingHint == null ? base.charset : Charset.forName(encodingHint);
         FileInfo info = encodingHint == null ? base : new FileInfo(cs, base.eol, base.originalEols, base.lastLineNoEol, base.bom, base.offset);
         return (newValue == null)
-                ? clearInternal(original, info, key, expectedOldValue)
-                : replaceInternal(original, info, key, expectedOldValue, newValue);
+                ? clearInternal(bytes, info, key, expectedOldValue)
+                : replaceInternal(bytes, info, key, expectedOldValue, newValue);
     }
 
-    public static void deleteKey(File file, String key, String expectedOldValue) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo info = FileInfo.detect(original);
-        byte[] modified = removeLineInternal(original, info, key, expectedOldValue);
-        Files.write(file.toPath(), modified);
+    public static byte[] deleteKey(byte[] bytes, String key, String expectedOldValue) throws IOException {
+        FileInfo info = FileInfo.detect(bytes);
+        return removeLineInternal(bytes, info, key, expectedOldValue);
     }
 
-    public static byte[] deleteKey(InputStream in, String key, String expectedOldValue) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo info = FileInfo.detect(original);
-        return removeLineInternal(original, info, key, expectedOldValue);
-    }
-
-    public static void deleteKey(File file, String encoding, String key, String expectedOldValue) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo base = FileInfo.detect(original);
+    public static byte[] deleteKey(byte[] bytes, String encoding, String key, String expectedOldValue) throws IOException {
+        FileInfo base = FileInfo.detect(bytes);
         Charset cs = Charset.forName(encoding);
         FileInfo overridden = new FileInfo(cs, base.eol, base.originalEols, base.lastLineNoEol, base.bom, base.offset);
-        byte[] modified = removeLineInternal(original, overridden, key, expectedOldValue);
-        Files.write(file.toPath(), modified);
+        return removeLineInternal(bytes, overridden, key, expectedOldValue);
     }
 
     /* --- Internals ----------------------------------------------------- */

@@ -1,12 +1,8 @@
 package org.example;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.*;
 
 /**
@@ -24,52 +20,17 @@ public final class XmlInPlaceEditor {
     private XmlInPlaceEditor() {
     }
 
-    /* ===================== Public FILE API ===================== */
-    public static void setValue(File f, String xPath, String newVal) throws IOException {
-        setValue(f, xPath, null, newVal, null);
+    /* ===================== Public Byte Array API ===================== */
+    
+    public static byte[] setValue(byte[] bytes, String xPath, String newVal) throws IOException {
+        return setValue(bytes, xPath, null, newVal, null);
     }
 
-    public static void setValue(File f, String xPath, String expectedOld, String newVal) throws IOException {
-        setValue(f, xPath, expectedOld, newVal, null);
+    public static byte[] setValue(byte[] bytes, String xPath, String expectedOld, String newVal) throws IOException {
+        return setValue(bytes, xPath, expectedOld, newVal, null);
     }
 
-    public static void setValue(File f, String xPath, String expectedOld, String newVal, String encHint) throws IOException {
-        byte[] bytes = Files.readAllBytes(f.toPath());
-        byte[] out = setValue(new ByteArrayInputStream(bytes), xPath, expectedOld, newVal, encHint);
-        Files.write(f.toPath(), out);
-    }
-
-    public static void deleteTag(File f, String xPath) throws IOException {
-        deleteTag(f, xPath, null, null);
-    }
-
-    public static void deleteTag(File f, String xPath, String expectedValAttr) throws IOException {
-        deleteTag(f, xPath, expectedValAttr, null);
-    }
-
-    public static void deleteTag(File f, String xPath, String expectedValAttr, String encHint) throws IOException {
-        byte[] bytes = Files.readAllBytes(f.toPath());
-        byte[] out = deleteTag(new ByteArrayInputStream(bytes), xPath, expectedValAttr, encHint);
-        Files.write(f.toPath(), out);
-    }
-
-    public static boolean search(File f, String xPath) throws IOException {
-        return search(f, xPath, null, null);
-    }
-
-    public static boolean search(File f, String xPath, String valAttr) throws IOException {
-        return search(f, xPath, valAttr, null);
-    }
-
-    public static boolean search(File f, String xPath, String valAttr, String encHint) throws IOException {
-        byte[] bytes = Files.readAllBytes(f.toPath());
-        return search(new ByteArrayInputStream(bytes), xPath, valAttr, encHint);
-    }
-
-    /* ===================== Public STREAM API ===================== */
-
-    public static byte[] setValue(InputStream in, String xPath, String expectedOld, String newVal, String encHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static byte[] setValue(byte[] bytes, String xPath, String expectedOld, String newVal, String encHint) throws IOException {
         Encoding info = Encoding.detect(bytes, encHint);
         String xml = new String(bytes, info.offset, bytes.length - info.offset, info.cs);
 
@@ -88,8 +49,15 @@ public final class XmlInPlaceEditor {
         return info.encode(outStr);
     }
 
-    public static byte[] deleteTag(InputStream in, String xPath, String expectedValAttr, String encHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static byte[] deleteTag(byte[] bytes, String xPath) throws IOException {
+        return deleteTag(bytes, xPath, null, null);
+    }
+
+    public static byte[] deleteTag(byte[] bytes, String xPath, String expectedValAttr) throws IOException {
+        return deleteTag(bytes, xPath, expectedValAttr, null);
+    }
+
+    public static byte[] deleteTag(byte[] bytes, String xPath, String expectedValAttr, String encHint) throws IOException {
         Encoding info = Encoding.detect(bytes, encHint);
         String xml = new String(bytes, info.offset, bytes.length - info.offset, info.cs);
 
@@ -146,8 +114,15 @@ public final class XmlInPlaceEditor {
         return info.encode(out);
     }
 
-    public static boolean search(InputStream in, String xPath, String valAttr, String encHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static boolean search(byte[] bytes, String xPath) throws IOException {
+        return search(bytes, xPath, null, null);
+    }
+
+    public static boolean search(byte[] bytes, String xPath, String valAttr) throws IOException {
+        return search(bytes, xPath, valAttr, null);
+    }
+
+    public static boolean search(byte[] bytes, String xPath, String valAttr, String encHint) throws IOException {
         Encoding info = Encoding.detect(bytes, encHint);
         String xml = new String(bytes, info.offset, bytes.length - info.offset, info.cs);
         Locator loc = new Locator(xml);

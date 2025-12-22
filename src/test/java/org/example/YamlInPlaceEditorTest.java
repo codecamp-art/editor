@@ -4,7 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -86,16 +87,18 @@ class YamlInPlaceEditorTest {
         }
 
         // Multiple mutations
-        YamlInPlaceEditor.setValue(f.toFile(), "server/host", "production.example.com");
-        YamlInPlaceEditor.setValue(f.toFile(), "server/port", 8080, 9080, null);
-        YamlInPlaceEditor.setValue(f.toFile(), "server/ssl", false, true, null);
-        YamlInPlaceEditor.setValue(f.toFile(), "database/password", "secret", "new_password", null);
-        YamlInPlaceEditor.setValue(f.toFile(), "database/settings/pool_size", 10, 20, null);
-        YamlInPlaceEditor.deleteKey(f.toFile(), "database/settings/obsolete", "remove_me", null);
-        YamlInPlaceEditor.deleteKey(f.toFile(), "url", null, null);
-        YamlInPlaceEditor.setValue(f.toFile(), "services/0/enabled", true, false, null);
-        YamlInPlaceEditor.setValue(f.toFile(), "services/1/port", 9090, 9091, null);
-        YamlInPlaceEditor.setValue(f.toFile(), "metadata/version", 1.0, "2.0", null);
+        byte[] content = Files.readAllBytes(f);
+        content = YamlInPlaceEditor.setValue(content, "server/host", "production.example.com");
+        content = YamlInPlaceEditor.setValue(content, "server/port", 8080, 9080, null);
+        content = YamlInPlaceEditor.setValue(content, "server/ssl", false, true, null);
+        content = YamlInPlaceEditor.setValue(content, "database/password", "secret", "new_password", null);
+        content = YamlInPlaceEditor.setValue(content, "database/settings/pool_size", 10, 20, null);
+        content = YamlInPlaceEditor.deleteKey(content, "database/settings/obsolete", "remove_me", null);
+        content = YamlInPlaceEditor.deleteKey(content, "url", null, null);
+        content = YamlInPlaceEditor.setValue(content, "services/0/enabled", true, false, null);
+        content = YamlInPlaceEditor.setValue(content, "services/1/port", 9090, 9091, null);
+        content = YamlInPlaceEditor.setValue(content, "metadata/version", 1.0, "2.0", null);
+        Files.write(f, content);
 
         String expected = "" +
                 "# Global configuration\r\n" +
@@ -138,11 +141,12 @@ class YamlInPlaceEditorTest {
         assertEquals(expected, after);
 
         // Search validations
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "server/host", "production.example.com"));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "server/ssl", true));
-        assertFalse(YamlInPlaceEditor.search(f.toFile(), "database/settings/obsolete")); // key removed
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "services/0/enabled", false));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "metadata/version", "2.0"));
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(YamlInPlaceEditor.search(finalContent, "server/host", "production.example.com"));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "server/ssl", true));
+        assertFalse(YamlInPlaceEditor.search(finalContent, "database/settings/obsolete")); // key removed
+        assertTrue(YamlInPlaceEditor.search(finalContent, "services/0/enabled", false));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "metadata/version", "2.0"));
     }
 
     /* ---------------------------------------------------------------------
@@ -187,14 +191,16 @@ class YamlInPlaceEditorTest {
         Files.write(f, original.getBytes(gbk));
 
         // Multiple mutations with GBK encoding
-        YamlInPlaceEditor.setValue(f.toFile(), "服务器/地址", "本地主机", "生产服务器", "GBK");
-        YamlInPlaceEditor.setValue(f.toFile(), "服务器/端口", 8080, 9080, "GBK");
-        YamlInPlaceEditor.setValue(f.toFile(), "数据库/密码", "秘密", "新密码", "GBK");
-        YamlInPlaceEditor.setValue(f.toFile(), "数据库/设置/连接池大小", 10, 20, "GBK");
-        YamlInPlaceEditor.deleteKey(f.toFile(), "数据库/设置/废弃选项", "删除我", "GBK");
-        YamlInPlaceEditor.setValue(f.toFile(), "服务列表/0/启用", true, false, "GBK");
-        YamlInPlaceEditor.setValue(f.toFile(), "服务列表/1/端口", 9090, 9091, "GBK");
-        YamlInPlaceEditor.setValue(f.toFile(), "元数据/版本", 1.0, "2.0", "GBK");
+        byte[] content = Files.readAllBytes(f);
+        content = YamlInPlaceEditor.setValue(content, "服务器/地址", "本地主机", "生产服务器", "GBK");
+        content = YamlInPlaceEditor.setValue(content, "服务器/端口", 8080, 9080, "GBK");
+        content = YamlInPlaceEditor.setValue(content, "数据库/密码", "秘密", "新密码", "GBK");
+        content = YamlInPlaceEditor.setValue(content, "数据库/设置/连接池大小", 10, 20, "GBK");
+        content = YamlInPlaceEditor.deleteKey(content, "数据库/设置/废弃选项", "删除我", "GBK");
+        content = YamlInPlaceEditor.setValue(content, "服务列表/0/启用", true, false, "GBK");
+        content = YamlInPlaceEditor.setValue(content, "服务列表/1/端口", 9090, 9091, "GBK");
+        content = YamlInPlaceEditor.setValue(content, "元数据/版本", 1.0, "2.0", "GBK");
+        Files.write(f, content);
 
         String expected = "" +
                 "# 配置文件\r\n" +
@@ -229,11 +235,12 @@ class YamlInPlaceEditorTest {
         assertEquals(expected, after);
 
         // Search validations (GBK)
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "服务器/地址", "生产服务器", "GBK"));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "数据库/密码", "新密码", "GBK"));
-        assertFalse(YamlInPlaceEditor.search(f.toFile(), "数据库/设置/废弃选项", null, "GBK")); // key removed
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "服务列表/0/启用", false, "GBK"));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "元数据/版本", "2.0", "GBK"));
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(YamlInPlaceEditor.search(finalContent, "服务器/地址", "生产服务器", "GBK"));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "数据库/密码", "新密码", "GBK"));
+        assertFalse(YamlInPlaceEditor.search(finalContent, "数据库/设置/废弃选项", null, "GBK")); // key removed
+        assertTrue(YamlInPlaceEditor.search(finalContent, "服务列表/0/启用", false, "GBK"));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "元数据/版本", "2.0", "GBK"));
     }
 
     /* ---------------------------------------------------------------------
@@ -282,20 +289,22 @@ class YamlInPlaceEditorTest {
         Files.write(f, original.getBytes(StandardCharsets.UTF_8));
 
         // Test various value types and operations
-        YamlInPlaceEditor.setValue(f.toFile(), "config/name", "Application Name", "New App Name");
-        YamlInPlaceEditor.setValue(f.toFile(), "config/port", 8080, 9090);
-        YamlInPlaceEditor.setValue(f.toFile(), "config/timeout", 30.5, 45.0);
-        YamlInPlaceEditor.setValue(f.toFile(), "config/enabled", true, false);
-        YamlInPlaceEditor.setValue(f.toFile(), "config/ssl_enabled", "yes", false);
-        YamlInPlaceEditor.setValue(f.toFile(), "config/cache_dir", null, "/tmp/cache");
+        byte[] content = Files.readAllBytes(f);
+        content = YamlInPlaceEditor.setValue(content, "config/name", "Application Name", "New App Name");
+        content = YamlInPlaceEditor.setValue(content, "config/port", 8080, 9090);
+        content = YamlInPlaceEditor.setValue(content, "config/timeout", 30.5, 45.0);
+        content = YamlInPlaceEditor.setValue(content, "config/enabled", true, false);
+        content = YamlInPlaceEditor.setValue(content, "config/ssl_enabled", "yes", false);
+        content = YamlInPlaceEditor.setValue(content, "config/cache_dir", null, "/tmp/cache");
         
         // Key deletions (removes entire line)
-        YamlInPlaceEditor.deleteKey(f.toFile(), "config/deprecated_option", "remove this");
-        YamlInPlaceEditor.deleteKey(f.toFile(), "config/old_setting", 123);
-        YamlInPlaceEditor.deleteKey(f.toFile(), "config/unused_flag");
+        content = YamlInPlaceEditor.deleteKey(content, "config/deprecated_option", "remove this");
+        content = YamlInPlaceEditor.deleteKey(content, "config/old_setting", 123);
+        content = YamlInPlaceEditor.deleteKey(content, "config/unused_flag");
 
         // Test inline structures
-        YamlInPlaceEditor.setValue(f.toFile(), "inline_object/key2", 42, 100);
+        content = YamlInPlaceEditor.setValue(content, "inline_object/key2", 42, 100);
+        Files.write(f, content);
 
         String expected = "" +
                 "# Configuration with various scalar types\r\n" +
@@ -333,15 +342,16 @@ class YamlInPlaceEditorTest {
         assertEquals(expected, after);
 
         // Search validations
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "config/name", "New App Name"));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "config/port", 9090));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "config/timeout", 45.0));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "config/enabled", false));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "config/cache_dir", "/tmp/cache"));
-        assertFalse(YamlInPlaceEditor.search(f.toFile(), "config/deprecated_option"));
-        assertFalse(YamlInPlaceEditor.search(f.toFile(), "config/old_setting"));
-        assertFalse(YamlInPlaceEditor.search(f.toFile(), "config/unused_flag"));
-        assertTrue(YamlInPlaceEditor.search(f.toFile(), "inline_object/key2", 100));
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(YamlInPlaceEditor.search(finalContent, "config/name", "New App Name"));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "config/port", 9090));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "config/timeout", 45.0));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "config/enabled", false));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "config/cache_dir", "/tmp/cache"));
+        assertFalse(YamlInPlaceEditor.search(finalContent, "config/deprecated_option"));
+        assertFalse(YamlInPlaceEditor.search(finalContent, "config/old_setting"));
+        assertFalse(YamlInPlaceEditor.search(finalContent, "config/unused_flag"));
+        assertTrue(YamlInPlaceEditor.search(finalContent, "inline_object/key2", 100));
     }
 
     /* ---------------------------------------------------------------------
@@ -363,7 +373,9 @@ class YamlInPlaceEditorTest {
             out.write(yamlContent.getBytes(StandardCharsets.UTF_8));
         }
 
-        YamlInPlaceEditor.setValue(utf8File.toFile(), "app/name", "test", "updated");
+        byte[] utf8Content = Files.readAllBytes(utf8File);
+        utf8Content = YamlInPlaceEditor.setValue(utf8Content, "app/name", "test", "updated");
+        Files.write(utf8File, utf8Content);
         byte[] result = Files.readAllBytes(utf8File);
         assertTrue(startsWith(result, new byte[]{(byte)0xEF, (byte)0xBB, (byte)0xBF}));
         String content = new String(result, 3, result.length - 3, StandardCharsets.UTF_8);
@@ -376,7 +388,9 @@ class YamlInPlaceEditorTest {
             out.write(yamlContent.getBytes(StandardCharsets.UTF_16BE));
         }
 
-        YamlInPlaceEditor.setValue(utf16beFile.toFile(), "app/version", 1.0, 2.0);
+        byte[] utf16beContent = Files.readAllBytes(utf16beFile);
+        utf16beContent = YamlInPlaceEditor.setValue(utf16beContent, "app/version", 1.0, 2.0);
+        Files.write(utf16beFile, utf16beContent);
         result = Files.readAllBytes(utf16beFile);
         assertTrue(startsWith(result, new byte[]{(byte)0xFE, (byte)0xFF}));
         content = new String(result, 2, result.length - 2, StandardCharsets.UTF_16BE);
@@ -389,7 +403,9 @@ class YamlInPlaceEditorTest {
             out.write(yamlContent.getBytes(StandardCharsets.UTF_16LE));
         }
 
-        YamlInPlaceEditor.setValue(utf16leFile.toFile(), "app/enabled", true, false);
+        byte[] utf16leContent = Files.readAllBytes(utf16leFile);
+        utf16leContent = YamlInPlaceEditor.setValue(utf16leContent, "app/enabled", true, false);
+        Files.write(utf16leFile, utf16leContent);
         result = Files.readAllBytes(utf16leFile);
         assertTrue(startsWith(result, new byte[]{(byte)0xFF, (byte)0xFE}));
         content = new String(result, 2, result.length - 2, StandardCharsets.UTF_16LE);
@@ -423,15 +439,15 @@ class YamlInPlaceEditorTest {
 
         var exec = Executors.newFixedThreadPool(3);
         exec.execute(() -> { try {
-            byte[] out = YamlInPlaceEditor.setValue(new ByteArrayInputStream(bytes), "a", 1, "updated_a", null);
+            byte[] out = YamlInPlaceEditor.setValue(bytes, "a", 1, "updated_a", null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
         exec.execute(() -> { try {
-            byte[] out = YamlInPlaceEditor.setValue(new ByteArrayInputStream(bytes), "b", 2, "updated_b", null);
+            byte[] out = YamlInPlaceEditor.setValue(bytes, "b", 2, "updated_b", null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
         exec.execute(() -> { try {
-            byte[] out = YamlInPlaceEditor.deleteKey(new ByteArrayInputStream(bytes), "nested/x", 10, null);
+            byte[] out = YamlInPlaceEditor.deleteKey(bytes, "nested/x", 10, null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
 
@@ -487,27 +503,30 @@ class YamlInPlaceEditorTest {
         Path emptyFile = tmp.resolve("empty.yaml");
         Files.write(emptyFile, new byte[0]);
         
+        byte[] emptyBytes = Files.readAllBytes(emptyFile);
         assertThrows(IllegalArgumentException.class, () -> 
-            YamlInPlaceEditor.setValue(emptyFile.toFile(), "nonexistent", "value"));
+            YamlInPlaceEditor.setValue(emptyBytes, "nonexistent", "value"));
         
         // Test file with only comments
         Path commentFile = tmp.resolve("comments.yaml");
         Files.write(commentFile, "# Only comments\n# No actual YAML content\n".getBytes());
         
+        byte[] commentBytes = Files.readAllBytes(commentFile);
         assertThrows(IllegalArgumentException.class, () -> 
-            YamlInPlaceEditor.setValue(commentFile.toFile(), "key", "value"));
+            YamlInPlaceEditor.setValue(commentBytes, "key", "value"));
         
         // Test missing path
         Path normalFile = tmp.resolve("normal.yaml");
         Files.write(normalFile, "existing: value\n".getBytes());
         
+        byte[] normalBytes = Files.readAllBytes(normalFile);
         assertThrows(IllegalArgumentException.class, () -> 
-            YamlInPlaceEditor.setValue(normalFile.toFile(), "missing/path", "value"));
+            YamlInPlaceEditor.setValue(normalBytes, "missing/path", "value"));
         
         // Test conditional replacement with wrong expected value
-        byte[] original = "key: original\n".getBytes();
+        byte[] original = "key: original\n".getBytes(StandardCharsets.UTF_8);
         byte[] unchanged = YamlInPlaceEditor.setValue(original, "key", "wrong_expected", "new_value");
-        assertEquals(new String(original), new String(unchanged));
+        assertEquals(new String(original, StandardCharsets.UTF_8), new String(unchanged, StandardCharsets.UTF_8));
         
         // Test search on non-existent path
         assertFalse(YamlInPlaceEditor.search(original, "nonexistent"));

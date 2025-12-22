@@ -101,8 +101,8 @@ public final class FileMasker {
     private static byte[] maskIni(InputStream in, List<String> paths) throws IOException {
         byte[] data = in.readAllBytes();
         for (String p : paths) {
-            data = IniInPlaceEditor.setValue(new ByteArrayInputStream(data), p,
-                    MASK, null, null, null, null);
+            data = IniInPlaceEditor.setValue(data, p,
+                    null, MASK, null, null, null);
         }
         return data;
     }
@@ -110,7 +110,7 @@ public final class FileMasker {
     private static byte[] maskYaml(InputStream in, List<String> paths) throws IOException {
         byte[] data = in.readAllBytes();
         for (String p : paths) {
-            data = YamlInPlaceEditor.setValue(new ByteArrayInputStream(data), p, MASK);
+            data = YamlInPlaceEditor.setValue(data, p, MASK);
         }
         return data;
     }

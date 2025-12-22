@@ -4,7 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -48,13 +49,15 @@ class TextInPlaceEditorCombinedTest {
         }
 
         // 1) Replace literal (user)
-        TextInPlaceEditor.replace(file.toFile(), "user: alice", "user: bob", false);
+        byte[] content = Files.readAllBytes(file);
+        content = TextInPlaceEditor.replace(content, "user: alice", "user: bob", false);
         // 2) Replace regex (port)
-        TextInPlaceEditor.replace(file.toFile(), "port\\s*=\\s*\\d+", "port = 9090", true);
+        content = TextInPlaceEditor.replace(content, "port\\s*=\\s*\\d+", "port = 9090", true);
         // 3) Remove line literal (enable)
-        TextInPlaceEditor.removeLine(file.toFile(), "enable = true", false);
+        content = TextInPlaceEditor.removeLine(content, "enable = true", false);
         // 4) Remove line via regex (password)
-        TextInPlaceEditor.removeLine(file.toFile(), "password\\s*:\\s*\\w+", true);
+        content = TextInPlaceEditor.removeLine(content, "password\\s*:\\s*\\w+", true);
+        Files.write(file, content);
 
         // Build expected content
         String expected =
@@ -89,13 +92,15 @@ class TextInPlaceEditorCombinedTest {
         Files.write(file, original.getBytes(gbk));
 
         // 1) Replace literal (user)
-        TextInPlaceEditor.replaceWithEncoding(file.toFile(), "GBK", "张三", "李四", false);
+        byte[] content = Files.readAllBytes(file);
+        content = TextInPlaceEditor.replace(content, "GBK", "张三", "李四", false);
         // 2) Replace regex (port)
-        TextInPlaceEditor.replaceWithEncoding(file.toFile(), "GBK", "端口\\s*=\\s*\\d+", "端口 = 9090", true);
+        content = TextInPlaceEditor.replace(content, "GBK", "端口\\s*=\\s*\\d+", "端口 = 9090", true);
         // 3) Remove line literal (缓存)
-        TextInPlaceEditor.removeLineWithEncoding(file.toFile(), "GBK", "缓存 = 启用", false);
+        content = TextInPlaceEditor.removeLine(content, "GBK", "缓存 = 启用", false);
         // 4) Remove line via regex (密码)
-        TextInPlaceEditor.removeLineWithEncoding(file.toFile(), "GBK", "密码\\s*:\\s*.*", true);
+        content = TextInPlaceEditor.removeLine(content, "GBK", "密码\\s*:\\s*.*", true);
+        Files.write(file, content);
 
         String expected =
                 "# 应用配置\r\n" +
@@ -127,21 +132,21 @@ class TextInPlaceEditorCombinedTest {
 
         tasks.add(() -> {
             try {
-                byte[] out = TextInPlaceEditor.replace(bytes, "alpha=1", "alpha=A", false, "UTF-8");
+                byte[] out = TextInPlaceEditor.replace(bytes, "UTF-8", "alpha=1", "alpha=A", false);
                 synchronized (results) { results.add(new String(out, StandardCharsets.UTF_8)); }
             } catch (IOException ignored) {}
             latch.countDown();
         });
         tasks.add(() -> {
             try {
-                byte[] out = TextInPlaceEditor.replace(bytes, "beta=2", "beta=B", false, "UTF-8");
+                byte[] out = TextInPlaceEditor.replace(bytes, "UTF-8", "beta=2", "beta=B", false);
                 synchronized (results) { results.add(new String(out, StandardCharsets.UTF_8)); }
             } catch (IOException ignored) {}
             latch.countDown();
         });
         tasks.add(() -> {
             try {
-                byte[] out = TextInPlaceEditor.removeLine(bytes, "gamma=3", false, "UTF-8");
+                byte[] out = TextInPlaceEditor.removeLine(bytes, "UTF-8", "gamma=3", false);
                 synchronized (results) { results.add(new String(out, StandardCharsets.UTF_8)); }
             } catch (IOException ignored) {}
             latch.countDown();

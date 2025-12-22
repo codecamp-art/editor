@@ -1,9 +1,8 @@
 package org.example;
 
-import java.io.*;
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -17,130 +16,72 @@ public final class TextInPlaceEditor {
     // --- Public API ---
 
     /**
-     * Replace the first occurrence of a pattern (regex or literal) in a file, in-place.
+     * Replace the first occurrence of a pattern (regex or literal) in byte array.
      * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param file Text file to edit
-     * @param pattern Regex or literal pattern to match
-     * @param replacement Replacement string
-     * @param isRegex If true, pattern is regex; if false, literal
-     * @throws IOException on I/O error
-     */
-    public static void replace(File file, String pattern, String replacement, boolean isRegex) throws IOException {
-        Objects.requireNonNull(file, "file");
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo info = FileInfo.detect(original);
-        Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        byte[] modified = replaceInternal(original, info, compiled, replacement, true);
-        Files.write(file.toPath(), modified);
-    }
-
-    /**
-     * Replace the first occurrence of a pattern (regex or literal) in an InputStream. Returns the modified bytes.
-     * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param in InputStream containing text data
+     * @param bytes Text content as bytes
      * @param pattern Regex or literal pattern to match
      * @param replacement Replacement string
      * @param isRegex If true, pattern is regex; if false, literal
      * @return Modified content as bytes
      * @throws IOException on I/O error
      */
-    public static byte[] replace(InputStream in, String pattern, String replacement, boolean isRegex) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo info = FileInfo.detect(original);
+    public static byte[] replace(byte[] bytes, String pattern, String replacement, boolean isRegex) throws IOException {
+        Objects.requireNonNull(bytes, "bytes");
+        FileInfo info = FileInfo.detect(bytes);
         Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        return replaceInternal(original, info, compiled, replacement, true);
+        return replaceInternal(bytes, info, compiled, replacement, true);
     }
 
     /**
-     * Replace the first occurrence of a pattern (regex or literal) in an InputStream. Returns the modified bytes.
+     * Replace the first occurrence of a pattern (regex or literal) in byte array, with explicit encoding.
      * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param pattern Regex or literal pattern to match
-     * @param replacement Replacement string
-     * @param isRegex If true, pattern is regex; if false, literal
-     * @return Modified content as bytes
-     * @throws IOException on I/O error
-     */
-    public static byte[] replace(byte[] data, String pattern, String replacement, boolean isRegex, String encoding) throws IOException {
-        FileInfo info = FileInfo.detect(data);
-        if (isValidEncoding(encoding)) {
-            info = new FileInfo(Charset.forName(encoding), info.eol, info.originalEols, info.lastLineNoEol, info.bom, info.offset);
-        }
-        Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        return replaceInternal(data, info, compiled, replacement, true);
-    }
-
-    /**
-     * Replace the first occurrence of a pattern (regex or literal) in a file, with explicit encoding.
-     * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param file Text file to edit
+     * @param bytes Text content as bytes
      * @param encoding Character encoding (e.g. "GBK")
      * @param pattern Regex or literal pattern to match
      * @param replacement Replacement string
      * @param isRegex If true, pattern is regex; if false, literal
+     * @return Modified content as bytes
      * @throws IOException on I/O error
      */
-    public static void replaceWithEncoding(File file, String encoding, String pattern, String replacement, boolean isRegex) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo base = FileInfo.detect(original);
+    public static byte[] replace(byte[] bytes, String encoding, String pattern, String replacement, boolean isRegex) throws IOException {
+        FileInfo base = FileInfo.detect(bytes);
         Charset cs = Charset.forName(encoding);
         FileInfo overridden = new FileInfo(cs, base.eol, base.originalEols, base.lastLineNoEol, base.bom, base.offset);
         Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        byte[] modified = replaceInternal(original, overridden, compiled, replacement, true);
-        Files.write(file.toPath(), modified);
+        return replaceInternal(bytes, overridden, compiled, replacement, true);
     }
 
     /**
-     * Remove (delete) the first line that matches the given pattern in a file, in-place.
+     * Remove (delete) the first line that matches the given pattern in byte array.
      * <p>Preserves all formatting, EOLs, encoding, and BOM. Thread-safe and stateless.
-     * @param file Text file to edit
+     * @param bytes Text content as bytes
      * @param pattern Regex or literal pattern to match
      * @param isRegex If true, pattern is regex; if false, literal
+     * @return Modified content as bytes
      * @throws IOException on I/O error
      */
-    public static void removeLine(File file, String pattern, boolean isRegex) throws IOException {
-        Objects.requireNonNull(file, "file");
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo info = FileInfo.detect(original);
+    public static byte[] removeLine(byte[] bytes, String pattern, boolean isRegex) throws IOException {
+        Objects.requireNonNull(bytes, "bytes");
+        FileInfo info = FileInfo.detect(bytes);
         Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        byte[] modified = removeLineInternal(original, info, compiled);
-        Files.write(file.toPath(), modified);
+        return removeLineInternal(bytes, info, compiled);
     }
 
     /**
-     * Remove (delete) the first line that matches the given pattern in an InputStream. Returns the modified bytes.
-     * <p>Preserves all formatting, EOLs, encoding, and BOM.</p>
+     * Remove (delete) the first line that matches the given pattern in byte array, with explicit encoding.
+     * @param bytes Text content as bytes
+     * @param encoding Character encoding (e.g. "GBK")
+     * @param pattern Regex or literal pattern to match
+     * @param isRegex If true, pattern is regex; if false, literal
+     * @return Modified content as bytes
+     * @throws IOException on I/O error
      */
-    public static byte[] removeLine(InputStream in, String pattern, boolean isRegex) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo info = FileInfo.detect(original);
-        Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        return removeLineInternal(original, info, compiled);
-    }
-
-    /**
-     * Remove (delete) the first line that matches the given pattern in an InputStream. Returns the modified bytes.
-     * <p>Preserves all formatting, EOLs, encoding, and BOM.</p>
-     */
-    public static byte[] removeLine(byte[] data, String pattern, boolean isRegex, String encoding) throws IOException {
-        FileInfo info = FileInfo.detect(data);
-        if (isValidEncoding(encoding)) {
-            info = new FileInfo(Charset.forName(encoding), info.eol, info.originalEols, info.lastLineNoEol, info.bom, info.offset);
-        }
-        Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        return removeLineInternal(data, info, compiled);
-    }
-
-    /**
-     * Remove (delete) the first line that matches the given pattern in a file with explicit encoding.
-     */
-    public static void removeLineWithEncoding(File file, String encoding, String pattern, boolean isRegex) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        FileInfo base = FileInfo.detect(original);
+    public static byte[] removeLine(byte[] bytes, String encoding, String pattern, boolean isRegex) throws IOException {
+        FileInfo base = FileInfo.detect(bytes);
         Charset cs = Charset.forName(encoding);
         FileInfo overridden = new FileInfo(cs, base.eol, base.originalEols, base.lastLineNoEol, base.bom, base.offset);
         Pattern compiled = isRegex ? Pattern.compile(pattern) : Pattern.compile(Pattern.quote(pattern));
-        byte[] modified = removeLineInternal(original, overridden, compiled);
-        Files.write(file.toPath(), modified);
+        return removeLineInternal(bytes, overridden, compiled);
     }
 
     // --- Internals ---

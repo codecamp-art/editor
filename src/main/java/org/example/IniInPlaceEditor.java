@@ -1,9 +1,8 @@
 package org.example;
 
-import java.io.*;
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,119 +45,7 @@ public final class IniInPlaceEditor {
      * Public high-level API (slash-path based)
      * ===================================================== */
 
-    /*
-     * Centralised worker that every public overload eventually calls. Having a single place greatly improves
-     * maintainability and eliminates the earlier copy-pasted code paths for GBK vs UTF-8 vs BOM cases.
-     */
-    private static void doEdit(File file,
-                               String encodingHint,       // null / "" ⇒ auto/BOM detect
-                               String iniPath,
-                               String expectedOldValue,
-                               String newValue, // null ⇒ unconditional
-                               Op op,
-                               List<String> linePrefixes,
-                               List<String[]> blockPrefixes) throws IOException {
 
-        byte[] original = Files.readAllBytes(file.toPath());
-
-        // Determine effective FileInfo respecting optional override charset.
-        FileInfo base = FileInfo.detect(original);
-        FileInfo eff;
-        if (encodingHint == null || encodingHint.isEmpty()) {
-            eff = base;
-        } else {
-            Charset cs = Charset.forName(encodingHint);
-            eff = new FileInfo(cs, base.eol(), base.originalEols(), base.lastLineNoEol(), base.bom(), base.offset());
-        }
-
-        byte[] modified = editIniInternal(original, eff, iniPath, expectedOldValue, newValue,
-                linePrefixes, blockPrefixes, op);
-
-        Files.write(file.toPath(), modified);
-    }
-
-    /*
-     * Centralised worker that every public overload eventually calls. Having a single place greatly improves
-     * maintainability and eliminates the earlier copy-pasted code paths for GBK vs UTF-8 vs BOM cases.
-     */
-    private static boolean doSearch(File file,
-                               String encodingHint,       // null / "" ⇒ auto/BOM detect
-                               String iniPath,
-                               String expectedOldValue,   // null ⇒ unconditional
-                               List<String> linePrefixes,
-                               List<String[]> blockPrefixes) throws IOException {
-
-        byte[] original = Files.readAllBytes(file.toPath());
-
-        // Determine effective FileInfo respecting optional override charset.
-        FileInfo base = FileInfo.detect(original);
-        FileInfo eff;
-        if (encodingHint == null || encodingHint.isEmpty()) {
-            eff = base;
-        } else {
-            Charset cs = Charset.forName(encodingHint);
-            eff = new FileInfo(cs, base.eol(), base.originalEols(), base.lastLineNoEol(), base.bom(), base.offset());
-        }
-
-        return searchIniInternal(original, eff, iniPath, expectedOldValue, linePrefixes, blockPrefixes);
-    }
-
-    /* ------------------------------------------------------------------
-     * Thin public facades – keep old signatures for compatibility
-     * ------------------------------------------------------------------ */
-
-    public static void editIni(File file, String iniPath, String newValue) throws IOException {
-        doEdit(file, null, iniPath, newValue, null, Op.REPLACE, null, null);
-    }
-
-    /** Explicit-encoding variant kept for compatibility (e.g. GBK). */
-    public static void editIniWithEncoding(File file, String encoding, String iniPath, String newValue) throws IOException {
-        doEdit(file, encoding, iniPath, newValue, null, Op.REPLACE, null, null);
-    }
-
-    /* Advanced comment overload retained – delegates to the core */
-    public static void editIni(File file, String section, String key, String newValue,
-                               List<String> lineCommentPrefixes, List<String[]> blockCommentDelimiters) throws IOException {
-        String path = (section == null || section.isEmpty()) ? key : section + "/" + key;
-        doEdit(file, null, path, newValue, null, Op.REPLACE, lineCommentPrefixes, blockCommentDelimiters);
-    }
-
-    /* =================================================================
-       Guarded / removal operations now delegate to core as well
-       ================================================================= */
-
-    public static void replaceIfMatches(File file, String iniPath, String expectedOld, String newValue) throws IOException {
-        doEdit(file, null, iniPath, newValue, expectedOld, Op.REPLACE, null, null);
-    }
-
-    public static void replaceIfMatchesWithEncoding(File file, String encoding, String iniPath,
-                                                     String expectedOldValue, String newValue) throws IOException {
-        doEdit(file, encoding, iniPath, newValue, expectedOldValue, Op.REPLACE, null, null);
-    }
-
-    public static void removeValue(File file, String iniPath) throws IOException {
-        doEdit(file, null, iniPath, "", null, Op.BLANK_VALUE, null, null);
-    }
-
-    public static void removeValueIfMatches(File file, String iniPath, String expectedOld) throws IOException {
-        doEdit(file, null, iniPath, "", expectedOld, Op.BLANK_VALUE, null, null);
-    }
-
-    public static void removeLine(File file, String iniPath) throws IOException {
-        doEdit(file, null, iniPath, null, null, Op.DELETE_LINE, null, null);
-    }
-
-    public static void removeLineIfMatches(File file, String iniPath, String expectedOld) throws IOException {
-        doEdit(file, null, iniPath, null, expectedOld, Op.DELETE_LINE, null, null);
-    }
-
-    /* ------------------------------------------------------------------
-     * Universal helper already added previously – keep but delegate
-     * ------------------------------------------------------------------ */
-    public static void replaceIfMatches(File file, String iniPath, String expectedOldValue,
-                                        String newValue, String encodingHint) throws IOException {
-        doEdit(file, encodingHint, iniPath, newValue, expectedOldValue, Op.REPLACE, null, null);
-    }
 
     /* =====================================================
      * Internals
@@ -172,7 +59,7 @@ public final class IniInPlaceEditor {
                                           String newValue,
                                           List<String> lineCommentPrefixes,
                                           List<String[]> blockCommentDelimiters,
-                                          Op op) throws IOException {
+                                          Op op) {
 
         if (op == null) op = Op.REPLACE; // backward-compatibility
 
@@ -556,26 +443,6 @@ public final class IniInPlaceEditor {
     
     private record EolInfo(String eol, List<String> originalEols, boolean lastLineNoEol) {}
 
-    /**
-     * Back-compat overload using default comment prefixes (';') and no block comments.
-     */
-    public static void editIni(File file, String section, String key, String newValue) throws IOException {
-        editIni(file, section, key, newValue, List.of(";"), null);
-    }
-
-    /**
-     * Back-compat overload for GBK with advanced comment settings.
-     */
-    public static void editIniWithEncoding(File file,
-                                           String section,
-                                           String key,
-                                           String newValue,
-                                           String encoding,
-                                           List<String> lineCommentPrefixes,
-                                           List<String[]> blockCommentDelimiters) throws IOException {
-        String path = (section == null || section.isEmpty()) ? key : section + "/" + key;
-        doEdit(file, encoding, path, null, newValue, Op.REPLACE, lineCommentPrefixes, blockCommentDelimiters);
-    }
 
     /*
      * Public helpers ––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -618,119 +485,83 @@ public final class IniInPlaceEditor {
     }
 
     /* =================================================================
-       Unified public API – prefer these going forward
+       Unified public API – byte array only
        ================================================================= */
 
     /**
      * Unified value editor. If {@code newValue} is empty the value is cleared but the key remains.
      * Set {@code expectedOld} for optimistic concurrency; set {@code encodingHint} (e.g. "GBK") to override charset.
      */
-    public static void setValue(File file,
+    public static byte[] setValue(byte[] bytes,
                                 String iniPath,
                                 String expectedOld,
                                 String newValue,
                                 String encodingHint,
                                 List<String> linePrefixes,
                                 List<String[]> blockPrefixes) throws IOException {
-        doEdit(file, encodingHint, iniPath, expectedOld, newValue == null ? "" : newValue,
-                Op.REPLACE, linePrefixes, blockPrefixes);
+        FileInfo base = FileInfo.detect(bytes);
+        FileInfo eff;
+        if (encodingHint == null || encodingHint.isEmpty()) {
+            eff = base;
+        } else {
+            eff = new FileInfo(Charset.forName(encodingHint), base.eol(), base.originalEols(),
+                    base.lastLineNoEol(), base.bom(), base.offset());
+        }
+        return editIniInternal(bytes, eff, iniPath, expectedOld, newValue == null ? "" : newValue,
+                linePrefixes, blockPrefixes, Op.REPLACE);
     }
 
     // Convenience overloads
-    public static void setValue(File file, String iniPath, String newValue) throws IOException {
-        setValue(file, iniPath, null, newValue, null, null, null);
+    public static byte[] setValue(byte[] bytes, String iniPath, String newValue) throws IOException {
+        return setValue(bytes, iniPath, null, newValue, null, null, null);
     }
 
     /**
      * Search function.
      * Set {@code expectedOld} for optimistic concurrency; set {@code encodingHint} (e.g. "GBK") to override charset.
      */
-    public static boolean search(File file,
+    public static boolean search(byte[] bytes,
                                 String iniPath,
                                 String value,
                                 String encodingHint,
                                 List<String> linePrefixes,
                                 List<String[]> blockPrefixes) throws IOException {
-        return doSearch(file, encodingHint, iniPath, value, linePrefixes, blockPrefixes);
+        FileInfo base = FileInfo.detect(bytes);
+        FileInfo eff;
+        if (encodingHint == null || encodingHint.isEmpty()) {
+            eff = base;
+        } else {
+            eff = new FileInfo(Charset.forName(encodingHint), base.eol(), base.originalEols(),
+                    base.lastLineNoEol(), base.bom(), base.offset());
+        }
+        return searchIniInternal(bytes, eff, iniPath, value, linePrefixes, blockPrefixes);
     }
 
     // Convenience overloads
-    public static boolean search(File file, String iniPath) throws IOException {
-        return search(file, iniPath, null, null, null, null);
+    public static boolean search(byte[] bytes, String iniPath) throws IOException {
+        return search(bytes, iniPath, null, null, null, null);
     }
 
-    public static boolean search(File file, String iniPath, String value) throws IOException {
-        return search(file, iniPath, value, null, null, null);
+    public static boolean search(byte[] bytes, String iniPath, String value) throws IOException {
+        return search(bytes, iniPath, value, null, null, null);
     }
 
     /** Delete entire key-value line */
-    public static void deleteKey(File file,
+    public static byte[] deleteKey(byte[] bytes,
                                  String iniPath,
                                  String expectedOld,
                                  String encodingHint,
                                  List<String> linePrefixes,
                                  List<String[]> blockPrefixes) throws IOException {
-        doEdit(file, encodingHint, iniPath, null, expectedOld, Op.DELETE_LINE, linePrefixes, blockPrefixes);
-    }
-
-    public static void deleteKey(File file, String iniPath) throws IOException {
-        deleteKey(file, iniPath, null, null, null, null);
-    }
-
-    /* =====================================================
-       InputStream-based variants (no direct file write)   
-       ===================================================== */
-
-    public static byte[] setValue(InputStream in,
-                                  String iniPath,
-                                  String expectedOld,
-                                  String newValue,
-                                  String encodingHint,
-                                  List<String> linePrefixes,
-                                  List<String[]> blockPrefixes) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo base = FileInfo.detect(original);
-        FileInfo eff;
-        if (encodingHint == null || encodingHint.isEmpty()) {
-            eff = base;
-        } else {
-            eff = new FileInfo(Charset.forName(encodingHint), base.eol(), base.originalEols(),
-                    base.lastLineNoEol(), base.bom(), base.offset());
-        }
-        return editIniInternal(original, eff, iniPath, expectedOld, newValue == null ? "" : newValue,
-                linePrefixes, blockPrefixes, Op.REPLACE);
-    }
-
-    public static boolean search(InputStream in,
-                                  String iniPath,
-                                  String value,
-                                  String encodingHint,
-                                  List<String> linePrefixes,
-                                  List<String[]> blockPrefixes) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo base = FileInfo.detect(original);
-        FileInfo eff;
-        if (encodingHint == null || encodingHint.isEmpty()) {
-            eff = base;
-        } else {
-            eff = new FileInfo(Charset.forName(encodingHint), base.eol(), base.originalEols(),
-                    base.lastLineNoEol(), base.bom(), base.offset());
-        }
-        return searchIniInternal(original, eff, iniPath, value, linePrefixes, blockPrefixes);
-    }
-
-    public static byte[] deleteKey(InputStream in,
-                                   String iniPath,
-                                   String expectedOld,
-                                   String encodingHint,
-                                   List<String> linePrefixes,
-                                   List<String[]> blockPrefixes) throws IOException {
-        byte[] original = in.readAllBytes();
-        FileInfo base = FileInfo.detect(original);
+        FileInfo base = FileInfo.detect(bytes);
         FileInfo eff = (encodingHint == null || encodingHint.isEmpty()) ? base :
                 new FileInfo(Charset.forName(encodingHint), base.eol(), base.originalEols(),
                         base.lastLineNoEol(), base.bom(), base.offset());
-        return editIniInternal(original, eff, iniPath, null, expectedOld,
+        return editIniInternal(bytes, eff, iniPath, null, expectedOld,
                 linePrefixes, blockPrefixes, Op.DELETE_LINE);
+    }
+
+    public static byte[] deleteKey(byte[] bytes, String iniPath) throws IOException {
+        return deleteKey(bytes, iniPath, null, null, null, null);
     }
 } 

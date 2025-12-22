@@ -1,13 +1,9 @@
 package org.example;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 
@@ -20,61 +16,17 @@ public final class JsonInPlaceEditor {
     private JsonInPlaceEditor() {
     }
 
-    // ==================== File API ====================
+    // ==================== Byte Array API ====================
 
-    public static void setValue(File file, String jsonPath, Object newValue) throws IOException {
-        setValue(file, jsonPath, null, newValue, null);
+    public static byte[] setValue(byte[] bytes, String jsonPath, Object newValue) throws IOException {
+        return setValue(bytes, jsonPath, null, newValue, null);
     }
 
-    public static void setValue(File file, String jsonPath, Object expectedOld, Object newValue) throws IOException {
-        setValue(file, jsonPath, expectedOld, newValue, null);
+    public static byte[] setValue(byte[] bytes, String jsonPath, Object expectedOld, Object newValue) throws IOException {
+        return setValue(bytes, jsonPath, expectedOld, newValue, null);
     }
 
-    public static void setValue(File file, String jsonPath, Object expectedOld, Object newValue, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] modified = setValue(new ByteArrayInputStream(original), jsonPath, expectedOld, newValue, encodingHint);
-        Files.write(file.toPath(), modified);
-    }
-
-    public static void deleteKey(File file, String jsonPath) throws IOException {
-        deleteKey(file, jsonPath, null, null);
-    }
-
-    public static void deleteKey(File file, String jsonPath, Object expectedOld) throws IOException {
-        deleteKey(file, jsonPath, expectedOld, null);
-    }
-
-    public static void deleteKey(File file, String jsonPath, Object expectedOld, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] modified = deleteKey(new ByteArrayInputStream(original), jsonPath, expectedOld, encodingHint);
-        Files.write(file.toPath(), modified);
-    }
-
-    public static boolean search(File file, String jsonPath) throws IOException {
-        return search(file, jsonPath, null, null);
-    }
-
-    public static boolean search(File file, String jsonPath, Object value) throws IOException {
-        return search(file, jsonPath, value, null);
-    }
-
-    public static boolean search(File file, String jsonPath, Object value, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        return search(new ByteArrayInputStream(original), jsonPath, value, encodingHint);
-    }
-
-    // ==================== InputStream API ====================
-
-    public static byte[] setValue(InputStream in, String jsonPath, Object newValue) throws IOException {
-        return setValue(in, jsonPath, null, newValue, null);
-    }
-
-    public static byte[] setValue(InputStream in, String jsonPath, Object expectedOld, Object newValue) throws IOException {
-        return setValue(in, jsonPath, expectedOld, newValue, null);
-    }
-
-    public static byte[] setValue(InputStream in, String jsonPath, Object expectedOld, Object newValue, String encodingHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static byte[] setValue(byte[] bytes, String jsonPath, Object expectedOld, Object newValue, String encodingHint) throws IOException {
         EncodingInfo info = detectEncoding(bytes, encodingHint);
         String content = new String(bytes, info.bomLength, bytes.length - info.bomLength, info.charset);
 
@@ -103,16 +55,15 @@ public final class JsonInPlaceEditor {
         return encode(modified, info);
     }
 
-    public static byte[] deleteKey(InputStream in, String jsonPath) throws IOException {
-        return deleteKey(in, jsonPath, null, null);
+    public static byte[] deleteKey(byte[] bytes, String jsonPath) throws IOException {
+        return deleteKey(bytes, jsonPath, null, null);
     }
 
-    public static byte[] deleteKey(InputStream in, String jsonPath, Object expectedOld) throws IOException {
-        return deleteKey(in, jsonPath, expectedOld, null);
+    public static byte[] deleteKey(byte[] bytes, String jsonPath, Object expectedOld) throws IOException {
+        return deleteKey(bytes, jsonPath, expectedOld, null);
     }
 
-    public static byte[] deleteKey(InputStream in, String jsonPath, Object expectedOld, String encodingHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static byte[] deleteKey(byte[] bytes, String jsonPath, Object expectedOld, String encodingHint) throws IOException {
         EncodingInfo info = detectEncoding(bytes, encodingHint);
         String content = new String(bytes, info.bomLength, bytes.length - info.bomLength, info.charset);
 
@@ -193,16 +144,15 @@ public final class JsonInPlaceEditor {
         return encode(modified, info);
     }
 
-    public static boolean search(InputStream in, String jsonPath) throws IOException {
-        return search(in, jsonPath, null, null);
+    public static boolean search(byte[] bytes, String jsonPath) throws IOException {
+        return search(bytes, jsonPath, null, null);
     }
 
-    public static boolean search(InputStream in, String jsonPath, Object value) throws IOException {
-        return search(in, jsonPath, value, null);
+    public static boolean search(byte[] bytes, String jsonPath, Object value) throws IOException {
+        return search(bytes, jsonPath, value, null);
     }
 
-    public static boolean search(InputStream in, String jsonPath, Object value, String encodingHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static boolean search(byte[] bytes, String jsonPath, Object value, String encodingHint) throws IOException {
         EncodingInfo info = detectEncoding(bytes, encodingHint);
         String content = new String(bytes, info.bomLength, bytes.length - info.bomLength, info.charset);
 

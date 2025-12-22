@@ -4,7 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -38,11 +39,13 @@ class XmlInPlaceEditorTest {
             out.write(UTF8_BOM); out.write(xml.getBytes(StandardCharsets.UTF_8)); }
 
         // mutate
-        XmlInPlaceEditor.setValue(f.toFile(), "config/server/@host", null, "example.com");
-        XmlInPlaceEditor.setValue(f.toFile(), "config/server/@port", "8080", "9090");
-        XmlInPlaceEditor.setValue(f.toFile(), "config/server/timeout", "10", "11");
-        XmlInPlaceEditor.deleteTag(f.toFile(), "config/database", null);
-        XmlInPlaceEditor.deleteTag(f.toFile(), "config/url", null);
+        byte[] content = Files.readAllBytes(f);
+        content = XmlInPlaceEditor.setValue(content, "config/server/@host", null, "example.com");
+        content = XmlInPlaceEditor.setValue(content, "config/server/@port", "8080", "9090");
+        content = XmlInPlaceEditor.setValue(content, "config/server/timeout", "10", "11");
+        content = XmlInPlaceEditor.deleteTag(content, "config/database", null);
+        content = XmlInPlaceEditor.deleteTag(content, "config/url", null);
+        Files.write(f, content);
 
         String expected = "" +
                 "<!-- Global -->\r\n"+
@@ -58,8 +61,9 @@ class XmlInPlaceEditorTest {
         String result = new String(resultBytes, UTF8_BOM.length, resultBytes.length-UTF8_BOM.length, StandardCharsets.UTF_8);
         assertEquals(expected, result);
 
-        assertTrue(XmlInPlaceEditor.search(f.toFile(), "config/server/@host", "example.com"));
-        assertFalse(XmlInPlaceEditor.search(f.toFile(), "config/database"));
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(XmlInPlaceEditor.search(finalContent, "config/server/@host", "example.com"));
+        assertFalse(XmlInPlaceEditor.search(finalContent, "config/database"));
     }
 
     /* ------------------------------------------------------------------ */
@@ -83,10 +87,12 @@ class XmlInPlaceEditorTest {
         Path f = dir.resolve("配置.xml");
         Files.write(f, xml.getBytes(gbk));
 
-        XmlInPlaceEditor.setValue(f.toFile(), "配置/服务器/@地址", null, "远程", "GBK");
-        XmlInPlaceEditor.setValue(f.toFile(), "配置/服务器/@端口", "8080", "9090", "GBK");
-        XmlInPlaceEditor.setValue(f.toFile(), "配置/服务器/超时", "30", "60", "GBK");
-        XmlInPlaceEditor.deleteTag(f.toFile(), "配置/地址", null, "GBK");
+        byte[] content = Files.readAllBytes(f);
+        content = XmlInPlaceEditor.setValue(content, "配置/服务器/@地址", null, "远程", "GBK");
+        content = XmlInPlaceEditor.setValue(content, "配置/服务器/@端口", "8080", "9090", "GBK");
+        content = XmlInPlaceEditor.setValue(content, "配置/服务器/超时", "30", "60", "GBK");
+        content = XmlInPlaceEditor.deleteTag(content, "配置/地址", null, "GBK");
+        Files.write(f, content);
 
         String expected = ""+
                 "<!-- 配置文件 -->\r\n"+
@@ -99,7 +105,8 @@ class XmlInPlaceEditorTest {
                 "</配置>\n";
         String res = Files.readString(f, gbk);
         assertEquals(expected, res);
-        assertTrue(XmlInPlaceEditor.search(f.toFile(), "配置/服务器/@地址", "远程", "GBK"));
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(XmlInPlaceEditor.search(finalContent, "配置/服务器/@地址", "远程", "GBK"));
     }
 
     /* ------------------------------------------------------------------ */
@@ -109,12 +116,12 @@ class XmlInPlaceEditorTest {
         String xml = "<root><a x=\"1\">val</a><b>old</b></root>";
         byte[] bytes = xml.getBytes(StandardCharsets.UTF_8);
 
-        byte[] r1 = XmlInPlaceEditor.setValue(new ByteArrayInputStream(bytes), "root/a/@x", "1", "2", null);
-        byte[] r2 = XmlInPlaceEditor.setValue(new ByteArrayInputStream(r1), "root/b", "old", "new", null);
+        byte[] r1 = XmlInPlaceEditor.setValue(bytes, "root/a/@x", "1", "2", null);
+        byte[] r2 = XmlInPlaceEditor.setValue(r1, "root/b", "old", "new", null);
 
         String expected = "<root><a x=\"2\">val</a><b>new</b></root>";
         assertEquals(expected, new String(r2, StandardCharsets.UTF_8));
-        assertTrue(XmlInPlaceEditor.search(new ByteArrayInputStream(r2), "root/a/@x", "2", null));
+        assertTrue(XmlInPlaceEditor.search(r2, "root/a/@x", "2", null));
     }
 
     /* ------------------------------------------------------------------ */
@@ -124,9 +131,11 @@ class XmlInPlaceEditorTest {
         String xml = "<x><y z=\"1\">a</y><y z=\"2\">b</y></x>";
         Path f = dir.resolve("c.xml"); Files.writeString(f, xml);
 
-        XmlInPlaceEditor.setValue(f.toFile(), "x/y/@z", "1", "10");
-        XmlInPlaceEditor.setValue(f.toFile(), "x/y[2]", "b", "bb"); // second y tweak not supported index, expect unchanged
-        XmlInPlaceEditor.deleteTag(f.toFile(), "x/y", null); // deletes first y only (first match)
+        byte[] content = Files.readAllBytes(f);
+        content = XmlInPlaceEditor.setValue(content, "x/y/@z", "1", "10");
+        content = XmlInPlaceEditor.setValue(content, "x/y[2]", "b", "bb"); // second y tweak not supported index, expect unchanged
+        content = XmlInPlaceEditor.deleteTag(content, "x/y", null); // deletes first y only (first match)
+        Files.write(f, content);
 
         String res = Files.readString(f);
         assertEquals("<x><y z=\"2\">b</y></x>", res);
@@ -140,9 +149,11 @@ class XmlInPlaceEditorTest {
         Path f = dir.resolve("m.xml"); Files.writeString(f, xml);
 
         // delete multi-line item
-        XmlInPlaceEditor.deleteTag(f.toFile(), "root/item", null);
+        byte[] content = Files.readAllBytes(f);
+        content = XmlInPlaceEditor.deleteTag(content, "root/item", null);
         // delete single <a> that shares line with <b>
-        XmlInPlaceEditor.deleteTag(f.toFile(), "root/a", null);
+        content = XmlInPlaceEditor.deleteTag(content, "root/a", null);
+        Files.write(f, content);
 
         String expected = "<root>\n  <b></b>\n</root>";
         assertEquals(expected, Files.readString(f));

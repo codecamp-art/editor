@@ -4,7 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -47,17 +48,19 @@ class PropertiesInPlaceEditorCombinedTest {
             out.write(UTF8_BOM); out.write(original.getBytes(StandardCharsets.UTF_8)); }
 
         // 1. Replace by key only
-        PropertiesInPlaceEditor.setValue(f.toFile(), "username", null, "root", null);
+        byte[] content = Files.readAllBytes(f);
+        content = PropertiesInPlaceEditor.setValue(content, "username", null, "root", null);
         // 2. Replace with expected old value
-        PropertiesInPlaceEditor.setValue(f.toFile(), "timeout", "30", "60", null);
-        PropertiesInPlaceEditor.setValue(f.toFile(), "timeout2", "regex:.*", "60", null);
+        content = PropertiesInPlaceEditor.setValue(content, "timeout", "30", "60", null);
+        content = PropertiesInPlaceEditor.setValue(content, "timeout2", "regex:.*", "60", null);
         // 3. Clear (remove value) preserving key & line
-        PropertiesInPlaceEditor.setValue(f.toFile(), "cache", "enabled", null, null);
+        content = PropertiesInPlaceEditor.setValue(content, "cache", "enabled", null, null);
         // 4. Remove entire line
-        PropertiesInPlaceEditor.deleteKey(f.toFile(), "url", "https://example.com");
+        content = PropertiesInPlaceEditor.deleteKey(content, "url", "https://example.com");
         // 5. Replace a multi-line property value
-        PropertiesInPlaceEditor.setValue(f.toFile(), "desc", "Line1 Line2", "New1\nNew2", null);
-        PropertiesInPlaceEditor.setValue(f.toFile(), "desc2", "test1test2", "test3", null);
+        content = PropertiesInPlaceEditor.setValue(content, "desc", "Line1 Line2", "New1\nNew2", null);
+        content = PropertiesInPlaceEditor.setValue(content, "desc2", "test1test2", "test3", null);
+        Files.write(f, content);
 
         String expected =
                 "# Global comment\r\n" +
@@ -98,12 +101,14 @@ class PropertiesInPlaceEditorCombinedTest {
         Files.write(f, original.getBytes(gbk));
 
         // mutations
-        PropertiesInPlaceEditor.setValue(f.toFile(), "用户名", null, "李四", "GBK");
-        PropertiesInPlaceEditor.setValue(f.toFile(), "超时", "30", "60", "GBK");
-        PropertiesInPlaceEditor.setValue(f.toFile(), "缓存", "启用", null, "GBK");
-        PropertiesInPlaceEditor.deleteKey(f.toFile(), "GBK", "地址", "北京");
+        byte[] content = Files.readAllBytes(f);
+        content = PropertiesInPlaceEditor.setValue(content, "用户名", null, "李四", "GBK");
+        content = PropertiesInPlaceEditor.setValue(content, "超时", "30", "60", "GBK");
+        content = PropertiesInPlaceEditor.setValue(content, "缓存", "启用", null, "GBK");
+        content = PropertiesInPlaceEditor.deleteKey(content, "GBK", "地址", "北京");
         // 5. Replace multi-line property in GBK file
-        PropertiesInPlaceEditor.setValue(f.toFile(), "描述", null, "新1\n新2", "GBK");
+        content = PropertiesInPlaceEditor.setValue(content, "描述", null, "新1\n新2", "GBK");
+        Files.write(f, content);
 
         String expected =
                 "# 配置说明\r\n" +
@@ -134,11 +139,11 @@ class PropertiesInPlaceEditorCombinedTest {
         CountDownLatch latch = new CountDownLatch(3);
 
         var exec = Executors.newFixedThreadPool(3);
-        exec.execute(() -> { try { byte[] out = PropertiesInPlaceEditor.setValue(new ByteArrayInputStream(bytes), "a", null, "A", null);
+        exec.execute(() -> { try { byte[] out = PropertiesInPlaceEditor.setValue(bytes, "a", null, "A", null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}} catch(IOException ignored){} latch.countDown(); });
-        exec.execute(() -> { try { byte[] out = PropertiesInPlaceEditor.setValue(new ByteArrayInputStream(bytes), "b", "2", "B", null);
+        exec.execute(() -> { try { byte[] out = PropertiesInPlaceEditor.setValue(bytes, "b", "2", "B", null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}} catch(IOException ignored){} latch.countDown(); });
-        exec.execute(() -> { try { byte[] out = PropertiesInPlaceEditor.deleteKey(new ByteArrayInputStream(bytes), "c", "3");
+        exec.execute(() -> { try { byte[] out = PropertiesInPlaceEditor.deleteKey(bytes, "c", "3");
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}} catch(IOException ignored){} latch.countDown(); });
 
         latch.await(5, TimeUnit.SECONDS);

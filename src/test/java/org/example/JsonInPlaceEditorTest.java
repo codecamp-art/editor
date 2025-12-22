@@ -4,7 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -54,13 +55,15 @@ class JsonInPlaceEditorTest {
         }
 
         // Test setValue operations
-        JsonInPlaceEditor.setValue(file.toFile(), "server/host", "example.com");
-        JsonInPlaceEditor.setValue(file.toFile(), "server/port", 8080, 9090);
-        JsonInPlaceEditor.setValue(file.toFile(), "database/password", "secret", null); // Clear value
-        JsonInPlaceEditor.setValue(file.toFile(), "features/0/enabled", true, false);
+        byte[] content = Files.readAllBytes(file);
+        content = JsonInPlaceEditor.setValue(content, "server/host", "example.com");
+        content = JsonInPlaceEditor.setValue(content, "server/port", 8080, 9090);
+        content = JsonInPlaceEditor.setValue(content, "database/password", "secret", null); // Clear value
+        content = JsonInPlaceEditor.setValue(content, "features/0/enabled", true, false);
         
         // Test deleteLine
-        JsonInPlaceEditor.deleteKey(file.toFile(), "server/ssl", true);
+        content = JsonInPlaceEditor.deleteKey(content, "server/ssl", true);
+        Files.write(file, content);
 
         String expected = "// Configuration file\r\n" +
                 "{\n" +
@@ -86,11 +89,12 @@ class JsonInPlaceEditorTest {
         assertEquals(expected, actualContent);
 
         // Test search operations
-        assertTrue(JsonInPlaceEditor.search(file.toFile(), "server/host", "example.com"));
-        assertFalse(JsonInPlaceEditor.search(file.toFile(), "server/host", "localhost"));
-        assertTrue(JsonInPlaceEditor.search(file.toFile(), "database/user"));
-        assertFalse(JsonInPlaceEditor.search(file.toFile(), "server/ssl")); // Deleted
-        assertTrue(JsonInPlaceEditor.search(file.toFile(), "features/1/name", "logging"));
+        byte[] finalContent = Files.readAllBytes(file);
+        assertTrue(JsonInPlaceEditor.search(finalContent, "server/host", "example.com"));
+        assertFalse(JsonInPlaceEditor.search(finalContent, "server/host", "localhost"));
+        assertTrue(JsonInPlaceEditor.search(finalContent, "database/user"));
+        assertFalse(JsonInPlaceEditor.search(finalContent, "server/ssl")); // Deleted
+        assertTrue(JsonInPlaceEditor.search(finalContent, "features/1/name", "logging"));
     }
 
     @Test
@@ -119,11 +123,13 @@ class JsonInPlaceEditorTest {
         Files.write(file, original.getBytes(gbk));
 
         // Test operations with GBK encoding
-        JsonInPlaceEditor.setValue(file.toFile(), "服务器/主机", null, "远程服务器", "GBK");
-        JsonInPlaceEditor.setValue(file.toFile(), "服务器/端口", 8080, 9090, "GBK");
-        JsonInPlaceEditor.setValue(file.toFile(), "数据库/密码", "机密", "新密码", "GBK");
-        JsonInPlaceEditor.setValue(file.toFile(), "功能列表/0/启用", true, false, "GBK");
-        JsonInPlaceEditor.deleteKey(file.toFile(), "服务器/启用SSL", null, "GBK");
+        byte[] content = Files.readAllBytes(file);
+        content = JsonInPlaceEditor.setValue(content, "服务器/主机", null, "远程服务器", "GBK");
+        content = JsonInPlaceEditor.setValue(content, "服务器/端口", 8080, 9090, "GBK");
+        content = JsonInPlaceEditor.setValue(content, "数据库/密码", "机密", "新密码", "GBK");
+        content = JsonInPlaceEditor.setValue(content, "功能列表/0/启用", true, false, "GBK");
+        content = JsonInPlaceEditor.deleteKey(content, "服务器/启用SSL", null, "GBK");
+        Files.write(file, content);
 
         String expected = "// 配置文件\r\n" +
                 "{\n" +
@@ -147,9 +153,10 @@ class JsonInPlaceEditorTest {
         assertEquals(expected, actual);
 
         // Test search with GBK
-        assertTrue(JsonInPlaceEditor.search(file.toFile(), "服务器/主机", "远程服务器", "GBK"));
-        assertTrue(JsonInPlaceEditor.search(file.toFile(), "功能列表/1/名称", "日志", "GBK"));
-        assertFalse(JsonInPlaceEditor.search(file.toFile(), "服务器/启用SSL", null, "GBK"));
+        byte[] finalContent = Files.readAllBytes(file);
+        assertTrue(JsonInPlaceEditor.search(finalContent, "服务器/主机", "远程服务器", "GBK"));
+        assertTrue(JsonInPlaceEditor.search(finalContent, "功能列表/1/名称", "日志", "GBK"));
+        assertFalse(JsonInPlaceEditor.search(finalContent, "服务器/启用SSL", null, "GBK"));
     }
 
     @Test
@@ -171,9 +178,9 @@ class JsonInPlaceEditorTest {
 
         byte[] bytes = original.getBytes(StandardCharsets.UTF_8);
 
-        // Test setValue via InputStream
+        // Test setValue via byte array
         byte[] result1 = JsonInPlaceEditor.setValue(
-            new ByteArrayInputStream(bytes), 
+            bytes, 
             "app/settings/theme", 
             "dark", 
             "light"
@@ -185,7 +192,7 @@ class JsonInPlaceEditorTest {
 
         // Test array element modification
         byte[] result2 = JsonInPlaceEditor.setValue(
-            new ByteArrayInputStream(result1),
+            result1,
             "users/1/name",
             "Bob",
             "Charlie"
@@ -195,15 +202,15 @@ class JsonInPlaceEditorTest {
         assertTrue(modified2.contains("\"name\": \"Charlie\""));
         assertFalse(modified2.contains("\"name\": \"Bob\""));
 
-        // Test search via InputStream
+        // Test search via byte array
         assertTrue(JsonInPlaceEditor.search(
-            new ByteArrayInputStream(result2),
+            result2,
             "app/name",
             "MyApp"
         ));
         
         assertTrue(JsonInPlaceEditor.search(
-            new ByteArrayInputStream(result2),
+            result2,
             "users/0/id",
             1
         ));
@@ -218,16 +225,19 @@ class JsonInPlaceEditorTest {
         Files.writeString(file, original);
 
         // Modify nested values
-        JsonInPlaceEditor.setValue(file.toFile(), "b/c", 2, 20);
-        JsonInPlaceEditor.setValue(file.toFile(), "e/1/g", 5, 50);
+        byte[] content = Files.readAllBytes(file);
+        content = JsonInPlaceEditor.setValue(content, "b/c", 2, 20);
+        content = JsonInPlaceEditor.setValue(content, "e/1/g", 5, 50);
+        Files.write(file, content);
         
         String expected = "{\"a\":1,\"b\":{\"c\":20,\"d\":3},\"e\":[{\"f\":4},{\"g\":50}],\"h\":6}";
         String actual = Files.readString(file);
         assertEquals(expected, actual);
 
         // Test search on compact JSON
-        assertTrue(JsonInPlaceEditor.search(file.toFile(), "b/d", 3));
-        assertTrue(JsonInPlaceEditor.search(file.toFile(), "e/0/f", 4));
+        byte[] finalContent = Files.readAllBytes(file);
+        assertTrue(JsonInPlaceEditor.search(finalContent, "b/d", 3));
+        assertTrue(JsonInPlaceEditor.search(finalContent, "e/0/f", 4));
     }
 
     @Test
@@ -246,7 +256,9 @@ class JsonInPlaceEditorTest {
         Path file = tempDir.resolve("comments.json");
         Files.writeString(file, original);
 
-        JsonInPlaceEditor.setValue(file.toFile(), "key2", "value2", "newValue2");
+        byte[] content = Files.readAllBytes(file);
+        content = JsonInPlaceEditor.setValue(content, "key2", "value2", "newValue2");
+        Files.write(file, content);
 
         String result = Files.readString(file);
         
@@ -274,17 +286,23 @@ class JsonInPlaceEditorTest {
         Files.writeString(file, original);
 
         // Conditional update - should succeed
-        JsonInPlaceEditor.setValue(file.toFile(), "status", "active", "inactive");
+        byte[] content = Files.readAllBytes(file);
+        content = JsonInPlaceEditor.setValue(content, "status", "active", "inactive");
+        Files.write(file, content);
         String result1 = Files.readString(file);
         assertTrue(result1.contains("\"status\": \"inactive\""));
 
         // Conditional update - should fail (wrong expected value)
-        JsonInPlaceEditor.setValue(file.toFile(), "count", "5", "20");
+        content = Files.readAllBytes(file);
+        content = JsonInPlaceEditor.setValue(content, "count", "5", "20");
+        Files.write(file, content);
         String result2 = Files.readString(file);
         assertTrue(result2.contains("\"count\": 10")); // Unchanged
 
         // Conditional delete - should succeed
-        JsonInPlaceEditor.deleteKey(file.toFile(), "enabled", true);
+        content = Files.readAllBytes(file);
+        content = JsonInPlaceEditor.deleteKey(content, "enabled", true);
+        Files.write(file, content);
         String result3 = Files.readString(file);
         assertFalse(result3.contains("\"enabled\""));
     }

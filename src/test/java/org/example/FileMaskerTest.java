@@ -58,7 +58,7 @@ class FileMaskerTest {
         FileMasker.mask(yamlFile.toFile(), "yaml", List.of("root/child/key"));
 
         String masked = Files.readString(yamlFile, StandardCharsets.UTF_8);
-        assertTrue(masked.contains("key: " + FileMasker.MASK));
+        assertTrue(masked.contains("key: \"" + FileMasker.MASK + "\""));
         assertFalse(masked.contains("secretValue"));
     }
 

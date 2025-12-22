@@ -1,12 +1,8 @@
 package org.example;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -29,62 +25,17 @@ public final class YamlInPlaceEditor {
     private YamlInPlaceEditor() {
     }
 
-    // ==================== File API ====================
+    // ==================== Byte Array API ====================
 
-    public static void setValue(File file, String yamlPath, Object newValue) throws IOException {
-        setValue(file, yamlPath, null, newValue, null);
+    public static byte[] setValue(byte[] bytes, String yamlPath, Object newValue) throws IOException {
+        return setValue(bytes, yamlPath, null, newValue, null);
     }
 
-    public static void setValue(File file, String yamlPath, Object expectedOld, Object newValue) throws IOException {
-        setValue(file, yamlPath, expectedOld, newValue, null);
+    public static byte[] setValue(byte[] bytes, String yamlPath, Object expectedOld, Object newValue) throws IOException {
+        return setValue(bytes, yamlPath, expectedOld, newValue, null);
     }
 
-    public static void setValue(File file, String yamlPath, Object expectedOld, Object newValue, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] modified = setValue(new ByteArrayInputStream(original), yamlPath, expectedOld, newValue, encodingHint);
-        Files.write(file.toPath(), modified);
-    }
-
-    public static void deleteKey(File file, String yamlPath) throws IOException {
-        deleteKey(file, yamlPath, null, null);
-    }
-
-    public static void deleteKey(File file, String yamlPath, Object expectedOld) throws IOException {
-        deleteKey(file, yamlPath, expectedOld, null);
-    }
-
-    public static void deleteKey(File file, String yamlPath, Object expectedOld, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        byte[] modified = deleteKey(new ByteArrayInputStream(original), yamlPath, expectedOld, encodingHint);
-        Files.write(file.toPath(), modified);
-    }
-
-
-    public static boolean search(File file, String yamlPath) throws IOException {
-        return search(file, yamlPath, null, null);
-    }
-
-    public static boolean search(File file, String yamlPath, Object value) throws IOException {
-        return search(file, yamlPath, value, null);
-    }
-
-    public static boolean search(File file, String yamlPath, Object value, String encodingHint) throws IOException {
-        byte[] original = Files.readAllBytes(file.toPath());
-        return search(new ByteArrayInputStream(original), yamlPath, value, encodingHint);
-    }
-
-    // ==================== InputStream API ====================
-
-    public static byte[] setValue(InputStream in, String yamlPath, Object newValue) throws IOException {
-        return setValue(in, yamlPath, null, newValue, null);
-    }
-
-    public static byte[] setValue(InputStream in, String yamlPath, Object expectedOld, Object newValue) throws IOException {
-        return setValue(in, yamlPath, expectedOld, newValue, null);
-    }
-
-    public static byte[] setValue(InputStream in, String yamlPath, Object expectedOld, Object newValue, String encodingHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static byte[] setValue(byte[] bytes, String yamlPath, Object expectedOld, Object newValue, String encodingHint) throws IOException {
         EncodingInfo info = detectEncoding(bytes, encodingHint);
         String content = new String(bytes, info.bomLength, bytes.length - info.bomLength, info.charset);
 
@@ -113,16 +64,15 @@ public final class YamlInPlaceEditor {
         return encode(modified, info);
     }
 
-    public static byte[] deleteKey(InputStream in, String yamlPath) throws IOException {
-        return deleteKey(in, yamlPath, null, null);
+    public static byte[] deleteKey(byte[] bytes, String yamlPath) throws IOException {
+        return deleteKey(bytes, yamlPath, null, null);
     }
 
-    public static byte[] deleteKey(InputStream in, String yamlPath, Object expectedOld) throws IOException {
-        return deleteKey(in, yamlPath, expectedOld, null);
+    public static byte[] deleteKey(byte[] bytes, String yamlPath, Object expectedOld) throws IOException {
+        return deleteKey(bytes, yamlPath, expectedOld, null);
     }
 
-    public static byte[] deleteKey(InputStream in, String yamlPath, Object expectedOld, String encodingHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static byte[] deleteKey(byte[] bytes, String yamlPath, Object expectedOld, String encodingHint) throws IOException {
         EncodingInfo info = detectEncoding(bytes, encodingHint);
         String content = new String(bytes, info.bomLength, bytes.length - info.bomLength, info.charset);
 
@@ -206,17 +156,15 @@ public final class YamlInPlaceEditor {
         return encode(modified, info);
     }
 
-
-    public static boolean search(InputStream in, String yamlPath) throws IOException {
-        return search(in, yamlPath, null, null);
+    public static boolean search(byte[] bytes, String yamlPath) throws IOException {
+        return search(bytes, yamlPath, null, null);
     }
 
-    public static boolean search(InputStream in, String yamlPath, Object value) throws IOException {
-        return search(in, yamlPath, value, null);
+    public static boolean search(byte[] bytes, String yamlPath, Object value) throws IOException {
+        return search(bytes, yamlPath, value, null);
     }
 
-    public static boolean search(InputStream in, String yamlPath, Object value, String encodingHint) throws IOException {
-        byte[] bytes = in.readAllBytes();
+    public static boolean search(byte[] bytes, String yamlPath, Object value, String encodingHint) throws IOException {
         EncodingInfo info = detectEncoding(bytes, encodingHint);
         String content = new String(bytes, info.bomLength, bytes.length - info.bomLength, info.charset);
 
@@ -234,32 +182,6 @@ public final class YamlInPlaceEditor {
 
         String currentVal = content.substring(loc.valueStart, loc.valueEnd);
         return valuesMatch(currentVal, value);
-    }
-
-    // ==================== Byte Array API ====================
-
-    public static byte[] setValue(byte[] bytes, String yamlPath, Object newValue) throws IOException {
-        return setValue(new ByteArrayInputStream(bytes), yamlPath, null, newValue, null);
-    }
-
-    public static byte[] setValue(byte[] bytes, String yamlPath, Object expectedOld, Object newValue) throws IOException {
-        return setValue(new ByteArrayInputStream(bytes), yamlPath, expectedOld, newValue, null);
-    }
-
-    public static byte[] setValue(byte[] bytes, String yamlPath, Object expectedOld, Object newValue, String encodingHint) throws IOException {
-        return setValue(new ByteArrayInputStream(bytes), yamlPath, expectedOld, newValue, encodingHint);
-    }
-
-    public static boolean search(byte[] bytes, String yamlPath) throws IOException {
-        return search(new ByteArrayInputStream(bytes), yamlPath, null, null);
-    }
-
-    public static boolean search(byte[] bytes, String yamlPath, Object value) throws IOException {
-        return search(new ByteArrayInputStream(bytes), yamlPath, value, null);
-    }
-
-    public static boolean search(byte[] bytes, String yamlPath, Object value, String encodingHint) throws IOException {
-        return search(new ByteArrayInputStream(bytes), yamlPath, value, encodingHint);
     }
 
     // ==================== Internal Classes ====================

@@ -4,7 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -61,16 +62,15 @@ class JsonInPlaceEditorCombinedTest {
         }
 
         // mutations
-        JsonInPlaceEditor.setValue(f.toFile(), "server/host", "example.com");
-        JsonInPlaceEditor.setValue(f.toFile(), "server/port", 8080, 9090, null);
-        JsonInPlaceEditor.setValue(f.toFile(), "server/time", "10", "11", null);
-        JsonInPlaceEditor.setValue(f.toFile(), "database/password", "secret", "", null);
-        JsonInPlaceEditor.deleteKey(f.toFile(), "database/obsolete", "remove", null);
-        JsonInPlaceEditor.deleteKey(f.toFile(), "url", null, null);
-
-        byte[] after4 = Files.readAllBytes(f);
-        byte[] after5 = JsonInPlaceEditor.setValue(new ByteArrayInputStream(after4), "paths/root", null, null, null);
-        Files.write(f, after5);
+        byte[] content = Files.readAllBytes(f);
+        content = JsonInPlaceEditor.setValue(content, "server/host", "example.com");
+        content = JsonInPlaceEditor.setValue(content, "server/port", 8080, 9090, null);
+        content = JsonInPlaceEditor.setValue(content, "server/time", "10", "11", null);
+        content = JsonInPlaceEditor.setValue(content, "database/password", "secret", "", null);
+        content = JsonInPlaceEditor.deleteKey(content, "database/obsolete", "remove", null);
+        content = JsonInPlaceEditor.deleteKey(content, "url", null, null);
+        content = JsonInPlaceEditor.setValue(content, "paths/root", null, null);
+        Files.write(f, content);
 
         String expected = "" +
                 "// Global comment\r\n" +
@@ -95,9 +95,10 @@ class JsonInPlaceEditorCombinedTest {
         assertEquals(expected, after);
 
         // Search validations
-        assertTrue(JsonInPlaceEditor.search(f.toFile(), "server/host", "example.com"));
-        assertFalse(JsonInPlaceEditor.search(f.toFile(), "server/host", "localhost"));
-        assertFalse(JsonInPlaceEditor.search(f.toFile(), "database/obsolete")); // key removed
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(JsonInPlaceEditor.search(finalContent, "server/host", "example.com"));
+        assertFalse(JsonInPlaceEditor.search(finalContent, "server/host", "localhost"));
+        assertFalse(JsonInPlaceEditor.search(finalContent, "database/obsolete")); // key removed
     }
 
     /* ---------------------------------------------------------------------
@@ -123,11 +124,13 @@ class JsonInPlaceEditorCombinedTest {
         Files.write(f, original.getBytes(gbk));
 
         // Replace address to "远程" (unconditional)
-        JsonInPlaceEditor.setValue(f.toFile(), "服务器/地址", null, "远程", "GBK");
-        JsonInPlaceEditor.setValue(f.toFile(), "服务器/端口", 8080, 9090, "GBK");
-        JsonInPlaceEditor.setValue(f.toFile(), "服务器/时间", "10点", "11点", "GBK");
-        JsonInPlaceEditor.deleteKey(f.toFile(), "删除", "移除", "GBK");
-        JsonInPlaceEditor.setValue(f.toFile(), "路径/根", "/var/www", "/var", "GBK");
+        byte[] content = Files.readAllBytes(f);
+        content = JsonInPlaceEditor.setValue(content, "服务器/地址", null, "远程", "GBK");
+        content = JsonInPlaceEditor.setValue(content, "服务器/端口", 8080, 9090, "GBK");
+        content = JsonInPlaceEditor.setValue(content, "服务器/时间", "10点", "11点", "GBK");
+        content = JsonInPlaceEditor.deleteKey(content, "删除", "移除", "GBK");
+        content = JsonInPlaceEditor.setValue(content, "路径/根", "/var/www", "/var", "GBK");
+        Files.write(f, content);
 
         String expected = "" +
                 "// 配置\r\n" +
@@ -145,8 +148,9 @@ class JsonInPlaceEditorCombinedTest {
         assertEquals(expected, after);
 
         // Search validations (GBK)
-        assertTrue(JsonInPlaceEditor.search(f.toFile(), "服务器/地址", "远程", "GBK"));
-        assertFalse(JsonInPlaceEditor.search(f.toFile(), "删除", null, "GBK")); // key removed
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(JsonInPlaceEditor.search(finalContent, "服务器/地址", "远程", "GBK"));
+        assertFalse(JsonInPlaceEditor.search(finalContent, "删除", null, "GBK")); // key removed
     }
 
     /* ---------------------------------------------------------------------
@@ -167,15 +171,15 @@ class JsonInPlaceEditorCombinedTest {
 
         var exec = Executors.newFixedThreadPool(3);
         exec.execute(() -> { try {
-            byte[] out = JsonInPlaceEditor.setValue(new ByteArrayInputStream(bytes), "a", 1, "A", null);
+            byte[] out = JsonInPlaceEditor.setValue(bytes, "a", 1, "A", null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
         exec.execute(() -> { try {
-            byte[] out = JsonInPlaceEditor.setValue(new ByteArrayInputStream(bytes), "b", 2, "B", null);
+            byte[] out = JsonInPlaceEditor.setValue(bytes, "b", 2, "B", null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
         exec.execute(() -> { try {
-            byte[] out = JsonInPlaceEditor.deleteKey(new ByteArrayInputStream(bytes), "c", 3, null);
+            byte[] out = JsonInPlaceEditor.deleteKey(bytes, "c", 3, null);
             synchronized(results){results.add(new String(out, StandardCharsets.UTF_8));}
         } catch(IOException ignored){} latch.countDown(); });
 
@@ -215,11 +219,13 @@ class JsonInPlaceEditorCombinedTest {
         }
 
         // Replace second service host
-        JsonInPlaceEditor.setValue(f.toFile(), "services/1/host", "example.com", "remote.com");
+        byte[] content = Files.readAllBytes(f);
+        content = JsonInPlaceEditor.setValue(content, "services/1/host", "example.com", "remote.com");
         // Clear first service name (unconditional)
-        JsonInPlaceEditor.setValue(f.toFile(), "services/0/name", null, "");
+        content = JsonInPlaceEditor.setValue(content, "services/0/name", null, "");
         // Delete dummy key entirely
-        JsonInPlaceEditor.deleteKey(f.toFile(), "dummy", null, null);
+        content = JsonInPlaceEditor.deleteKey(content, "dummy", null, null);
+        Files.write(f, content);
 
         String expected = "" +
                 "// services list\r\n" +
@@ -241,9 +247,10 @@ class JsonInPlaceEditorCombinedTest {
         assertEquals(expected, after);
 
         // Search validations – nested array paths
-        assertTrue(JsonInPlaceEditor.search(f.toFile(), "services/1/host", "remote.com"));
-        assertTrue(JsonInPlaceEditor.search(f.toFile(), "services/0/name")); // path exists (value cleared)
-        assertFalse(JsonInPlaceEditor.search(f.toFile(), "dummy"));
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(JsonInPlaceEditor.search(finalContent, "services/1/host", "remote.com"));
+        assertTrue(JsonInPlaceEditor.search(finalContent, "services/0/name")); // path exists (value cleared)
+        assertFalse(JsonInPlaceEditor.search(finalContent, "dummy"));
     }
 
     /* ------------------------------------------------ helpers ------------------------------------------------ */

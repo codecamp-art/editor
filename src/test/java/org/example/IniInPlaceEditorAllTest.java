@@ -4,7 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -54,19 +55,18 @@ class IniInPlaceEditorAllTest {
             os.write(body.getBytes(StandardCharsets.UTF_8));
         }
 
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "server/host", "localhost"));
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "server/port", "8080"));
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "database/password", "secret"));
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "database/obsolete"));
+        byte[] content = Files.readAllBytes(f);
+        assertTrue(IniInPlaceEditor.search(content, "server/host", "localhost"));
+        assertTrue(IniInPlaceEditor.search(content, "server/port", "8080"));
+        assertTrue(IniInPlaceEditor.search(content, "database/password", "secret"));
+        assertTrue(IniInPlaceEditor.search(content, "database/obsolete"));
 
-        IniInPlaceEditor.setValue(f.toFile(), "server/host", "example.com");
-        IniInPlaceEditor.setValue(f.toFile(), "server/port", "8080", "9090", null, null, null);
-        IniInPlaceEditor.setValue(f.toFile(), "database/password", "secret", "", null, null, null);
-        IniInPlaceEditor.deleteKey(f.toFile(), "database/obsolete", "remove", null, null, null);
-
-        byte[] after4 = Files.readAllBytes(f);
-        byte[] after5 = IniInPlaceEditor.setValue(new ByteArrayInputStream(after4), "paths/root", null, "", null, null, null);
-        Files.write(f, after5);
+        content = IniInPlaceEditor.setValue(content, "server/host", "example.com");
+        content = IniInPlaceEditor.setValue(content, "server/port", "8080", "9090", null, null, null);
+        content = IniInPlaceEditor.setValue(content, "database/password", "secret", "", null, null, null);
+        content = IniInPlaceEditor.deleteKey(content, "database/obsolete", "remove", null, null, null);
+        content = IniInPlaceEditor.setValue(content, "paths/root", null, "", null, null, null);
+        Files.write(f, content);
 
         String expected = "; Global comment\r\n" +
                 "[server]\r\n" +
@@ -83,8 +83,9 @@ class IniInPlaceEditorAllTest {
         byte[] bytes = Files.readAllBytes(f);
         assertTrue(startsWith(bytes, BOM));
         String finalBody = new String(bytes, BOM.length, bytes.length - BOM.length, StandardCharsets.UTF_8);
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "server/host", "example.com"));
-        assertFalse(IniInPlaceEditor.search(f.toFile(), "server/host", "localhost"));
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(IniInPlaceEditor.search(finalContent, "server/host", "example.com"));
+        assertFalse(IniInPlaceEditor.search(finalContent, "server/host", "localhost"));
         assertEquals(expected, finalBody);
     }
 
@@ -112,18 +113,20 @@ class IniInPlaceEditorAllTest {
         Path f = tmp.resolve("gbk.ini");
         Files.write(f, body.getBytes(gbk));
 
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/名称", "张三", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/年龄", "30", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/地址", "上海", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/地址1", "上海", "GBK", lineCmt, blk));
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/空值", null, "GBK", lineCmt, blk));
+        byte[] content = Files.readAllBytes(f);
+        assertTrue(IniInPlaceEditor.search(content, "信息/名称", "张三", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(content, "信息/年龄", "30", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(content, "信息/地址", "上海", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(content, "信息/地址1", "上海", "GBK", lineCmt, blk));
+        assertTrue(IniInPlaceEditor.search(content, "信息/空值", null, "GBK", lineCmt, blk));
 
-        IniInPlaceEditor.setValue(f.toFile(), "信息/名称", null, "李四", "GBK", lineCmt, blk);
-        IniInPlaceEditor.setValue(f.toFile(), "信息/年龄", "30", "", "GBK", lineCmt, blk);
-        IniInPlaceEditor.setValue(f.toFile(), "信息/年龄1", "30", "", "GBK", lineCmt, blk);
-        IniInPlaceEditor.setValue(f.toFile(), "信息/地址", "上海", "北京", "GBK", lineCmt, blk);
-        IniInPlaceEditor.setValue(f.toFile(), "信息/地址1", "上海", "北京", "GBK", lineCmt, blk);
-        IniInPlaceEditor.deleteKey(f.toFile(), "信息/空值", "删除", "GBK", lineCmt, blk);
+        content = IniInPlaceEditor.setValue(content, "信息/名称", null, "李四", "GBK", lineCmt, blk);
+        content = IniInPlaceEditor.setValue(content, "信息/年龄", "30", "", "GBK", lineCmt, blk);
+        content = IniInPlaceEditor.setValue(content, "信息/年龄1", "30", "", "GBK", lineCmt, blk);
+        content = IniInPlaceEditor.setValue(content, "信息/地址", "上海", "北京", "GBK", lineCmt, blk);
+        content = IniInPlaceEditor.setValue(content, "信息/地址1", "上海", "北京", "GBK", lineCmt, blk);
+        content = IniInPlaceEditor.deleteKey(content, "信息/空值", "删除", "GBK", lineCmt, blk);
+        Files.write(f, content);
 
         String expected = "// Global comment 名称 = 张三\r\n" +
                 "/* blk */\r\n" +
@@ -136,9 +139,10 @@ class IniInPlaceEditorAllTest {
                 "地址 = 北京\r\n" + 
                 "地址1=北京\r\n";
 
-        String content = Files.readString(f, gbk);
-        assertTrue(IniInPlaceEditor.search(f.toFile(), "信息/地址", "北京", "GBK", lineCmt, blk));
-        assertEquals(expected, content);
+        byte[] finalContent = Files.readAllBytes(f);
+        assertTrue(IniInPlaceEditor.search(finalContent, "信息/地址", "北京", "GBK", lineCmt, blk));
+        String actualContent = Files.readString(f, gbk);
+        assertEquals(expected, actualContent);
     }
 
     /* -------------------------------------------------- helpers -------------------------------------------------- */
