@@ -1,4 +1,8 @@
-from common.systemd_workflow import SystemdProcessSpec, SystemdWorkflowDefinition
+from common.systemd_workflow import (
+    ExternalDagDependency,
+    SystemdProcessSpec,
+    SystemdWorkflowDefinition,
+)
 
 
 TRADING_PLATFORM_WORKFLOW = SystemdWorkflowDefinition(
@@ -8,12 +12,6 @@ TRADING_PLATFORM_WORKFLOW = SystemdWorkflowDefinition(
 # Trading Platform Start/Stop
 
 This workflow controls trading platform related systemd services across remote RHEL7/8 servers.
-
-## Supported trigger parameters
-- target_mode: workflow | single_process
-- target_process
-- run_mode
-- extra_args
 """.strip(),
     schedule_start="0 7 * * 1-5",
     schedule_stop="0 19 * * 1-5",
@@ -52,6 +50,19 @@ This workflow controls trading platform related systemd services across remote R
             enabled_in_envs=("qa", "prod"),
         ),
     ),
+    upstream_dags_for_start=(
+        ExternalDagDependency(
+            dag_id="market-data-start",
+            task_id="end",
+            enabled_in_envs=("qa", "prod", "dr"),
+        ),
+        ExternalDagDependency(
+            dag_id="reference-data-start",
+            task_id="end",
+            enabled_in_envs=("prod",),
+        ),
+    ),
+    upstream_dags_for_stop=(),
     tags=("systemd", "trading-platform", "ssh", "kerberos"),
     command_timeout_seconds=1800,
 )

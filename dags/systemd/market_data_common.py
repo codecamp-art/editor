@@ -1,4 +1,8 @@
-from common.systemd_workflow import SystemdProcessSpec, SystemdWorkflowDefinition
+from common.systemd_workflow import (
+    ExternalDagDependency,
+    SystemdProcessSpec,
+    SystemdWorkflowDefinition,
+)
 
 
 MARKET_DATA_WORKFLOW = SystemdWorkflowDefinition(
@@ -27,6 +31,14 @@ This workflow controls market data systemd services.
             host_group="gateway",
             platform="rhel7",
             start_after=("mds_collector",),
+        ),
+    ),
+    upstream_dags_for_start=(),
+    upstream_dags_for_stop=(
+        ExternalDagDependency(
+            dag_id="trading-platform-stop",
+            task_id="end",
+            enabled_in_envs=("qa", "prod", "dr"),
         ),
     ),
     tags=("systemd", "market-data", "ssh", "kerberos"),

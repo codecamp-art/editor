@@ -7,6 +7,7 @@ from airflow.decorators import get_current_context, task
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.empty import EmptyOperator
 from airflow.providers.ssh.operators.ssh import SSHOperator
+from airflow.sensors.external_task import ExternalTaskSensor
 
 from common.config_loader import get_current_env_name, load_topology_for_current_env
 from common.dag_factory import (
@@ -30,6 +31,17 @@ DEFAULT_SYSTEMD_TOPOLOGY_FILE = Path(__file__).resolve().parents[1] / "configs" 
 
 
 @dataclass(frozen=True)
+class ExternalDagDependency:
+    dag_id: str
+    task_id: str = "end"
+    allowed_states: tuple[str, ...] = ("success",)
+    failed_states: tuple[str, ...] = ("failed", "skipped")
+    timeout_seconds: int = 4 * 60 * 60
+    poke_interval_seconds: int = 60
+    enabled_in_envs: tuple[str, ...] = ("dev", "qa", "prod", "dr")
+
+
+@dataclass(frozen=True)
 class SystemdProcessSpec:
     process_id: str
     service_name: str
@@ -49,6 +61,8 @@ class SystemdWorkflowDefinition:
     schedule_stop: str
     fields: dict
     processes: tuple[SystemdProcessSpec, ...]
+    upstream_dags_for_start: tuple[ExternalDagDependency, ...] = ()
+    upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
     tags: tuple[str, ...] = ("systemd", "ssh", "kerberos")
     command_timeout_seconds: int = 1800
 
@@ -62,7 +76,6 @@ def build_systemd_airflow_fields(extra_fields: dict) -> dict:
 
 
 def build_systemd_command(platform: str, service_name: str, service_user: str, action: str) -> str:
-    # Keep the command pattern aligned to your requirement wording.
     if platform == "rhel7":
         inner = ["sudo", "systemd", action, service_name]
     elif platform == "rhel8":
@@ -87,6 +100,13 @@ def filter_enabled_processes(processes: tuple[SystemdProcessSpec, ...], current_
     return [p for p in processes if current_env in p.enabled_in_envs]
 
 
+def filter_enabled_dependencies(
+    dependencies: tuple[ExternalDagDependency, ...],
+    current_env: str,
+) -> tuple[ExternalDagDependency, ...]:
+    return tuple(dep for dep in dependencies if current_env in dep.enabled_in_envs)
+
+
 def build_process_lookup(processes: list[SystemdProcessSpec]) -> dict[str, SystemdProcessSpec]:
     lookup = {}
     for p in processes:
@@ -102,6 +122,28 @@ def validate_dependency_graph(processes: list[SystemdProcessSpec]) -> None:
         for dep in p.start_after:
             if dep not in lookup:
                 raise ValueError(f"Process '{p.process_id}' depends on unknown process '{dep}'.")
+
+
+def create_external_dependency_sensors(
+    *,
+    dependencies: tuple[ExternalDagDependency, ...],
+) -> list[ExternalTaskSensor]:
+    sensors: list[ExternalTaskSensor] = []
+
+    for dep in dependencies:
+        sensor = ExternalTaskSensor(
+            task_id=f"wait_for__{dep.dag_id.replace('-', '_')}__{dep.task_id.replace('-', '_')}",
+            external_dag_id=dep.dag_id,
+            external_task_id=dep.task_id,
+            allowed_states=list(dep.allowed_states),
+            failed_states=list(dep.failed_states),
+            timeout=dep.timeout_seconds,
+            poke_interval=dep.poke_interval_seconds,
+            mode="reschedule",
+        )
+        sensors.append(sensor)
+
+    return sensors
 
 
 def create_systemd_dag(
@@ -125,6 +167,11 @@ def create_systemd_dag(
 
     airflow_fields = build_systemd_airflow_fields(workflow.fields)
     airflow_params = build_airflow_params_from_fields(airflow_fields)
+
+    raw_upstream_dependencies = (
+        workflow.upstream_dags_for_start if action == "start" else workflow.upstream_dags_for_stop
+    )
+    upstream_dependencies = filter_enabled_dependencies(raw_upstream_dependencies, current_env)
 
     @dag_decorator(
         dag_id=dag_id,
@@ -158,13 +205,19 @@ def create_systemd_dag(
         start_node = EmptyOperator(task_id="start")
         end_node = EmptyOperator(task_id="end")
 
+        wait_sensors = create_external_dependency_sensors(
+            dependencies=upstream_dependencies,
+        )
+
+        if wait_sensors:
+            for sensor in wait_sensors:
+                sensor >> start_node
+
         task_map: dict[tuple[str, str], SSHOperator] = {}
         process_roots: dict[str, list[SSHOperator]] = {}
-        process_lookup = build_process_lookup(enabled_processes)
 
         for process in enabled_processes:
             hosts = resolve_hosts_for_process(topology, process.host_group)
-
             process_tasks: list[SSHOperator] = []
 
             for host in hosts:
@@ -188,14 +241,11 @@ def create_systemd_dag(
                     executor_config=build_executor_config(runtime_context),
                 )
 
-                validated_task >> op
                 task_map[(process.process_id, host)] = op
                 process_tasks.append(op)
 
             process_roots[process.process_id] = process_tasks
 
-        # Start DAG: dep >> current
-        # Stop DAG: current >> dep
         for process in enabled_processes:
             current_tasks = process_roots.get(process.process_id, [])
 
@@ -224,18 +274,15 @@ def create_systemd_dag(
                 if not has_downstream:
                     current_tasks >> end_node
             else:
-                # In stop DAG, original roots become terminal nodes
                 if not process.start_after:
                     current_tasks >> end_node
 
-        # Single-process filter task
         @task(task_id="filter_target_mode")
         def filter_target_mode(validated: dict) -> dict:
             return validated
 
         filter_result = filter_target_mode(validated_task)
 
-        # Lightweight skip guards per process/host
         for process in enabled_processes:
             hosts = resolve_hosts_for_process(topology, process.host_group)
 
@@ -256,9 +303,8 @@ def create_systemd_dag(
                     task_id=f"allow__{process.process_id}__{host.replace('.', '_').replace('-', '_')}"
                 )(filter_result, process.process_id)
 
-                # Rewire to insert guard immediately before remote task
                 allow_task >> original_task
 
-        start_node >> validated_task
+        validated_task >> start_node
 
     return _dag()
