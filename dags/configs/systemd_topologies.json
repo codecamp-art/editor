@@ -1,0 +1,34 @@
+{
+  "dev": {
+    "host_groups": {
+      "gateway": ["dev-gw-01.company.net"],
+      "mds": ["dev-mds-01.company.net"],
+      "app_primary": ["dev-app-01.company.net"],
+      "app_secondary": []
+    }
+  },
+  "qa": {
+    "host_groups": {
+      "gateway": ["qa-gw-01.company.net", "qa-gw-02.company.net"],
+      "mds": ["qa-mds-01.company.net"],
+      "app_primary": ["qa-app-01.company.net"],
+      "app_secondary": ["qa-app-02.company.net"]
+    }
+  },
+  "prod": {
+    "host_groups": {
+      "gateway": ["prod-gw-01.company.net", "prod-gw-02.company.net"],
+      "mds": ["prod-mds-01.company.net", "prod-mds-02.company.net"],
+      "app_primary": ["prod-app-01.company.net"],
+      "app_secondary": ["prod-app-02.company.net"]
+    }
+  },
+  "dr": {
+    "host_groups": {
+      "gateway": ["dr-gw-01.company.net"],
+      "mds": ["dr-mds-01.company.net"],
+      "app_primary": ["dr-app-01.company.net"],
+      "app_secondary": []
+    }
+  }
+}

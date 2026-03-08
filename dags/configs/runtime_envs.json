@@ -1,0 +1,58 @@
+{
+  "dev": {
+    "default": {
+      "namespace": "airflow-dev-shared",
+      "target_host": "dev-bastion.company.net",
+      "kerberos_principal": "airflow_s3ro_dev",
+      "kerberos_realm": "COD.COM.CN",
+      "keytab_secret_name": "proid-client-keytab",
+      "keytab_filename": "proid.keytab",
+      "kerberos_cache_filename": "krb5cc_airflow_s3ro_dev",
+      "kerberos_init_image": "artifactory.ai.ms.com.cn/docker-ec-airflow-3rdparty/krb5-init:1.2",
+      "main_container_name": "base",
+      "timezone": "Asia/Shanghai"
+    }
+  },
+  "qa": {
+    "default": {
+      "namespace": "airflow-qa-shared",
+      "target_host": "qa-bastion.company.net",
+      "kerberos_principal": "airflow_s3ro_qa",
+      "kerberos_realm": "COD.COM.CN",
+      "keytab_secret_name": "proid-client-keytab",
+      "keytab_filename": "proid.keytab",
+      "kerberos_cache_filename": "krb5cc_airflow_s3ro_qa",
+      "kerberos_init_image": "artifactory.ai.ms.com.cn/docker-ec-airflow-3rdparty/krb5-init:1.2",
+      "main_container_name": "base",
+      "timezone": "Asia/Shanghai"
+    }
+  },
+  "prod": {
+    "default": {
+      "namespace": "airflow-prod-shared",
+      "target_host": "prod-bastion.company.net",
+      "kerberos_principal": "airflow_s3ro_prod",
+      "kerberos_realm": "COD.COM.CN",
+      "keytab_secret_name": "proid-client-keytab",
+      "keytab_filename": "proid.keytab",
+      "kerberos_cache_filename": "krb5cc_airflow_s3ro_prod",
+      "kerberos_init_image": "artifactory.ai.ms.com.cn/docker-ec-airflow-3rdparty/krb5-init:1.2",
+      "main_container_name": "base",
+      "timezone": "Asia/Shanghai"
+    }
+  },
+  "dr": {
+    "default": {
+      "namespace": "airflow-dr-shared",
+      "target_host": "dr-bastion.company.net",
+      "kerberos_principal": "airflow_s3ro_dr",
+      "kerberos_realm": "COD.COM.CN",
+      "keytab_secret_name": "proid-client-keytab",
+      "keytab_filename": "proid.keytab",
+      "kerberos_cache_filename": "krb5cc_airflow_s3ro_dr",
+      "kerberos_init_image": "artifactory.ai.ms.com.cn/docker-ec-airflow-3rdparty/krb5-init:1.2",
+      "main_container_name": "base",
+      "timezone": "Asia/Shanghai"
+    }
+  }
+}
