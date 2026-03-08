@@ -1,4 +1,5 @@
 from common.reporting_workflow import ReportingDefinition, create_reporting_dag
+from common.trading_calendar import TradingDayCheckDefinition
 
 
 REPORT_A = ReportingDefinition(
@@ -42,6 +43,19 @@ This DAG runs Report A on the remote reporting server.
         }
     },
     adhoc_rules={"required": ["business_date"]},
+    trading_day_check=TradingDayCheckDefinition(
+        check_host="calendar-check.company.net",
+        check_user="calendaruser",
+        command_template=(
+            "/opt/calendar/bin/check_trading_day.sh "
+            "--business-date {business_date} "
+            "--market {market} "
+            "--calendar-code {calendar_code}"
+        ),
+        market="APAC",
+        calendar_code="TRADING_APAC",
+        timeout_seconds=300,
+    ),
     command_timeout_seconds=3600,
     tags=("reporting", "recon", "report-a", "ssh", "kerberos"),
 )

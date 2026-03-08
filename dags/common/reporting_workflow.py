@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from airflow.decorators import get_current_context, task
-from airflow.exceptions import AirflowSkipException
 from airflow.providers.ssh.operators.ssh import SSHOperator
 
 from common.dag_factory import (
@@ -21,7 +20,12 @@ from common.field_schema import (
 )
 from common.remote_command import build_sudo_bash_command, split_extra_args
 from common.ssh_hook import MSSSHHook
-from common.trading_calendar import is_weekday_trading_day
+from common.trading_calendar import TradingDayCheckDefinition
+from common.trading_day_tasks import (
+    create_trading_day_decide_task,
+    create_trading_day_prepare_task,
+    create_trading_day_ssh_task,
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,7 @@ class ReportingDefinition:
     sudo_user: str
     fields: dict
     adhoc_rules: dict
+    trading_day_check: TradingDayCheckDefinition | None = None
     command_timeout_seconds: int = 3600
     tags: tuple[str, ...] = ("reporting", "ssh", "kerberos")
 
@@ -85,6 +90,7 @@ def create_reporting_dag(
     runtime_context = build_runtime_context(runtime_env_file)
     merged_fields = merge_field_definitions(COMMON_FIELDS, definition.fields)
     airflow_params = build_airflow_params_from_fields(merged_fields)
+    executor_config = build_executor_config(runtime_context)
 
     @dag_decorator(
         dag_id=definition.dag_id,
@@ -99,14 +105,9 @@ def create_reporting_dag(
         def validate_and_prepare() -> dict:
             context = get_current_context()
             raw_params = dict(context["params"])
-            logical_date = context["logical_date"]
 
             validated = validate_fields(raw_params, merged_fields)
             apply_adhoc_rules(validated, definition.adhoc_rules)
-
-            if not validated["skip_trading_day_check"]:
-                if validated["run_mode"] == "normal" and not is_weekday_trading_day(logical_date):
-                    raise AirflowSkipException(f"Logical date {logical_date} is not treated as a trading day.")
 
             arg_list = build_args_from_fields(validated, merged_fields)
 
@@ -122,6 +123,32 @@ def create_reporting_dag(
 
         prepared = validate_and_prepare()
 
+        if definition.trading_day_check is not None:
+            prepare_trading_day_check = create_trading_day_prepare_task(
+                task_id="prepare_trading_day_check",
+                trading_day_check=definition.trading_day_check,
+            )
+
+            run_trading_day_check = create_trading_day_ssh_task(
+                task_id="run_trading_day_check",
+                trading_day_check=definition.trading_day_check,
+                kerberos_principal=runtime_context["kerberos_principal"],
+                executor_config=executor_config,
+            )
+
+            decide_trading_day = create_trading_day_decide_task(
+                task_id="decide_trading_day",
+            )
+
+            trading_day_result = decide_trading_day(
+                prepare_trading_day_check,
+                run_trading_day_check.output,
+            )
+
+            prepared >> prepare_trading_day_check >> run_trading_day_check >> trading_day_result
+        else:
+            trading_day_result = None
+
         run_report = SSHOperator(
             task_id="run_report",
             ssh_hook=MSSSHHook(
@@ -131,9 +158,12 @@ def create_reporting_dag(
             ),
             command="{{ ti.xcom_pull(task_ids='validate_and_prepare')['command'] }}",
             cmd_timeout=definition.command_timeout_seconds,
-            executor_config=build_executor_config(runtime_context),
+            executor_config=executor_config,
         )
 
-        prepared >> run_report
+        if trading_day_result is not None:
+            trading_day_result >> run_report
+        else:
+            prepared >> run_report
 
     return _dag()
