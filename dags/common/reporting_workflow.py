@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from airflow.decorators import get_current_context, task
@@ -34,14 +34,27 @@ class ReportingDefinition:
     dag_id: str
     title: str
     description: str
-    schedule: str
+    schedule: str | None
     remote_script: str
     sudo_user: str
     fields: dict
     adhoc_rules: dict
     trading_day_check: TradingDayCheckDefinition | None = None
+    preset_params: dict | None = None
     command_timeout_seconds: int = 3600
     tags: tuple[str, ...] = ("reporting", "ssh", "kerberos")
+
+
+@dataclass(frozen=True)
+class ReportingScheduleVariant:
+    dag_id: str
+    title_suffix: str
+    description_suffix: str = ""
+    schedule: str | None = None
+    preset_params: dict | None = None
+    fields_override: dict | None = None
+    adhoc_rules_override: dict | None = None
+    tags_additional: tuple[str, ...] = ()
 
 
 def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
@@ -58,6 +71,18 @@ def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
     for group in required_together:
         if not all(validated.get(field) not in (None, "") for field in group):
             raise ValueError(f"Fields {group} must all be provided together in adhoc mode.")
+
+
+def merge_params_with_priority(*param_maps: dict | None) -> dict:
+    """
+    Merge params from low priority to high priority.
+    Later maps override earlier ones.
+    """
+    merged: dict = {}
+    for item in param_maps:
+        if item:
+            merged.update(item)
+    return merged
 
 
 def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
@@ -95,7 +120,7 @@ def create_reporting_dag(
     @dag_decorator(
         dag_id=definition.dag_id,
         description=definition.description,
-        schedule=definition.schedule,
+        schedule=definition.schedule or None,
         tags=list(definition.tags),
         timezone=runtime_context["timezone"],
         params=airflow_params,
@@ -104,9 +129,16 @@ def create_reporting_dag(
         @task(task_id="validate_and_prepare")
         def validate_and_prepare() -> dict:
             context = get_current_context()
-            raw_params = dict(context["params"])
+            # Airflow params from UI/manual trigger
+            user_params = dict(context["params"])
 
-            validated = validate_fields(raw_params, merged_fields)
+            # preset_params are defaults for this DAG variant
+            effective_input = merge_params_with_priority(
+                definition.preset_params,
+                user_params,
+            )
+
+            validated = validate_fields(effective_input, merged_fields)
             apply_adhoc_rules(validated, definition.adhoc_rules)
 
             arg_list = build_args_from_fields(validated, merged_fields)
@@ -119,7 +151,10 @@ def create_reporting_dag(
                     *split_extra_args(validated.get("extra_args")),
                 ],
             )
-            return {"command": command}
+            return {
+                "command": command,
+                "validated_params": validated,
+            }
 
         prepared = validate_and_prepare()
 
@@ -167,3 +202,45 @@ def create_reporting_dag(
             prepared >> run_report
 
     return _dag()
+
+
+def create_reporting_definition_variant(
+    *,
+    base_definition: ReportingDefinition,
+    variant: ReportingScheduleVariant,
+) -> ReportingDefinition:
+    fields = merge_field_definitions(
+        base_definition.fields,
+        variant.fields_override or {},
+    )
+
+    adhoc_rules = dict(base_definition.adhoc_rules)
+    if variant.adhoc_rules_override:
+        adhoc_rules.update(variant.adhoc_rules_override)
+
+    preset_params = merge_params_with_priority(
+        base_definition.preset_params,
+        variant.preset_params,
+    )
+
+    description = base_definition.description
+    if variant.description_suffix:
+        description = f"{description}\n\n{variant.description_suffix}".strip()
+
+    tags = tuple(dict.fromkeys([*base_definition.tags, *variant.tags_additional]))
+
+    return ReportingDefinition(
+        report_id=base_definition.report_id,
+        dag_id=variant.dag_id,
+        title=f"{base_definition.title} {variant.title_suffix}".strip(),
+        description=description,
+        schedule=variant.schedule,
+        remote_script=base_definition.remote_script,
+        sudo_user=base_definition.sudo_user,
+        fields=fields,
+        adhoc_rules=adhoc_rules,
+        trading_day_check=base_definition.trading_day_check,
+        preset_params=preset_params,
+        command_timeout_seconds=base_definition.command_timeout_seconds,
+        tags=tags,
+    )
