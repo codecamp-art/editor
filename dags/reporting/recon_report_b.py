@@ -18,7 +18,7 @@ This report supports multiple scheduled DAG variants and one dedicated adhoc DAG
 """.strip(),
     schedule=None,
     remote_script="/opt/reporting/bin/run_recon_report_b.sh",
-    sudo_user="reportuser",
+    sudo_user="reportuser_default",
     fields={
         "from_date": {
             "type": "string",
@@ -91,6 +91,36 @@ REPORT_B_SCHEDULED_VARIANTS = (
             "book": "BOOK1",
             "include_exceptions": False,
         },
+        env_overrides={
+            "dev": {
+                "schedule": "25 9 * * 1-5",
+                "sudo_user": "reportuser_dev_b",
+                "preset_params": {
+                    "notify_email": "dev-ops@example.com",
+                },
+            },
+            "qa": {
+                "schedule": "20 9 * * 1-5",
+                "sudo_user": "reportuser_qa_b",
+                "preset_params": {
+                    "notify_email": "qa-ops@example.com",
+                },
+            },
+            "prod": {
+                "schedule": "10 9 * * 1-5",
+                "sudo_user": "reportuser_prod_b",
+                "preset_params": {
+                    "notify_email": "prod-ops@example.com",
+                },
+            },
+            "dr": {
+                "schedule": "30 9 * * 1-5",
+                "sudo_user": "reportuser_dr_b",
+                "preset_params": {
+                    "notify_email": "dr-ops@example.com",
+                },
+            },
+        },
         tags_additional=("scheduled", "book1", "morning"),
     ),
     ReportingScheduleVariant(
@@ -102,6 +132,36 @@ REPORT_B_SCHEDULED_VARIANTS = (
             "run_mode": "normal",
             "book": "BOOK2",
             "include_exceptions": True,
+        },
+        env_overrides={
+            "dev": {
+                "schedule": "25 18 * * 1-5",
+                "sudo_user": "reportuser_dev_b",
+                "preset_params": {
+                    "notify_email": "dev-ops@example.com",
+                },
+            },
+            "qa": {
+                "schedule": "20 18 * * 1-5",
+                "sudo_user": "reportuser_qa_b",
+                "preset_params": {
+                    "notify_email": "qa-ops@example.com",
+                },
+            },
+            "prod": {
+                "schedule": "10 18 * * 1-5",
+                "sudo_user": "reportuser_prod_b",
+                "preset_params": {
+                    "notify_email": "prod-ops@example.com",
+                },
+            },
+            "dr": {
+                "schedule": "30 18 * * 1-5",
+                "sudo_user": "reportuser_dr_b",
+                "preset_params": {
+                    "notify_email": "dr-ops@example.com",
+                },
+            },
         },
         tags_additional=("scheduled", "book2", "evening"),
     ),
@@ -118,6 +178,32 @@ REPORT_B_ADHOC_VARIANT = ReportingScheduleVariant(
     },
     adhoc_rules_override={
         "required_together": [["from_date", "to_date"]],
+    },
+    env_overrides={
+        "dev": {
+            "sudo_user": "reportuser_dev_b",
+            "preset_params": {
+                "notify_email": "dev-ops@example.com",
+            },
+        },
+        "qa": {
+            "sudo_user": "reportuser_qa_b",
+            "preset_params": {
+                "notify_email": "qa-ops@example.com",
+            },
+        },
+        "prod": {
+            "sudo_user": "reportuser_prod_b",
+            "preset_params": {
+                "notify_email": "prod-ops@example.com",
+            },
+        },
+        "dr": {
+            "sudo_user": "reportuser_dr_b",
+            "preset_params": {
+                "notify_email": "dr-ops@example.com",
+            },
+        },
     },
     tags_additional=("adhoc",),
 )
