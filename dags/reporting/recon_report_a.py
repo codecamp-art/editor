@@ -17,9 +17,17 @@ REPORT_A_BASE = ReportingDefinition(
 This report supports multiple scheduled DAG variants and one dedicated adhoc DAG.
 """.strip(),
     schedule=None,
-    remote_script="/opt/reporting/bin/run_recon_report_a.sh",
+    remote_script=None,
+    remote_command_prefix=["java", "-jar", "recon-report-a.jar"],
     sudo_user="reportuser_default",
+    working_dir="/opt/reporting/recon-report-a",
     fields={
+        "spring_profile": {
+            "type": "string",
+            "default": "",
+            "description": "Spring profile",
+            "cli_name": "spring.profiles.active",
+        },
         "business_date": {
             "type": "string",
             "default": "",
@@ -97,7 +105,10 @@ REPORT_A_SCHEDULED_VARIANTS = (
             "dev": {
                 "schedule": "15 9 * * 1-5",
                 "sudo_user": "reportuser_dev",
+                "working_dir": "/opt/reporting/dev/recon-report-a",
+                "remote_command_prefix": ["java", "-jar", "recon-report-a-dev.jar"],
                 "preset_params": {
+                    "spring_profile": "dev",
                     "legal_entity": "DEVLE",
                     "output_format": "csv",
                 },
@@ -105,7 +116,10 @@ REPORT_A_SCHEDULED_VARIANTS = (
             "qa": {
                 "schedule": "10 9 * * 1-5",
                 "sudo_user": "reportuser_qa",
+                "working_dir": "/opt/reporting/qa/recon-report-a",
+                "remote_command_prefix": ["java", "-jar", "recon-report-a-qa.jar"],
                 "preset_params": {
+                    "spring_profile": "qa",
                     "legal_entity": "QALE",
                     "output_format": "csv",
                 },
@@ -113,7 +127,10 @@ REPORT_A_SCHEDULED_VARIANTS = (
             "prod": {
                 "schedule": "5 9 * * 1-5",
                 "sudo_user": "reportuser_prod",
+                "working_dir": "/opt/reporting/prod/recon-report-a",
+                "remote_command_prefix": ["java", "-jar", "recon-report-a-prod.jar"],
                 "preset_params": {
+                    "spring_profile": "prod",
                     "legal_entity": "PRODLE",
                     "output_format": "xlsx",
                 },
@@ -121,98 +138,16 @@ REPORT_A_SCHEDULED_VARIANTS = (
             "dr": {
                 "schedule": "20 9 * * 1-5",
                 "sudo_user": "reportuser_dr",
+                "working_dir": "/opt/reporting/dr/recon-report-a",
+                "remote_command_prefix": ["java", "-jar", "recon-report-a-dr.jar"],
                 "preset_params": {
+                    "spring_profile": "dr",
                     "legal_entity": "DRLE",
                     "output_format": "csv",
                 },
             },
         },
         tags_additional=("scheduled", "apac", "morning"),
-    ),
-    ReportingScheduleVariant(
-        dag_id="recon-report-a-emea-midday",
-        title_suffix="EMEA Midday",
-        description_suffix="Scheduled EMEA midday run.",
-        schedule="10 12 * * 1-5",
-        preset_params={
-            "run_mode": "normal",
-            "region": "EMEA",
-            "output_format": "csv",
-        },
-        env_overrides={
-            "dev": {
-                "schedule": "20 12 * * 1-5",
-                "sudo_user": "reportuser_dev",
-                "preset_params": {
-                    "legal_entity": "DEVLE",
-                },
-            },
-            "qa": {
-                "schedule": "10 12 * * 1-5",
-                "sudo_user": "reportuser_qa",
-                "preset_params": {
-                    "legal_entity": "QALE",
-                },
-            },
-            "prod": {
-                "schedule": "5 12 * * 1-5",
-                "sudo_user": "reportuser_prod",
-                "preset_params": {
-                    "legal_entity": "PRODLE",
-                    "output_format": "xlsx",
-                },
-            },
-            "dr": {
-                "schedule": "15 12 * * 1-5",
-                "sudo_user": "reportuser_dr",
-                "preset_params": {
-                    "legal_entity": "DRLE",
-                },
-            },
-        },
-        tags_additional=("scheduled", "emea", "midday"),
-    ),
-    ReportingScheduleVariant(
-        dag_id="recon-report-a-apac-eod",
-        title_suffix="APAC EOD",
-        description_suffix="Scheduled APAC end-of-day run.",
-        schedule="10 18 * * 1-5",
-        preset_params={
-            "run_mode": "normal",
-            "region": "APAC",
-            "output_format": "xlsx",
-        },
-        env_overrides={
-            "dev": {
-                "schedule": "15 18 * * 1-5",
-                "sudo_user": "reportuser_dev",
-                "preset_params": {
-                    "legal_entity": "DEVLE",
-                },
-            },
-            "qa": {
-                "schedule": "10 18 * * 1-5",
-                "sudo_user": "reportuser_qa",
-                "preset_params": {
-                    "legal_entity": "QALE",
-                },
-            },
-            "prod": {
-                "schedule": "5 18 * * 1-5",
-                "sudo_user": "reportuser_prod",
-                "preset_params": {
-                    "legal_entity": "PRODLE",
-                },
-            },
-            "dr": {
-                "schedule": "20 18 * * 1-5",
-                "sudo_user": "reportuser_dr",
-                "preset_params": {
-                    "legal_entity": "DRLE",
-                },
-            },
-        },
-        tags_additional=("scheduled", "apac", "eod"),
     ),
 )
 
@@ -231,28 +166,40 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
     env_overrides={
         "dev": {
             "sudo_user": "reportuser_dev",
+            "working_dir": "/opt/reporting/dev/recon-report-a",
+            "remote_command_prefix": ["java", "-jar", "recon-report-a-dev.jar"],
             "preset_params": {
+                "spring_profile": "dev",
                 "region": "APAC",
                 "legal_entity": "DEVLE",
             },
         },
         "qa": {
             "sudo_user": "reportuser_qa",
+            "working_dir": "/opt/reporting/qa/recon-report-a",
+            "remote_command_prefix": ["java", "-jar", "recon-report-a-qa.jar"],
             "preset_params": {
+                "spring_profile": "qa",
                 "region": "APAC",
                 "legal_entity": "QALE",
             },
         },
         "prod": {
             "sudo_user": "reportuser_prod",
+            "working_dir": "/opt/reporting/prod/recon-report-a",
+            "remote_command_prefix": ["java", "-jar", "recon-report-a-prod.jar"],
             "preset_params": {
+                "spring_profile": "prod",
                 "region": "APAC",
                 "legal_entity": "PRODLE",
             },
         },
         "dr": {
             "sudo_user": "reportuser_dr",
+            "working_dir": "/opt/reporting/dr/recon-report-a",
+            "remote_command_prefix": ["java", "-jar", "recon-report-a-dr.jar"],
             "preset_params": {
+                "spring_profile": "dr",
                 "region": "APAC",
                 "legal_entity": "DRLE",
             },
