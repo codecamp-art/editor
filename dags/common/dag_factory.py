@@ -43,11 +43,13 @@ def build_executor_config(runtime_context: dict) -> dict:
     )
 
 
-def dag_decorator(*, dag_id: str, description: str, schedule: str, tags: list[str], timezone: str, params: dict):
+def dag_decorator(*, dag_id: str, description: str, schedule: str | None, tags: list[str], timezone: str, params: dict):
+    dag_schedule = CronTriggerTimetable(schedule, timezone=timezone) if schedule else None
+
     return dag(
         dag_id=dag_id,
         start_date=datetime(2024, 12, 26),
-        schedule=CronTriggerTimetable(schedule, timezone=timezone),
+        schedule=dag_schedule,
         catchup=False,
         doc_md=description,
         tags=tags,
