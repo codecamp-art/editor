@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from airflow.decorators import get_current_context, task
 from airflow.providers.ssh.operators.ssh import SSHOperator
 
+from common.config_loader import get_current_env_name
 from common.dag_factory import (
     DEFAULT_RUNTIME_ENV_FILE,
     build_executor_config,
@@ -55,6 +56,23 @@ class ReportingScheduleVariant:
     fields_override: dict | None = None
     adhoc_rules_override: dict | None = None
     tags_additional: tuple[str, ...] = ()
+    env_overrides: dict | None = None
+    """
+    env_overrides example:
+    {
+        "dev": {
+            "schedule": "10 9 * * 1-5",
+            "sudo_user": "reportuser_dev",
+            "remote_script": "/opt/reporting/dev/run_report.sh",
+            "preset_params": {...},
+            "trading_day_check": TradingDayCheckDefinition(...),
+            "command_timeout_seconds": 3600
+        },
+        "qa": {
+            ...
+        }
+    }
+    """
 
 
 def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
@@ -74,10 +92,6 @@ def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
 
 
 def merge_params_with_priority(*param_maps: dict | None) -> dict:
-    """
-    Merge params from low priority to high priority.
-    Later maps override earlier ones.
-    """
     merged: dict = {}
     for item in param_maps:
         if item:
@@ -120,7 +134,7 @@ def create_reporting_dag(
     @dag_decorator(
         dag_id=definition.dag_id,
         description=definition.description,
-        schedule=definition.schedule or None,
+        schedule=definition.schedule,
         tags=list(definition.tags),
         timezone=runtime_context["timezone"],
         params=airflow_params,
@@ -129,10 +143,8 @@ def create_reporting_dag(
         @task(task_id="validate_and_prepare")
         def validate_and_prepare() -> dict:
             context = get_current_context()
-            # Airflow params from UI/manual trigger
             user_params = dict(context["params"])
 
-            # preset_params are defaults for this DAG variant
             effective_input = merge_params_with_priority(
                 definition.preset_params,
                 user_params,
@@ -209,6 +221,9 @@ def create_reporting_definition_variant(
     base_definition: ReportingDefinition,
     variant: ReportingScheduleVariant,
 ) -> ReportingDefinition:
+    current_env = get_current_env_name()
+    env_override = (variant.env_overrides or {}).get(current_env, {})
+
     fields = merge_field_definitions(
         base_definition.fields,
         variant.fields_override or {},
@@ -221,6 +236,7 @@ def create_reporting_definition_variant(
     preset_params = merge_params_with_priority(
         base_definition.preset_params,
         variant.preset_params,
+        env_override.get("preset_params"),
     )
 
     description = base_definition.description
@@ -229,18 +245,24 @@ def create_reporting_definition_variant(
 
     tags = tuple(dict.fromkeys([*base_definition.tags, *variant.tags_additional]))
 
+    resolved_schedule = env_override.get("schedule", variant.schedule if variant.schedule is not None else base_definition.schedule)
+    resolved_sudo_user = env_override.get("sudo_user", base_definition.sudo_user)
+    resolved_remote_script = env_override.get("remote_script", base_definition.remote_script)
+    resolved_trading_day_check = env_override.get("trading_day_check", base_definition.trading_day_check)
+    resolved_timeout = env_override.get("command_timeout_seconds", base_definition.command_timeout_seconds)
+
     return ReportingDefinition(
         report_id=base_definition.report_id,
         dag_id=variant.dag_id,
         title=f"{base_definition.title} {variant.title_suffix}".strip(),
         description=description,
-        schedule=variant.schedule,
-        remote_script=base_definition.remote_script,
-        sudo_user=base_definition.sudo_user,
+        schedule=resolved_schedule,
+        remote_script=resolved_remote_script,
+        sudo_user=resolved_sudo_user,
         fields=fields,
         adhoc_rules=adhoc_rules,
-        trading_day_check=base_definition.trading_day_check,
+        trading_day_check=resolved_trading_day_check,
         preset_params=preset_params,
-        command_timeout_seconds=base_definition.command_timeout_seconds,
+        command_timeout_seconds=resolved_timeout,
         tags=tags,
     )
