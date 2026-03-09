@@ -14,13 +14,25 @@ def split_extra_args(extra_args: str | None) -> list[str]:
     return shlex.split(extra_args)
 
 
+def build_inner_command(
+    *,
+    command_prefix: list[str],
+    app_args: list[str],
+    working_dir: str | None = None,
+) -> str:
+    command_str = shell_join([*command_prefix, *app_args])
+
+    if working_dir:
+        return f"cd {shlex.quote(working_dir)} && {command_str}"
+
+    return command_str
+
+
 def build_sudo_bash_command(
     *,
     sudo_user: str,
-    script_and_args: list[str],
+    inner_command: str,
 ) -> str:
-    script_command = shell_join(script_and_args)
-
     return shell_join(
         [
             "sudo",
@@ -28,6 +40,6 @@ def build_sudo_bash_command(
             sudo_user,
             "bash",
             "-lc",
-            script_command,
+            inner_command,
         ]
     )
