@@ -19,7 +19,11 @@ from common.field_schema import (
     merge_field_definitions,
     validate_fields,
 )
-from common.remote_command import build_sudo_bash_command, split_extra_args
+from common.remote_command import (
+    build_inner_command,
+    build_sudo_bash_command,
+    split_extra_args,
+)
 from common.ssh_hook import MSSSHHook
 from common.trading_calendar import TradingDayCheckDefinition
 from common.trading_day_tasks import (
@@ -36,8 +40,15 @@ class ReportingDefinition:
     title: str
     description: str
     schedule: str | None
-    remote_script: str
+
+    # Use one of:
+    # - remote_script
+    # - remote_command_prefix
+    remote_script: str | None
+    remote_command_prefix: list[str] | None
+
     sudo_user: str
+    working_dir: str | None
     fields: dict
     adhoc_rules: dict
     trading_day_check: TradingDayCheckDefinition | None = None
@@ -63,13 +74,12 @@ class ReportingScheduleVariant:
         "dev": {
             "schedule": "10 9 * * 1-5",
             "sudo_user": "reportuser_dev",
+            "working_dir": "/opt/reporting/dev",
             "remote_script": "/opt/reporting/dev/run_report.sh",
+            "remote_command_prefix": ["java", "-jar", "report.jar"],
             "preset_params": {...},
             "trading_day_check": TradingDayCheckDefinition(...),
             "command_timeout_seconds": 3600
-        },
-        "qa": {
-            ...
         }
     }
     """
@@ -121,6 +131,19 @@ def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
     return args
 
 
+def resolve_command_prefix(definition: ReportingDefinition) -> list[str]:
+    if definition.remote_command_prefix:
+        return definition.remote_command_prefix
+
+    if definition.remote_script:
+        return [definition.remote_script]
+
+    raise ValueError(
+        f"ReportingDefinition '{definition.dag_id}' must define either "
+        f"remote_script or remote_command_prefix."
+    )
+
+
 def create_reporting_dag(
     *,
     definition: ReportingDefinition,
@@ -130,6 +153,7 @@ def create_reporting_dag(
     merged_fields = merge_field_definitions(COMMON_FIELDS, definition.fields)
     airflow_params = build_airflow_params_from_fields(merged_fields)
     executor_config = build_executor_config(runtime_context)
+    command_prefix = resolve_command_prefix(definition)
 
     @dag_decorator(
         dag_id=definition.dag_id,
@@ -153,16 +177,22 @@ def create_reporting_dag(
             validated = validate_fields(effective_input, merged_fields)
             apply_adhoc_rules(validated, definition.adhoc_rules)
 
-            arg_list = build_args_from_fields(validated, merged_fields)
+            app_args = [
+                *build_args_from_fields(validated, merged_fields),
+                *split_extra_args(validated.get("extra_args")),
+            ]
+
+            inner_command = build_inner_command(
+                command_prefix=command_prefix,
+                app_args=app_args,
+                working_dir=definition.working_dir,
+            )
 
             command = build_sudo_bash_command(
                 sudo_user=definition.sudo_user,
-                script_and_args=[
-                    definition.remote_script,
-                    *arg_list,
-                    *split_extra_args(validated.get("extra_args")),
-                ],
+                inner_command=inner_command,
             )
+
             return {
                 "command": command,
                 "validated_params": validated,
@@ -245,11 +275,25 @@ def create_reporting_definition_variant(
 
     tags = tuple(dict.fromkeys([*base_definition.tags, *variant.tags_additional]))
 
-    resolved_schedule = env_override.get("schedule", variant.schedule if variant.schedule is not None else base_definition.schedule)
+    resolved_schedule = env_override.get(
+        "schedule",
+        variant.schedule if variant.schedule is not None else base_definition.schedule,
+    )
     resolved_sudo_user = env_override.get("sudo_user", base_definition.sudo_user)
+    resolved_working_dir = env_override.get("working_dir", base_definition.working_dir)
     resolved_remote_script = env_override.get("remote_script", base_definition.remote_script)
-    resolved_trading_day_check = env_override.get("trading_day_check", base_definition.trading_day_check)
-    resolved_timeout = env_override.get("command_timeout_seconds", base_definition.command_timeout_seconds)
+    resolved_remote_command_prefix = env_override.get(
+        "remote_command_prefix",
+        base_definition.remote_command_prefix,
+    )
+    resolved_trading_day_check = env_override.get(
+        "trading_day_check",
+        base_definition.trading_day_check,
+    )
+    resolved_timeout = env_override.get(
+        "command_timeout_seconds",
+        base_definition.command_timeout_seconds,
+    )
 
     return ReportingDefinition(
         report_id=base_definition.report_id,
@@ -258,7 +302,9 @@ def create_reporting_definition_variant(
         description=description,
         schedule=resolved_schedule,
         remote_script=resolved_remote_script,
+        remote_command_prefix=resolved_remote_command_prefix,
         sudo_user=resolved_sudo_user,
+        working_dir=resolved_working_dir,
         fields=fields,
         adhoc_rules=adhoc_rules,
         trading_day_check=resolved_trading_day_check,
