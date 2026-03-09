@@ -18,7 +18,7 @@ This report supports multiple scheduled DAG variants and one dedicated adhoc DAG
 """.strip(),
     schedule=None,
     remote_script="/opt/reporting/bin/run_recon_report_a.sh",
-    sudo_user="reportuser",
+    sudo_user="reportuser_default",
     fields={
         "business_date": {
             "type": "string",
@@ -46,7 +46,6 @@ This report supports multiple scheduled DAG variants and one dedicated adhoc DAG
             "description": "Output format",
             "cli_name": "outputFormat",
         },
-        # manual-only richer fields can live here and be hidden/unused by scheduled presets
         "rerun_failed_only": {
             "type": "boolean",
             "default": False,
@@ -94,6 +93,40 @@ REPORT_A_SCHEDULED_VARIANTS = (
             "region": "APAC",
             "output_format": "csv",
         },
+        env_overrides={
+            "dev": {
+                "schedule": "15 9 * * 1-5",
+                "sudo_user": "reportuser_dev",
+                "preset_params": {
+                    "legal_entity": "DEVLE",
+                    "output_format": "csv",
+                },
+            },
+            "qa": {
+                "schedule": "10 9 * * 1-5",
+                "sudo_user": "reportuser_qa",
+                "preset_params": {
+                    "legal_entity": "QALE",
+                    "output_format": "csv",
+                },
+            },
+            "prod": {
+                "schedule": "5 9 * * 1-5",
+                "sudo_user": "reportuser_prod",
+                "preset_params": {
+                    "legal_entity": "PRODLE",
+                    "output_format": "xlsx",
+                },
+            },
+            "dr": {
+                "schedule": "20 9 * * 1-5",
+                "sudo_user": "reportuser_dr",
+                "preset_params": {
+                    "legal_entity": "DRLE",
+                    "output_format": "csv",
+                },
+            },
+        },
         tags_additional=("scheduled", "apac", "morning"),
     ),
     ReportingScheduleVariant(
@@ -106,6 +139,37 @@ REPORT_A_SCHEDULED_VARIANTS = (
             "region": "EMEA",
             "output_format": "csv",
         },
+        env_overrides={
+            "dev": {
+                "schedule": "20 12 * * 1-5",
+                "sudo_user": "reportuser_dev",
+                "preset_params": {
+                    "legal_entity": "DEVLE",
+                },
+            },
+            "qa": {
+                "schedule": "10 12 * * 1-5",
+                "sudo_user": "reportuser_qa",
+                "preset_params": {
+                    "legal_entity": "QALE",
+                },
+            },
+            "prod": {
+                "schedule": "5 12 * * 1-5",
+                "sudo_user": "reportuser_prod",
+                "preset_params": {
+                    "legal_entity": "PRODLE",
+                    "output_format": "xlsx",
+                },
+            },
+            "dr": {
+                "schedule": "15 12 * * 1-5",
+                "sudo_user": "reportuser_dr",
+                "preset_params": {
+                    "legal_entity": "DRLE",
+                },
+            },
+        },
         tags_additional=("scheduled", "emea", "midday"),
     ),
     ReportingScheduleVariant(
@@ -117,6 +181,36 @@ REPORT_A_SCHEDULED_VARIANTS = (
             "run_mode": "normal",
             "region": "APAC",
             "output_format": "xlsx",
+        },
+        env_overrides={
+            "dev": {
+                "schedule": "15 18 * * 1-5",
+                "sudo_user": "reportuser_dev",
+                "preset_params": {
+                    "legal_entity": "DEVLE",
+                },
+            },
+            "qa": {
+                "schedule": "10 18 * * 1-5",
+                "sudo_user": "reportuser_qa",
+                "preset_params": {
+                    "legal_entity": "QALE",
+                },
+            },
+            "prod": {
+                "schedule": "5 18 * * 1-5",
+                "sudo_user": "reportuser_prod",
+                "preset_params": {
+                    "legal_entity": "PRODLE",
+                },
+            },
+            "dr": {
+                "schedule": "20 18 * * 1-5",
+                "sudo_user": "reportuser_dr",
+                "preset_params": {
+                    "legal_entity": "DRLE",
+                },
+            },
         },
         tags_additional=("scheduled", "apac", "eod"),
     ),
@@ -131,15 +225,43 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
     preset_params={
         "run_mode": "adhoc",
     },
-    # optional: stronger adhoc rules here if you want
     adhoc_rules_override={
         "required": ["business_date"],
+    },
+    env_overrides={
+        "dev": {
+            "sudo_user": "reportuser_dev",
+            "preset_params": {
+                "region": "APAC",
+                "legal_entity": "DEVLE",
+            },
+        },
+        "qa": {
+            "sudo_user": "reportuser_qa",
+            "preset_params": {
+                "region": "APAC",
+                "legal_entity": "QALE",
+            },
+        },
+        "prod": {
+            "sudo_user": "reportuser_prod",
+            "preset_params": {
+                "region": "APAC",
+                "legal_entity": "PRODLE",
+            },
+        },
+        "dr": {
+            "sudo_user": "reportuser_dr",
+            "preset_params": {
+                "region": "APAC",
+                "legal_entity": "DRLE",
+            },
+        },
     },
     tags_additional=("adhoc",),
 )
 
 
-# Create scheduled DAGs
 for _variant in REPORT_A_SCHEDULED_VARIANTS:
     _definition = create_reporting_definition_variant(
         base_definition=REPORT_A_BASE,
@@ -147,7 +269,6 @@ for _variant in REPORT_A_SCHEDULED_VARIANTS:
     )
     globals()[_definition.dag_id.replace("-", "_")] = create_reporting_dag(definition=_definition)
 
-# Create dedicated adhoc DAG
 _report_a_adhoc_definition = create_reporting_definition_variant(
     base_definition=REPORT_A_BASE,
     variant=REPORT_A_ADHOC_VARIANT,
