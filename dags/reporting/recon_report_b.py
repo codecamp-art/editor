@@ -1,17 +1,22 @@
-from common.reporting_workflow import ReportingDefinition, create_reporting_dag
+from common.reporting_workflow import (
+    ReportingDefinition,
+    ReportingScheduleVariant,
+    create_reporting_dag,
+    create_reporting_definition_variant,
+)
 from common.trading_calendar import TradingDayCheckDefinition
 
 
-REPORT_B = ReportingDefinition(
+REPORT_B_BASE = ReportingDefinition(
     report_id="recon_report_b",
-    dag_id="recon-report-b",
+    dag_id="recon-report-b-base-not-used-directly",
     title="Recon Report B",
     description="""
 # Recon Report B
 
-This DAG runs Report B on the remote reporting server.
+This report supports multiple scheduled DAG variants and one dedicated adhoc DAG.
 """.strip(),
-    schedule="20 9 * * 1-5",
+    schedule=None,
     remote_script="/opt/reporting/bin/run_recon_report_b.sh",
     sudo_user="reportuser",
     fields={
@@ -45,9 +50,17 @@ This DAG runs Report B on the remote reporting server.
             "default": "",
             "description": "Optional notification email",
             "cli_name": "notifyEmail",
-        }
+        },
+        "desk": {
+            "type": "string",
+            "default": "",
+            "description": "Optional desk filter for adhoc runs",
+            "cli_name": "desk",
+        },
     },
-    adhoc_rules={"required_together": [["from_date", "to_date"]]},
+    adhoc_rules={
+        "required_together": [["from_date", "to_date"]],
+    },
     trading_day_check=TradingDayCheckDefinition(
         check_host="calendar-check.company.net",
         check_user="calendaruser",
@@ -61,8 +74,64 @@ This DAG runs Report B on the remote reporting server.
         calendar_code="TRADING_APAC",
         timeout_seconds=300,
     ),
+    preset_params=None,
     command_timeout_seconds=5400,
     tags=("reporting", "recon", "report-b", "ssh", "kerberos"),
 )
 
-dag = create_reporting_dag(definition=REPORT_B)
+
+REPORT_B_SCHEDULED_VARIANTS = (
+    ReportingScheduleVariant(
+        dag_id="recon-report-b-book1-morning",
+        title_suffix="Book1 Morning",
+        description_suffix="Scheduled Book1 morning run.",
+        schedule="20 9 * * 1-5",
+        preset_params={
+            "run_mode": "normal",
+            "book": "BOOK1",
+            "include_exceptions": False,
+        },
+        tags_additional=("scheduled", "book1", "morning"),
+    ),
+    ReportingScheduleVariant(
+        dag_id="recon-report-b-book2-evening",
+        title_suffix="Book2 Evening",
+        description_suffix="Scheduled Book2 evening run.",
+        schedule="20 18 * * 1-5",
+        preset_params={
+            "run_mode": "normal",
+            "book": "BOOK2",
+            "include_exceptions": True,
+        },
+        tags_additional=("scheduled", "book2", "evening"),
+    ),
+)
+
+
+REPORT_B_ADHOC_VARIANT = ReportingScheduleVariant(
+    dag_id="recon-report-b-adhoc",
+    title_suffix="Adhoc",
+    description_suffix="Dedicated adhoc DAG with richer manual parameters.",
+    schedule=None,
+    preset_params={
+        "run_mode": "adhoc",
+    },
+    adhoc_rules_override={
+        "required_together": [["from_date", "to_date"]],
+    },
+    tags_additional=("adhoc",),
+)
+
+
+for _variant in REPORT_B_SCHEDULED_VARIANTS:
+    _definition = create_reporting_definition_variant(
+        base_definition=REPORT_B_BASE,
+        variant=_variant,
+    )
+    globals()[_definition.dag_id.replace("-", "_")] = create_reporting_dag(definition=_definition)
+
+_report_b_adhoc_definition = create_reporting_definition_variant(
+    base_definition=REPORT_B_BASE,
+    variant=REPORT_B_ADHOC_VARIANT,
+)
+recon_report_b_adhoc = create_reporting_dag(definition=_report_b_adhoc_definition)
