@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from airflow.decorators import get_current_context, task
+from airflow.sdk import get_current_context, task
 from airflow.providers.ssh.operators.ssh import SSHOperator
 
 from common.config_loader import get_current_env_name
@@ -12,6 +12,7 @@ from common.dag_factory import (
     build_executor_config,
     build_runtime_context,
     dag_decorator,
+    get_sysid_from_file,
 )
 from common.field_schema import (
     COMMON_FIELDS,
@@ -52,7 +53,11 @@ class ReportingDefinition:
     fields: dict
     adhoc_rules: dict
     trading_day_check: TradingDayCheckDefinition | None = None
+
+    # Also used to decide which params appear in the Airflow UI.
+    # Only keys present here are shown in UI.
     preset_params: dict | None = None
+
     command_timeout_seconds: int = 3600
     tags: tuple[str, ...] = ("reporting", "ssh", "kerberos")
 
@@ -68,21 +73,6 @@ class ReportingScheduleVariant:
     adhoc_rules_override: dict | None = None
     tags_additional: tuple[str, ...] = ()
     env_overrides: dict | None = None
-    """
-    env_overrides example:
-    {
-        "dev": {
-            "schedule": "10 9 * * 1-5",
-            "sudo_user": "reportuser_dev",
-            "working_dir": "/opt/reporting/dev",
-            "remote_script": "/opt/reporting/dev/run_report.sh",
-            "remote_command_prefix": ["java", "-jar", "report.jar"],
-            "preset_params": {...},
-            "trading_day_check": TradingDayCheckDefinition(...),
-            "command_timeout_seconds": 3600
-        }
-    }
-    """
 
 
 def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
@@ -144,14 +134,42 @@ def resolve_command_prefix(definition: ReportingDefinition) -> list[str]:
     )
 
 
+def build_airflow_params_from_preset_keys(
+    *,
+    all_fields: dict,
+    preset_params: dict | None,
+) -> dict:
+    if not preset_params:
+        return {}
+
+    visible_fields = {
+        field_name: {
+            **all_fields[field_name],
+            "default": preset_params[field_name],
+        }
+        for field_name in preset_params.keys()
+        if field_name in all_fields
+    }
+    return build_airflow_params_from_fields(visible_fields)
+
+
 def create_reporting_dag(
     *,
     definition: ReportingDefinition,
+    source_file: str | Path,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ):
-    runtime_context = build_runtime_context(runtime_env_file)
+    owner = get_sysid_from_file(source_file)
+    runtime_context = build_runtime_context(
+        owner=owner,
+        config_file=runtime_env_file,
+    )
+
     merged_fields = merge_field_definitions(COMMON_FIELDS, definition.fields)
-    airflow_params = build_airflow_params_from_fields(merged_fields)
+    airflow_params = build_airflow_params_from_preset_keys(
+        all_fields=merged_fields,
+        preset_params=definition.preset_params,
+    )
     executor_config = build_executor_config(runtime_context)
     command_prefix = resolve_command_prefix(definition)
 
@@ -162,6 +180,7 @@ def create_reporting_dag(
         tags=list(definition.tags),
         timezone=runtime_context["timezone"],
         params=airflow_params,
+        owner=owner,
     )
     def _dag():
         @task(task_id="validate_and_prepare")
