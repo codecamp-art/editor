@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from airflow.decorators import get_current_context, task
+from airflow.sdk import get_current_context, task
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.ssh.operators.ssh import SSHOperator
 
@@ -9,7 +9,7 @@ from common.ssh_hook import MSSSHHook
 from common.trading_calendar import TradingDayCheckDefinition
 
 
-def create_trading_day_prepare_task(
+def build_prepare_trading_day_check_task(
     *,
     task_id: str,
     trading_day_check: TradingDayCheckDefinition,
@@ -40,7 +40,7 @@ def create_trading_day_prepare_task(
 
         remote_command = build_sudo_bash_command(
             sudo_user=trading_day_check.check_user,
-            script_and_args=["bash", "-lc", remote_inner_command],
+            inner_command=remote_inner_command,
         )
 
         return {
@@ -50,10 +50,10 @@ def create_trading_day_prepare_task(
             "command": remote_command,
         }
 
-    return _prepare_trading_day_check()
+    return _prepare_trading_day_check
 
 
-def create_trading_day_ssh_task(
+def build_trading_day_ssh_task(
     *,
     task_id: str,
     trading_day_check: TradingDayCheckDefinition,
@@ -74,7 +74,7 @@ def create_trading_day_ssh_task(
     )
 
 
-def create_trading_day_decide_task(
+def build_decide_trading_day_task(
     *,
     task_id: str,
 ):
