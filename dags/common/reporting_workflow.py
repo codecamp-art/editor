@@ -28,9 +28,9 @@ from common.remote_command import (
 from common.ssh_hook import MSSSHHook
 from common.trading_calendar import TradingDayCheckDefinition
 from common.trading_day_tasks import (
-    create_trading_day_decide_task,
-    create_trading_day_prepare_task,
-    create_trading_day_ssh_task,
+    build_decide_trading_day_task,
+    build_prepare_trading_day_check_task,
+    build_trading_day_ssh_task,
 )
 
 
@@ -41,23 +41,14 @@ class ReportingDefinition:
     title: str
     description: str
     schedule: str | None
-
-    # Use one of:
-    # - remote_script
-    # - remote_command_prefix
     remote_script: str | None
     remote_command_prefix: list[str] | None
-
     sudo_user: str
     working_dir: str | None
     fields: dict
     adhoc_rules: dict
     trading_day_check: TradingDayCheckDefinition | None = None
-
-    # Also used to decide which params appear in the Airflow UI.
-    # Only keys present here are shown in UI.
     preset_params: dict | None = None
-
     command_timeout_seconds: int = 3600
     tags: tuple[str, ...] = ("reporting", "ssh", "kerberos")
 
@@ -217,26 +208,32 @@ def create_reporting_dag(
                 "validated_params": validated,
             }
 
-        prepared = validate_and_prepare()
+        prepared = validate_and_prepare.override(
+            executor_config=executor_config
+        )()
 
         if definition.trading_day_check is not None:
-            prepare_trading_day_check = create_trading_day_prepare_task(
+            prepare_trading_day_check_task = build_prepare_trading_day_check_task(
                 task_id="prepare_trading_day_check",
                 trading_day_check=definition.trading_day_check,
             )
+            prepare_trading_day_check = prepare_trading_day_check_task.override(
+                executor_config=executor_config
+            )()
 
-            run_trading_day_check = create_trading_day_ssh_task(
+            run_trading_day_check = build_trading_day_ssh_task(
                 task_id="run_trading_day_check",
                 trading_day_check=definition.trading_day_check,
                 kerberos_principal=runtime_context["kerberos_principal"],
                 executor_config=executor_config,
             )
 
-            decide_trading_day = create_trading_day_decide_task(
+            decide_trading_day_task = build_decide_trading_day_task(
                 task_id="decide_trading_day",
             )
-
-            trading_day_result = decide_trading_day(
+            trading_day_result = decide_trading_day_task.override(
+                executor_config=executor_config
+            )(
                 prepare_trading_day_check,
                 run_trading_day_check.output,
             )
