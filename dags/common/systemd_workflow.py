@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from airflow.decorators import get_current_context, task
+from airflow.sdk import get_current_context, task
 from airflow.exceptions import AirflowSkipException
-from airflow.operators.empty import EmptyOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
 from airflow.providers.ssh.operators.ssh import SSHOperator
-from airflow.sensors.external_task import ExternalTaskSensor
 
 from common.config_loader import get_current_env_name, load_topology_for_current_env
 from common.dag_factory import (
@@ -15,6 +15,7 @@ from common.dag_factory import (
     build_executor_config,
     build_runtime_context,
     dag_decorator,
+    get_sysid_from_file,
 )
 from common.field_schema import (
     COMMON_FIELDS,
@@ -24,7 +25,6 @@ from common.field_schema import (
     validate_fields,
 )
 from common.remote_command import build_sudo_bash_command
-from common.ssh_hook import MSSSHHook
 
 
 DEFAULT_SYSTEMD_TOPOLOGY_FILE = Path(__file__).resolve().parents[1] / "configs" / "systemd_topologies.json"
@@ -47,7 +47,7 @@ class SystemdProcessSpec:
     service_name: str
     service_user: str
     host_group: str
-    platform: str  # rhel7 | rhel8
+    platform: str
     start_after: tuple[str, ...] = ()
     enabled_in_envs: tuple[str, ...] = ("dev", "qa", "prod", "dr")
 
@@ -77,15 +77,15 @@ def build_systemd_airflow_fields(extra_fields: dict) -> dict:
 
 def build_systemd_command(platform: str, service_name: str, service_user: str, action: str) -> str:
     if platform == "rhel7":
-        inner = ["sudo", "systemd", action, service_name]
+        inner = f"sudo systemd {action} {service_name}"
     elif platform == "rhel8":
-        inner = ["systemd", "--user", action, service_name]
+        inner = f"systemd --user {action} {service_name}"
     else:
         raise ValueError(f"Unsupported platform '{platform}'.")
 
     return build_sudo_bash_command(
         sudo_user=service_user,
-        script_and_args=inner,
+        inner_command=inner,
     )
 
 
@@ -127,6 +127,7 @@ def validate_dependency_graph(processes: list[SystemdProcessSpec]) -> None:
 def create_external_dependency_sensors(
     *,
     dependencies: tuple[ExternalDagDependency, ...],
+    executor_config: dict,
 ) -> list[ExternalTaskSensor]:
     sensors: list[ExternalTaskSensor] = []
 
@@ -140,6 +141,7 @@ def create_external_dependency_sensors(
             timeout=dep.timeout_seconds,
             poke_interval=dep.poke_interval_seconds,
             mode="reschedule",
+            executor_config=executor_config,
         )
         sensors.append(sensor)
 
@@ -150,15 +152,20 @@ def create_systemd_dag(
     *,
     workflow: SystemdWorkflowDefinition,
     dag_id: str,
-    action: str,  # start | stop
+    action: str,
     schedule: str,
+    source_file: str | Path,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
     topology_file: str | Path = DEFAULT_SYSTEMD_TOPOLOGY_FILE,
 ):
     if action not in {"start", "stop"}:
         raise ValueError("action must be 'start' or 'stop'")
 
-    runtime_context = build_runtime_context(runtime_env_file)
+    owner = get_sysid_from_file(source_file)
+    runtime_context = build_runtime_context(
+        owner=owner,
+        config_file=runtime_env_file,
+    )
     topology = load_topology_for_current_env(topology_file)
     current_env = get_current_env_name()
 
@@ -167,6 +174,7 @@ def create_systemd_dag(
 
     airflow_fields = build_systemd_airflow_fields(workflow.fields)
     airflow_params = build_airflow_params_from_fields(airflow_fields)
+    executor_config = build_executor_config(runtime_context)
 
     raw_upstream_dependencies = (
         workflow.upstream_dags_for_start if action == "start" else workflow.upstream_dags_for_stop
@@ -180,6 +188,7 @@ def create_systemd_dag(
         tags=list(workflow.tags),
         timezone=runtime_context["timezone"],
         params=airflow_params,
+        owner=owner,
     )
     def _dag():
         @task(task_id="validate_inputs")
@@ -200,13 +209,16 @@ def create_systemd_dag(
 
             return validated
 
-        validated_task = validate_inputs()
+        validated_task = validate_inputs.override(
+            executor_config=executor_config
+        )()
 
-        start_node = EmptyOperator(task_id="start")
-        end_node = EmptyOperator(task_id="end")
+        start_node = EmptyOperator(task_id="start", executor_config=executor_config)
+        end_node = EmptyOperator(task_id="end", executor_config=executor_config)
 
         wait_sensors = create_external_dependency_sensors(
             dependencies=upstream_dependencies,
+            executor_config=executor_config,
         )
 
         if wait_sensors:
@@ -229,6 +241,8 @@ def create_systemd_dag(
                     action=action,
                 )
 
+                from common.ssh_hook import MSSSHHook
+
                 op = SSHOperator(
                     task_id=task_id,
                     ssh_hook=MSSSHHook(
@@ -238,7 +252,7 @@ def create_systemd_dag(
                     ),
                     command=command,
                     cmd_timeout=workflow.command_timeout_seconds,
-                    executor_config=build_executor_config(runtime_context),
+                    executor_config=executor_config,
                 )
 
                 task_map[(process.process_id, host)] = op
@@ -281,7 +295,9 @@ def create_systemd_dag(
         def filter_target_mode(validated: dict) -> dict:
             return validated
 
-        filter_result = filter_target_mode(validated_task)
+        filter_result = filter_target_mode.override(
+            executor_config=executor_config
+        )(validated_task)
 
         for process in enabled_processes:
             hosts = resolve_hosts_for_process(topology, process.host_group)
@@ -300,7 +316,8 @@ def create_systemd_dag(
                     )
 
                 allow_task = allow_process.override(
-                    task_id=f"allow__{process.process_id}__{host.replace('.', '_').replace('-', '_')}"
+                    task_id=f"allow__{process.process_id}__{host.replace('.', '_').replace('-', '_')}",
+                    executor_config=executor_config,
                 )(filter_result, process.process_id)
 
                 allow_task >> original_task
