@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tgt-refresh
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: tgt-refresh-sa
+          restartPolicy: OnFailure
+          containers:
+            - name: tgt-refresh
+              image: my-registry.example.com/security/kerberos-refresh:1.0.0
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  kinit -R || kinit -kt /etc/security/keytabs/app.keytab appuser@EXAMPLE.COM
+                  klist
+              env:
+                - name: KRB5_CONFIG
+                  value: /etc/krb5/krb5.conf
+                - name: KRB5CCNAME
+                  value: FILE:/var/kerberos/ccache/krb5cc
+              volumeMounts:
+                - name: krb5-conf
+                  mountPath: /etc/krb5
+                  readOnly: true
+                - name: keytab
+                  mountPath: /etc/security/keytabs
+                  readOnly: true
+                - name: ccache
+                  mountPath: /var/kerberos/ccache
+          volumes:
+            - name: krb5-conf
+              secret:
+                secretName: krb5-conf
+            - name: keytab
+              secret:
+                secretName: kerberos-keytab
+            - name: ccache
+              emptyDir: {}
