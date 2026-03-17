@@ -9,7 +9,8 @@ from airflow.providers.ssh.operators.ssh import SSHOperator
 from common.config_loader import get_current_env_name
 from common.dag_factory import (
     DEFAULT_RUNTIME_ENV_FILE,
-    build_executor_config,
+    build_full_kerberos_executor_config,
+    build_minimal_tenant_executor_config,
     build_runtime_context,
     dag_decorator,
     get_sysid_from_file,
@@ -115,10 +116,8 @@ def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
 def resolve_command_prefix(definition: ReportingDefinition) -> list[str]:
     if definition.remote_command_prefix:
         return definition.remote_command_prefix
-
     if definition.remote_script:
         return [definition.remote_script]
-
     raise ValueError(
         f"ReportingDefinition '{definition.dag_id}' must define either "
         f"remote_script or remote_command_prefix."
@@ -161,7 +160,9 @@ def create_reporting_dag(
         all_fields=merged_fields,
         preset_params=definition.preset_params,
     )
-    executor_config = build_executor_config(runtime_context)
+
+    minimal_executor_config = build_minimal_tenant_executor_config(runtime_context)
+    kerberos_executor_config = build_full_kerberos_executor_config(runtime_context)
     command_prefix = resolve_command_prefix(definition)
 
     @dag_decorator(
@@ -209,7 +210,7 @@ def create_reporting_dag(
             }
 
         prepared = validate_and_prepare.override(
-            executor_config=executor_config
+            executor_config=minimal_executor_config
         )()
 
         if definition.trading_day_check is not None:
@@ -218,21 +219,21 @@ def create_reporting_dag(
                 trading_day_check=definition.trading_day_check,
             )
             prepare_trading_day_check = prepare_trading_day_check_task.override(
-                executor_config=executor_config
+                executor_config=minimal_executor_config
             )()
 
             run_trading_day_check = build_trading_day_ssh_task(
                 task_id="run_trading_day_check",
                 trading_day_check=definition.trading_day_check,
                 kerberos_principal=runtime_context["kerberos_principal"],
-                executor_config=executor_config,
+                executor_config=kerberos_executor_config,
             )
 
             decide_trading_day_task = build_decide_trading_day_task(
                 task_id="decide_trading_day",
             )
             trading_day_result = decide_trading_day_task.override(
-                executor_config=executor_config
+                executor_config=minimal_executor_config
             )(
                 prepare_trading_day_check,
                 run_trading_day_check.output,
@@ -251,7 +252,7 @@ def create_reporting_dag(
             ),
             command="{{ ti.xcom_pull(task_ids='validate_and_prepare')['command'] }}",
             cmd_timeout=definition.command_timeout_seconds,
-            executor_config=executor_config,
+            executor_config=kerberos_executor_config,
         )
 
         if trading_day_result is not None:
