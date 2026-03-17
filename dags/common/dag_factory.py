@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -13,33 +12,21 @@ from common.config_loader import load_runtime_env_config
 DEFAULT_RUNTIME_ENV_FILE = Path(__file__).resolve().parents[1] / "configs" / "runtime_envs.json"
 
 
-def get_sysid_from_file(file_path: str | Path) -> str:
-    path = Path(file_path)
-    return path.parts[-2]
-
-
-def build_tenant_namespace(*, owner: str) -> str:
-    tenant_prefix = os.environ.get("AIRFLOW_TENANT_PREFIX")
-    airflow_env = os.environ.get("AIRFLOW_ENV")
-
-    if not tenant_prefix:
-        raise ValueError("Required environment variable 'AIRFLOW_TENANT_PREFIX' is missing.")
-    if not airflow_env:
-        raise ValueError("Required environment variable 'AIRFLOW_ENV' is missing.")
-
-    return f"{tenant_prefix}-{airflow_env.lower()}-{owner}"
-
-
 def build_runtime_context(
     *,
-    owner: str,
     config_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ) -> dict:
     runtime_cfg = load_runtime_env_config(config_file)
 
+    if not runtime_cfg.get("owner"):
+        raise ValueError("Missing required config key: owner")
+    if not runtime_cfg.get("namespace"):
+        raise ValueError("Missing required config key: namespace")
+
     return {
+        "owner": runtime_cfg["owner"],
         "target_host": runtime_cfg.get("target_host"),
-        "namespace": build_tenant_namespace(owner=owner),
+        "namespace": runtime_cfg["namespace"],
         "kerberos_principal": runtime_cfg["kerberos_principal"],
         "kerberos_realm": runtime_cfg["kerberos_realm"],
         "keytab_secret_name": runtime_cfg["keytab_secret_name"],
@@ -52,11 +39,6 @@ def build_runtime_context(
 
 
 def build_minimal_tenant_executor_config(runtime_context: dict) -> dict:
-    """
-    Minimal executor_config for Python/helper tasks.
-    Enough to satisfy tenant scheduling policy, without Kerberos init container,
-    secret mounts, or extra volumes.
-    """
     try:
         from kubernetes.client import models as k8s
     except ImportError as exc:
