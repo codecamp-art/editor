@@ -7,14 +7,15 @@ from airflow.sdk import get_current_context, task
 from airflow.providers.ssh.operators.ssh import SSHOperator
 
 from common.config_loader import get_current_env_name
+
 from common.dag_factory import (
     DEFAULT_RUNTIME_ENV_FILE,
     build_full_kerberos_executor_config,
     build_minimal_tenant_executor_config,
     build_runtime_context,
     dag_decorator,
-    get_sysid_from_file,
 )
+
 from common.field_schema import (
     COMMON_FIELDS,
     build_airflow_params_from_fields,
@@ -149,11 +150,10 @@ def create_reporting_dag(
     source_file: str | Path,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ):
-    owner = get_sysid_from_file(source_file)
     runtime_context = build_runtime_context(
-        owner=owner,
         config_file=runtime_env_file,
     )
+    owner = runtime_context["owner"]
 
     merged_fields = merge_field_definitions(COMMON_FIELDS, definition.fields)
     airflow_params = build_airflow_params_from_preset_keys(
