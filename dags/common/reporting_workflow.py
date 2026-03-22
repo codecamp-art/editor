@@ -114,6 +114,30 @@ def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
     return args
 
 
+def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
+    env_vars: dict[str, str] = {}
+
+    for field_name, spec in fields.items():
+        if spec.get("export_to_env") is not True:
+            continue
+
+        value = validated.get(field_name)
+        if value in (None, ""):
+            continue
+
+        env_name = spec.get("env_name")
+        if not env_name:
+            continue
+
+        transform = spec.get("env_transform")
+        if transform == "lower_bool":
+            value = str(bool(value)).lower()
+
+        env_vars[env_name] = str(value)
+
+    return env_vars
+
+
 def resolve_command_prefix(definition: ReportingDefinition) -> list[str]:
     if definition.remote_command_prefix:
         return definition.remote_command_prefix
@@ -193,10 +217,13 @@ def create_reporting_dag(
                 *split_extra_args(validated.get("extra_args")),
             ]
 
+            env_vars = build_env_vars_from_fields(validated, merged_fields)
+
             inner_command = build_inner_command(
                 command_prefix=command_prefix,
                 app_args=app_args,
                 working_dir=definition.working_dir,
+                env_vars=env_vars,
             )
 
             command = build_sudo_bash_command(

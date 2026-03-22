@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from airflow.sdk import dag
-from airflow.timetables.trigger import CronTriggerTimetable
+from airflow.timetables.trigger import CronTriggerTimetable, MultipleCronTriggerTimetable
 
 from common.config_loader import load_runtime_env_config
 
@@ -79,13 +79,18 @@ def dag_decorator(
     *,
     dag_id: str,
     description: str,
-    schedule: str | None,
+    schedule: str | list[str] | tuple[str, ...] | None,
     tags: list[str],
     timezone: str,
     params: dict,
     owner: str,
 ):
-    dag_schedule = CronTriggerTimetable(schedule, timezone=timezone) if schedule else None
+    if schedule is None:
+        dag_schedule = None
+    elif isinstance(schedule, str):
+        dag_schedule = CronTriggerTimetable(schedule, timezone=timezone)
+    else:
+        dag_schedule = MultipleCronTriggerTimetable(*schedule, timezone=timezone)
 
     return dag(
         dag_id=dag_id,
