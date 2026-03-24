@@ -4,14 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from airflow.sdk import get_current_context, task
-from airflow.providers.ssh.operators.ssh import SSHOperator
 
 from common.config_loader import get_current_env_name
 
 from common.dag_factory import (
     DEFAULT_RUNTIME_ENV_FILE,
     build_full_kerberos_executor_config,
-    build_minimal_tenant_executor_config,
     build_runtime_context,
     dag_decorator,
 )
@@ -27,12 +25,10 @@ from common.remote_command import (
     build_sudo_bash_command,
     split_extra_args,
 )
-from common.ssh_hook import MSSSHHook
+from common.ssh_hook import MSSSHHook, execute_ssh_command
 from common.trading_calendar import TradingDayCheckDefinition
 from common.trading_day_tasks import (
-    build_decide_trading_day_task,
-    build_prepare_trading_day_check_task,
-    build_trading_day_ssh_task,
+    build_trading_day_check_task,
 )
 
 
@@ -185,7 +181,6 @@ def create_reporting_dag(
         preset_params=definition.preset_params,
     )
 
-    minimal_executor_config = build_minimal_tenant_executor_config(runtime_context)
     kerberos_executor_config = build_full_kerberos_executor_config(runtime_context)
     command_prefix = resolve_command_prefix(definition)
 
@@ -199,8 +194,8 @@ def create_reporting_dag(
         owner=owner,
     )
     def _dag():
-        @task(task_id="validate_and_prepare")
-        def validate_and_prepare() -> dict:
+        @task(task_id="run_report")
+        def run_report() -> str:
             context = get_current_context()
             user_params = dict(context["params"])
 
@@ -231,61 +226,32 @@ def create_reporting_dag(
                 inner_command=inner_command,
             )
 
-            return {
-                "command": command,
-                "validated_params": validated,
-            }
+            return execute_ssh_command(
+                task_id="run_report__ssh",
+                ssh_hook=MSSSHHook(
+                    remote_host=runtime_context["target_host"],
+                    username=runtime_context["kerberos_principal"],
+                    enable_kerberos=True,
+                ),
+                command=command,
+                cmd_timeout=definition.command_timeout_seconds,
+            )
 
-        prepared = validate_and_prepare.override(
-            executor_config=minimal_executor_config
+        run_report_task = run_report.override(
+            executor_config=kerberos_executor_config
         )()
 
         if definition.trading_day_check is not None:
-            prepare_trading_day_check_task = build_prepare_trading_day_check_task(
-                task_id="prepare_trading_day_check",
-                trading_day_check=definition.trading_day_check,
-            )
-            prepare_trading_day_check = prepare_trading_day_check_task.override(
-                executor_config=minimal_executor_config
-            )()
-
-            run_trading_day_check = build_trading_day_ssh_task(
-                task_id="run_trading_day_check",
+            trading_day_check_task = build_trading_day_check_task(
+                task_id="trading_day_check",
                 trading_day_check=definition.trading_day_check,
                 kerberos_principal=runtime_context["kerberos_principal"],
-                executor_config=kerberos_executor_config,
             )
+            trading_day_check_result = trading_day_check_task.override(
+                executor_config=kerberos_executor_config
+            )()
 
-            decide_trading_day_task = build_decide_trading_day_task(
-                task_id="decide_trading_day",
-            )
-            trading_day_result = decide_trading_day_task.override(
-                executor_config=minimal_executor_config
-            )(
-                prepare_trading_day_check,
-                run_trading_day_check.output,
-            )
-
-            prepared >> prepare_trading_day_check >> run_trading_day_check >> trading_day_result
-        else:
-            trading_day_result = None
-
-        run_report = SSHOperator(
-            task_id="run_report",
-            ssh_hook=MSSSHHook(
-                remote_host=runtime_context["target_host"],
-                username=runtime_context["kerberos_principal"],
-                enable_kerberos=True,
-            ),
-            command="{{ ti.xcom_pull(task_ids='validate_and_prepare')['command'] }}",
-            cmd_timeout=definition.command_timeout_seconds,
-            executor_config=kerberos_executor_config,
-        )
-
-        if trading_day_result is not None:
-            trading_day_result >> run_report
-        else:
-            prepared >> run_report
+            trading_day_check_result >> run_report_task
 
     return _dag()
 
