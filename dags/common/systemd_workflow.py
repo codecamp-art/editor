@@ -7,7 +7,6 @@ from airflow.sdk import get_current_context, task
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
-from airflow.providers.ssh.operators.ssh import SSHOperator
 
 from common.config_loader import get_current_env_name, load_topology_for_current_env
 from common.dag_factory import (
@@ -25,6 +24,7 @@ from common.field_schema import (
     validate_fields,
 )
 from common.remote_command import build_sudo_bash_command
+from common.ssh_hook import MSSSHHook, MSSSHOperator
 
 
 DEFAULT_SYSTEMD_TOPOLOGY_FILE = Path(__file__).resolve().parents[1] / "configs" / "systemd_topologies.json"
@@ -225,12 +225,12 @@ def create_systemd_dag(
             for sensor in wait_sensors:
                 sensor >> start_node
 
-        task_map: dict[tuple[str, str], SSHOperator] = {}
-        process_roots: dict[str, list[SSHOperator]] = {}
+        task_map: dict[tuple[str, str], MSSSHOperator] = {}
+        process_roots: dict[str, list[MSSSHOperator]] = {}
 
         for process in enabled_processes:
             hosts = resolve_hosts_for_process(topology, process.host_group)
-            process_tasks: list[SSHOperator] = []
+            process_tasks: list[MSSSHOperator] = []
 
             for host in hosts:
                 task_id = f"{process.process_id}__{host.replace('.', '_').replace('-', '_')}"
@@ -241,9 +241,7 @@ def create_systemd_dag(
                     action=action,
                 )
 
-                from common.ssh_hook import MSSSHHook
-
-                op = SSHOperator(
+                op = MSSSHOperator(
                     task_id=task_id,
                     ssh_hook=MSSSHHook(
                         remote_host=host,

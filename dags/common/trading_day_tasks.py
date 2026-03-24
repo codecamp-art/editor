@@ -4,7 +4,7 @@ from airflow.sdk import get_current_context, task
 from airflow.exceptions import AirflowSkipException
 
 from common.remote_command import build_sudo_bash_command
-from common.ssh_hook import MSSSHHook, execute_ssh_command
+from common.ssh_hook import MSSSHHook, MSSSHOperator, execute_ssh_command
 from common.trading_calendar import TradingDayCheckDefinition
 
 
@@ -118,9 +118,7 @@ def build_trading_day_ssh_task(
     kerberos_principal: str,
     executor_config: dict,
 ):
-    from airflow.providers.ssh.operators.ssh import SSHOperator
-
-    return SSHOperator(
+    return MSSSHOperator(
         task_id=task_id,
         ssh_hook=MSSSHHook(
             remote_host=trading_day_check.check_host,
