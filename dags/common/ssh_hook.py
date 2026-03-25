@@ -30,10 +30,10 @@ class MSSSHHook(SSHHook):
     Custom SSH hook with optional Kerberos settings and env-var fallback
     for username/password.
 
-    Typical usage for your case:
-    - host/port come from Airflow SSH connection or remote_host
-    - username/password come from pod env vars injected from K8s Secret
-    - Kerberos stays disabled unless explicitly enabled
+    Resolution order:
+    1. explicit hook args
+    2. environment variables
+    3. values populated by parent SSHHook / Airflow connection
     """
 
     def __init__(
@@ -61,6 +61,9 @@ class MSSSHHook(SSHHook):
         env_username_var: str = "SSH_USERNAME",
         env_password_var: str = "SSH_PASSWORD",
     ) -> None:
+        self._explicit_username = username
+        self._explicit_password = password
+
         super().__init__(
             ssh_conn_id=ssh_conn_id,
             remote_host=remote_host,
@@ -113,8 +116,8 @@ class MSSSHHook(SSHHook):
         Establish an SSH connection to the remote host, with optional Kerberos auth.
         Username/password can come from:
         1. explicit hook args
-        2. Airflow connection
-        3. environment variables
+        2. environment variables
+        3. parent hook / Airflow connection populated values
         """
         if self.client:
             transport = self.client.get_transport()
@@ -153,8 +156,16 @@ class MSSSHHook(SSHHook):
                     self.host_key,
                 )
 
-        resolved_username = self.username or os.getenv(self.env_username_var)
-        resolved_password = self.password or os.getenv(self.env_password_var)
+        resolved_username = (
+            self._explicit_username
+            or os.getenv(self.env_username_var)
+            or self.username
+        )
+        resolved_password = (
+            self._explicit_password
+            or os.getenv(self.env_password_var)
+            or self.password
+        )
 
         if not self.remote_host:
             raise AirflowException(
@@ -163,8 +174,8 @@ class MSSSHHook(SSHHook):
 
         if not resolved_username:
             raise AirflowException(
-                f"SSH username is not set. Checked Airflow connection and env var "
-                f"{self.env_username_var}."
+                f"SSH username is not set. Checked explicit args, env var "
+                f"{self.env_username_var}, and Airflow connection."
             )
 
         self.log.info(
