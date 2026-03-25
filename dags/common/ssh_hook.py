@@ -167,6 +167,19 @@ class MSSSHHook(SSHHook):
                 f"{self.env_username_var}."
             )
 
+        self.log.info(
+            "Preparing SSH connection: conn_id=%s, host=%s, port=%s, username=%s, kerberos=%s",
+            self.ssh_conn_id,
+            self.remote_host,
+            self.port,
+            resolved_username,
+            self.enable_kerberos,
+        )
+        self.log.info(
+            "SSH password source present: %s",
+            "yes" if bool(resolved_password) else "no",
+        )
+
         connect_kwargs: dict[str, Any] = {
             "hostname": self.remote_host,
             "username": resolved_username,
@@ -211,7 +224,24 @@ class MSSSHHook(SSHHook):
             before_sleep=log_before_sleep,
         ):
             with attempt:
-                client.connect(**connect_kwargs)
+                try:
+                    self.log.info(
+                        "SSH connect attempt %s to host=%s port=%s username=%s",
+                        attempt.retry_state.attempt_number,
+                        self.remote_host,
+                        self.port,
+                        resolved_username,
+                    )
+                    client.connect(**connect_kwargs)
+                except Exception:
+                    self.log.exception(
+                        "SSH connect failed: host=%s port=%s username=%s kerberos=%s",
+                        self.remote_host,
+                        self.port,
+                        resolved_username,
+                        self.enable_kerberos,
+                    )
+                    raise
 
         if self.keepalive_interval:
             client.get_transport().set_keepalive(self.keepalive_interval)  # type: ignore[union-attr]
