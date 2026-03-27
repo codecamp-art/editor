@@ -63,6 +63,6 @@ This workflow controls trading platform related systemd services across remote R
         ),
     ),
     upstream_dags_for_stop=(),
-    tags=("systemd", "trading-platform", "ssh", "kerberos"),
+    tags=("systemd", "trading-platform", "ssh"),
     command_timeout_seconds=1800,
 )

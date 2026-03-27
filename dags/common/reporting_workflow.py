@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from pathlib import Path
 
 from airflow.sdk import get_current_context, task
+from airflow.exceptions import AirflowException
+from airflow.providers.ssh.hooks.ssh import SSHHook
 
 from common.config_loader import get_current_env_name
 
 from common.dag_factory import (
     DEFAULT_RUNTIME_ENV_FILE,
-    build_full_kerberos_executor_config,
+    build_minimal_tenant_executor_config,
     build_runtime_context,
     dag_decorator,
 )
@@ -25,11 +29,53 @@ from common.remote_command import (
     build_sudo_bash_command,
     split_extra_args,
 )
-from common.ssh_hook import MSSSHHook, execute_ssh_command
 from common.trading_calendar import TradingDayCheckDefinition
 from common.trading_day_tasks import (
     build_trading_day_check_task,
 )
+
+
+def _build_default_ssh_hook(remote_host: str) -> SSHHook:
+    username = os.getenv("SSH_USERNAME") or None
+    password = os.getenv("SSH_PASSWORD") or None
+    return SSHHook(
+        remote_host=remote_host,
+        username=username,
+        password=password,
+    )
+
+
+def _execute_ssh_command(
+    *,
+    task_id: str,
+    remote_host: str,
+    command: str,
+    cmd_timeout: int,
+) -> str:
+    context = get_current_context()
+    ssh_hook = _build_default_ssh_hook(remote_host)
+    get_pty = command.startswith("sudo")
+
+    with ssh_hook.get_conn() as ssh_client:
+        exit_status, agg_stdout, agg_stderr = ssh_hook.exec_ssh_client_command(
+            ssh_client,
+            command,
+            get_pty=get_pty,
+            environment=None,
+            timeout=cmd_timeout,
+        )
+
+    if exit_status != 0:
+        raise AirflowException(
+            f"SSH operator error in task '{task_id}': exit status = {exit_status}, "
+            f"stderr = {agg_stderr.decode('utf-8', errors='replace')}"
+        )
+
+    task_instance = context.get("task_instance")
+    if task_instance is not None:
+        task_instance.xcom_push(key="ssh_exit", value=exit_status)
+
+    return agg_stdout.decode("utf-8", errors="replace")
 
 
 @dataclass(frozen=True)
@@ -48,7 +94,7 @@ class ReportingDefinition:
     trading_day_check: TradingDayCheckDefinition | None = None
     preset_params: dict | None = None
     command_timeout_seconds: int = 3600
-    tags: tuple[str, ...] = ("reporting", "ssh", "kerberos")
+    tags: tuple[str, ...] = ("reporting", "ssh")
 
 
 @dataclass(frozen=True)
@@ -181,7 +227,7 @@ def create_reporting_dag(
         preset_params=definition.preset_params,
     )
 
-    kerberos_executor_config = build_full_kerberos_executor_config(runtime_context)
+    executor_config = build_minimal_tenant_executor_config(runtime_context)
     command_prefix = resolve_command_prefix(definition)
 
     @dag_decorator(
@@ -226,29 +272,24 @@ def create_reporting_dag(
                 inner_command=inner_command,
             )
 
-            return execute_ssh_command(
+            return _execute_ssh_command(
                 task_id="run_report__ssh",
-                ssh_hook=MSSSHHook(
-                    remote_host=runtime_context["target_host"],
-                    username=runtime_context["kerberos_principal"],
-                    enable_kerberos=True,
-                ),
+                remote_host=runtime_context["target_host"],
                 command=command,
                 cmd_timeout=definition.command_timeout_seconds,
             )
 
         run_report_task = run_report.override(
-            executor_config=kerberos_executor_config
+            executor_config=executor_config
         )()
 
         if definition.trading_day_check is not None:
             trading_day_check_task = build_trading_day_check_task(
                 task_id="trading_day_check",
                 trading_day_check=definition.trading_day_check,
-                kerberos_principal=runtime_context["kerberos_principal"],
             )
             trading_day_check_result = trading_day_check_task.override(
-                executor_config=kerberos_executor_config
+                executor_config=executor_config
             )()
 
             trading_day_check_result >> run_report_task

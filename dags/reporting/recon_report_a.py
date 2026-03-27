@@ -86,7 +86,7 @@ This report supports multiple scheduled DAG variants and one dedicated adhoc DAG
     ),
     preset_params=None,
     command_timeout_seconds=3600,
-    tags=("reporting", "recon", "report-a", "ssh", "kerberos"),
+    tags=("reporting", "recon", "report-a", "ssh"),
 )
 
 
