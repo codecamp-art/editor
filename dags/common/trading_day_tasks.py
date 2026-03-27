@@ -1,18 +1,31 @@
 from __future__ import annotations
 
+import os
+
 from airflow.sdk import get_current_context, task
 from airflow.exceptions import AirflowSkipException
+from airflow.providers.ssh.hooks.ssh import SSHHook
+from airflow.providers.ssh.operators.ssh import SSHOperator
 
 from common.remote_command import build_sudo_bash_command
-from common.ssh_hook import MSSSHHook, MSSSHOperator, execute_ssh_command
+from common.ssh_hook import execute_ssh_command
 from common.trading_calendar import TradingDayCheckDefinition
+
+
+def _build_default_ssh_hook(remote_host: str) -> SSHHook:
+    username = os.getenv("SSH_USERNAME") or None
+    password = os.getenv("SSH_PASSWORD") or None
+    return SSHHook(
+        remote_host=remote_host,
+        username=username,
+        password=password,
+    )
 
 
 def build_trading_day_check_task(
     *,
     task_id: str,
     trading_day_check: TradingDayCheckDefinition,
-    kerberos_principal: str,
 ):
     @task(task_id=task_id)
     def _trading_day_check() -> str:
@@ -41,11 +54,7 @@ def build_trading_day_check_task(
 
         ssh_result = execute_ssh_command(
             task_id=f"{task_id}__ssh",
-            ssh_hook=MSSSHHook(
-                remote_host=trading_day_check.check_host,
-                username=kerberos_principal,
-                enable_kerberos=True,
-            ),
+            ssh_hook=_build_default_ssh_hook(trading_day_check.check_host),
             command=remote_command,
             cmd_timeout=trading_day_check.timeout_seconds,
         )
@@ -115,16 +124,11 @@ def build_trading_day_ssh_task(
     *,
     task_id: str,
     trading_day_check: TradingDayCheckDefinition,
-    kerberos_principal: str,
     executor_config: dict,
 ):
-    return MSSSHOperator(
+    return SSHOperator(
         task_id=task_id,
-        ssh_hook=MSSSHHook(
-            remote_host=trading_day_check.check_host,
-            username=kerberos_principal,
-            enable_kerberos=True,
-        ),
+        ssh_hook=_build_default_ssh_hook(trading_day_check.check_host),
         command="{{ ti.xcom_pull(task_ids='prepare_trading_day_check')['command'] }}",
         cmd_timeout=trading_day_check.timeout_seconds,
         executor_config=executor_config,

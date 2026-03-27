@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from pathlib import Path
 
 from airflow.sdk import get_current_context, task
 from airflow.exceptions import AirflowSkipException
+from airflow.providers.ssh.hooks.ssh import SSHHook
+from airflow.providers.ssh.operators.ssh import SSHOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
 
@@ -24,10 +28,19 @@ from common.field_schema import (
     validate_fields,
 )
 from common.remote_command import build_sudo_bash_command
-from common.ssh_hook import MSSSHHook, MSSSHOperator
 
 
 DEFAULT_SYSTEMD_TOPOLOGY_FILE = Path(__file__).resolve().parents[1] / "configs" / "systemd_topologies.json"
+
+
+def _build_default_ssh_hook(remote_host: str) -> SSHHook:
+    username = os.getenv("SSH_USERNAME") or None
+    password = os.getenv("SSH_PASSWORD") or None
+    return SSHHook(
+        remote_host=remote_host,
+        username=username,
+        password=password,
+    )
 
 
 @dataclass(frozen=True)
@@ -63,7 +76,7 @@ class SystemdWorkflowDefinition:
     processes: tuple[SystemdProcessSpec, ...]
     upstream_dags_for_start: tuple[ExternalDagDependency, ...] = ()
     upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
-    tags: tuple[str, ...] = ("systemd", "ssh", "kerberos")
+    tags: tuple[str, ...] = ("systemd", "ssh")
     command_timeout_seconds: int = 1800
 
 
@@ -225,12 +238,12 @@ def create_systemd_dag(
             for sensor in wait_sensors:
                 sensor >> start_node
 
-        task_map: dict[tuple[str, str], MSSSHOperator] = {}
-        process_roots: dict[str, list[MSSSHOperator]] = {}
+        task_map: dict[tuple[str, str], SSHOperator] = {}
+        process_roots: dict[str, list[SSHOperator]] = {}
 
         for process in enabled_processes:
             hosts = resolve_hosts_for_process(topology, process.host_group)
-            process_tasks: list[MSSSHOperator] = []
+            process_tasks: list[SSHOperator] = []
 
             for host in hosts:
                 task_id = f"{process.process_id}__{host.replace('.', '_').replace('-', '_')}"
@@ -241,13 +254,9 @@ def create_systemd_dag(
                     action=action,
                 )
 
-                op = MSSSHOperator(
+                op = SSHOperator(
                     task_id=task_id,
-                    ssh_hook=MSSSHHook(
-                        remote_host=host,
-                        username=runtime_context["kerberos_principal"],
-                        enable_kerberos=True,
-                    ),
+                    ssh_hook=_build_default_ssh_hook(host),
                     command=command,
                     cmd_timeout=workflow.command_timeout_seconds,
                     executor_config=executor_config,

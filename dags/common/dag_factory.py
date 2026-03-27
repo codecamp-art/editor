@@ -33,6 +33,7 @@ def build_runtime_context(
         "keytab_filename": runtime_cfg.get("keytab_filename", "proid.keytab"),
         "kerberos_cache_filename": runtime_cfg.get("kerberos_cache_filename", "krb5cc_airflow"),
         "kerberos_init_image": runtime_cfg["kerberos_init_image"],
+        "ssh_secret_name": runtime_cfg.get("ssh_secret_name", runtime_cfg.get("keytab_secret_name")),
         "main_container_name": runtime_cfg.get("main_container_name", "base"),
         "timezone": runtime_cfg.get("timezone", "Asia/Shanghai"),
     }
@@ -53,6 +54,13 @@ def build_minimal_tenant_executor_config(runtime_context: dict) -> dict:
                 containers=[
                     k8s.V1Container(
                         name=runtime_context["main_container_name"],
+                        env_from=[
+                            k8s.V1EnvFromSource(
+                                secret_ref=k8s.V1SecretEnvSource(
+                                    name=runtime_context["ssh_secret_name"],
+                                )
+                            )
+                        ] if runtime_context.get("ssh_secret_name") else None,
                     )
                 ],
             ),

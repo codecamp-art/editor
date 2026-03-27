@@ -41,6 +41,6 @@ This workflow controls market data systemd services.
             enabled_in_envs=("qa", "prod", "dr"),
         ),
     ),
-    tags=("systemd", "market-data", "ssh", "kerberos"),
+    tags=("systemd", "market-data", "ssh"),
     command_timeout_seconds=1800,
 )
