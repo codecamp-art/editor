@@ -3,12 +3,11 @@ from __future__ import annotations
 import os
 
 from airflow.sdk import get_current_context, task
-from airflow.exceptions import AirflowSkipException
+from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.providers.ssh.hooks.ssh import SSHHook
 from airflow.providers.ssh.operators.ssh import SSHOperator
 
 from common.remote_command import build_sudo_bash_command
-from common.ssh_hook import execute_ssh_command
 from common.trading_calendar import TradingDayCheckDefinition
 
 
@@ -20,6 +19,39 @@ def _build_default_ssh_hook(remote_host: str) -> SSHHook:
         username=username,
         password=password,
     )
+
+
+def _execute_ssh_command(
+    *,
+    task_id: str,
+    remote_host: str,
+    command: str,
+    cmd_timeout: int,
+) -> str:
+    context = get_current_context()
+    ssh_hook = _build_default_ssh_hook(remote_host)
+    get_pty = command.startswith("sudo")
+
+    with ssh_hook.get_conn() as ssh_client:
+        exit_status, agg_stdout, agg_stderr = ssh_hook.exec_ssh_client_command(
+            ssh_client,
+            command,
+            get_pty=get_pty,
+            environment=None,
+            timeout=cmd_timeout,
+        )
+
+    if exit_status != 0:
+        raise AirflowException(
+            f"SSH operator error in task '{task_id}': exit status = {exit_status}, "
+            f"stderr = {agg_stderr.decode('utf-8', errors='replace')}"
+        )
+
+    task_instance = context.get("task_instance")
+    if task_instance is not None:
+        task_instance.xcom_push(key="ssh_exit", value=exit_status)
+
+    return agg_stdout.decode("utf-8", errors="replace")
 
 
 def build_trading_day_check_task(
@@ -52,9 +84,9 @@ def build_trading_day_check_task(
             inner_command=remote_inner_command,
         )
 
-        ssh_result = execute_ssh_command(
+        ssh_result = _execute_ssh_command(
             task_id=f"{task_id}__ssh",
-            ssh_hook=_build_default_ssh_hook(trading_day_check.check_host),
+            remote_host=trading_day_check.check_host,
             command=remote_command,
             cmd_timeout=trading_day_check.timeout_seconds,
         )

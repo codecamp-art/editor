@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from airflow.sdk import get_current_context, task
+from airflow.exceptions import AirflowException
 from airflow.providers.ssh.hooks.ssh import SSHHook
 
 from common.config_loader import get_current_env_name
@@ -28,7 +29,6 @@ from common.remote_command import (
     build_sudo_bash_command,
     split_extra_args,
 )
-from common.ssh_hook import execute_ssh_command
 from common.trading_calendar import TradingDayCheckDefinition
 from common.trading_day_tasks import (
     build_trading_day_check_task,
@@ -43,6 +43,39 @@ def _build_default_ssh_hook(remote_host: str) -> SSHHook:
         username=username,
         password=password,
     )
+
+
+def _execute_ssh_command(
+    *,
+    task_id: str,
+    remote_host: str,
+    command: str,
+    cmd_timeout: int,
+) -> str:
+    context = get_current_context()
+    ssh_hook = _build_default_ssh_hook(remote_host)
+    get_pty = command.startswith("sudo")
+
+    with ssh_hook.get_conn() as ssh_client:
+        exit_status, agg_stdout, agg_stderr = ssh_hook.exec_ssh_client_command(
+            ssh_client,
+            command,
+            get_pty=get_pty,
+            environment=None,
+            timeout=cmd_timeout,
+        )
+
+    if exit_status != 0:
+        raise AirflowException(
+            f"SSH operator error in task '{task_id}': exit status = {exit_status}, "
+            f"stderr = {agg_stderr.decode('utf-8', errors='replace')}"
+        )
+
+    task_instance = context.get("task_instance")
+    if task_instance is not None:
+        task_instance.xcom_push(key="ssh_exit", value=exit_status)
+
+    return agg_stdout.decode("utf-8", errors="replace")
 
 
 @dataclass(frozen=True)
@@ -239,9 +272,9 @@ def create_reporting_dag(
                 inner_command=inner_command,
             )
 
-            return execute_ssh_command(
+            return _execute_ssh_command(
                 task_id="run_report__ssh",
-                ssh_hook=_build_default_ssh_hook(runtime_context["target_host"]),
+                remote_host=runtime_context["target_host"],
                 command=command,
                 cmd_timeout=definition.command_timeout_seconds,
             )
