@@ -194,7 +194,7 @@ def create_reporting_dag(
         owner=owner,
     )
     def _dag():
-        @task(task_id="run_report")
+        @task(task_id="run_report", multiple_outputs=False)
         def run_report() -> str:
             context = get_current_context()
             user_params = dict(context["params"])
