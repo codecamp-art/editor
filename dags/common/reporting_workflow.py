@@ -104,6 +104,8 @@ def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
 
         if transform == "lower_bool":
             value = str(bool(value)).lower()
+        elif isinstance(value, list):
+            value = spec.get("cli_joiner", ",").join(str(item) for item in value)
 
         args.append(f"--{cli_name}={value}")
 
@@ -128,6 +130,8 @@ def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
         transform = spec.get("env_transform")
         if transform == "lower_bool":
             value = str(bool(value)).lower()
+        elif isinstance(value, list):
+            value = spec.get("env_joiner", ",").join(str(item) for item in value)
 
         env_vars[env_name] = str(value)
 

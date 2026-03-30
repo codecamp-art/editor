@@ -65,13 +65,31 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
         field_type = spec["type"]
         default = spec.get("default")
         description = spec.get("description", "")
+        values_display = spec.get("values_display")
 
         if field_type == "enum":
-            params[field_name] = Param(
-                default=default,
-                enum=spec["values"],
-                description=description,
-            )
+            param_kwargs = {
+                "default": default,
+                "enum": spec["values"],
+                "description": description,
+            }
+            if values_display:
+                param_kwargs["values_display"] = values_display
+            params[field_name] = Param(**param_kwargs)
+        elif field_type == "multi_enum":
+            param_kwargs = {
+                "default": list(default or []),
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": spec["values"],
+                },
+                "examples": spec["values"],
+                "description": description,
+            }
+            if values_display:
+                param_kwargs["values_display"] = values_display
+            params[field_name] = Param(**param_kwargs)
         elif field_type == "boolean":
             params[field_name] = Param(
                 default=bool(default),
@@ -121,6 +139,21 @@ def validate_fields(raw_params: dict, fields: dict) -> dict:
             if value is not None and value not in spec["values"]:
                 raise ValueError(
                     f"{field_name} must be one of {spec['values']}, got '{value}'."
+                )
+
+        elif field_type == "multi_enum":
+            if value is None:
+                value = []
+            elif isinstance(value, tuple):
+                value = list(value)
+            elif not isinstance(value, list):
+                raise ValueError(f"{field_name} must be a list of values.")
+
+            invalid_values = [item for item in value if item not in spec["values"]]
+            if invalid_values:
+                raise ValueError(
+                    f"{field_name} must only contain values from {spec['values']}, "
+                    f"got invalid values {invalid_values}."
                 )
 
         elif field_type == "string":
