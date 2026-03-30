@@ -71,20 +71,30 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
         field_type = spec["type"]
         default = normalize_empty(spec.get("default"))
         description = spec.get("description", "")
-        values_display = spec.get("values_display")
+        values_display = spec.get("values_display") or {}
 
         if field_type == "enum":
-            enum_default = default if default is not None else ""
-            param_kwargs = {
-                "default": enum_default,
-                "enum": ["", *spec["values"]],
-                "type": "string",
-                "description": description,
+            empty_label = spec.get("empty_label", "None")
+            param_values_display = {
+                value: str(value)
+                for value in spec["values"]
             }
-            if values_display:
-                param_kwargs["values_display"] = values_display
+            param_values_display[None] = empty_label
+            param_values_display.update(values_display)
+            param_kwargs = {
+                "default": default,
+                "enum": [*spec["values"], None],
+                "type": ["string", "null"],
+                "description": description,
+                "values_display": param_values_display,
+            }
             params[field_name] = Param(**param_kwargs)
         elif field_type == "multi_enum":
+            param_values_display = {
+                value: str(value)
+                for value in spec["values"]
+            }
+            param_values_display.update(values_display)
             param_kwargs = {
                 "default": list(default or []),
                 "type": "array",
@@ -94,9 +104,8 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
                 },
                 "examples": spec["values"],
                 "description": description,
+                "values_display": param_values_display,
             }
-            if values_display:
-                param_kwargs["values_display"] = values_display
             params[field_name] = Param(**param_kwargs)
         elif field_type == "boolean":
             params[field_name] = Param(
