@@ -17,6 +17,7 @@ from common.dag_factory import (
 from common.field_schema import (
     COMMON_FIELDS,
     build_airflow_params_from_fields,
+    is_empty_value,
     merge_field_definitions,
     validate_fields,
 )
@@ -71,12 +72,12 @@ def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
 
     required = adhoc_rules.get("required", [])
     for field_name in required:
-        if validated.get(field_name) in (None, ""):
+        if is_empty_value(validated.get(field_name)):
             raise ValueError(f"{field_name} is required in adhoc mode.")
 
     required_together = adhoc_rules.get("required_together", [])
     for group in required_together:
-        if not all(validated.get(field) not in (None, "") for field in group):
+        if not all(not is_empty_value(validated.get(field)) for field in group):
             raise ValueError(f"Fields {group} must all be provided together in adhoc mode.")
 
 
@@ -96,7 +97,7 @@ def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
             continue
 
         value = validated.get(field_name)
-        if value in (None, ""):
+        if is_empty_value(value):
             continue
 
         cli_name = spec.get("cli_name", field_name)
@@ -120,7 +121,7 @@ def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
             continue
 
         value = validated.get(field_name)
-        if value in (None, ""):
+        if is_empty_value(value):
             continue
 
         env_name = spec.get("env_name")

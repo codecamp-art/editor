@@ -55,7 +55,13 @@ def normalize_empty(value):
         return None
     if isinstance(value, str) and value.strip() == "":
         return None
+    if isinstance(value, (list, tuple, set)) and len(value) == 0:
+        return None
     return value
+
+
+def is_empty_value(value) -> bool:
+    return normalize_empty(value) is None
 
 
 def build_airflow_params_from_fields(fields: dict) -> dict:
@@ -63,14 +69,15 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
 
     for field_name, spec in fields.items():
         field_type = spec["type"]
-        default = spec.get("default")
+        default = normalize_empty(spec.get("default"))
         description = spec.get("description", "")
         values_display = spec.get("values_display")
 
         if field_type == "enum":
             param_kwargs = {
                 "default": default,
-                "enum": spec["values"],
+                "enum": [*spec["values"], None],
+                "type": ["string", "null"],
                 "description": description,
             }
             if values_display:
@@ -92,8 +99,8 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
             params[field_name] = Param(**param_kwargs)
         elif field_type == "boolean":
             params[field_name] = Param(
-                default=bool(default),
-                type="boolean",
+                default=bool(default) if default is not None else None,
+                type=["boolean", "null"],
                 description=description,
             )
         elif field_type == "integer":
@@ -104,7 +111,7 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
             )
         else:
             params[field_name] = Param(
-                default=default if default is not None else "",
+                default=default,
                 type=["string", "null"],
                 description=description,
             )
@@ -122,9 +129,23 @@ def validate_fields(raw_params: dict, fields: dict) -> dict:
 
         if value is None and "default" in spec:
             value = spec["default"]
+            value = normalize_empty(value)
 
         if field_type == "boolean":
-            value = bool(value) if value is not None else False
+            if value is None:
+                pass
+            elif isinstance(value, bool):
+                pass
+            elif isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized == "true":
+                    value = True
+                elif normalized == "false":
+                    value = False
+                else:
+                    raise ValueError(f"{field_name} must be a boolean.")
+            else:
+                value = bool(value)
 
         elif field_type == "integer":
             if value is not None:
