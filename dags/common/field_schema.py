@@ -74,10 +74,11 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
         values_display = spec.get("values_display")
 
         if field_type == "enum":
+            enum_default = default if default is not None else ""
             param_kwargs = {
-                "default": default,
-                "enum": [*spec["values"], None],
-                "type": ["string", "null"],
+                "default": enum_default,
+                "enum": ["", *spec["values"]],
+                "type": "string",
                 "description": description,
             }
             if values_display:
