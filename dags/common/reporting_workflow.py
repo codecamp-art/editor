@@ -90,17 +90,6 @@ def merge_params_with_priority(*param_maps: dict | None) -> dict:
     return merged
 
 
-def build_java_jar_command_prefix(
-    *,
-    jar_name: str,
-    spring_profile: str | None = None,
-) -> list[str]:
-    command_prefix = ["java", "-jar", jar_name]
-    if spring_profile:
-        command_prefix.append(f"--spring.profiles.active={spring_profile}")
-    return command_prefix
-
-
 def _ensure_list_of_strings(name: str, value: object) -> list[str]:
     if value is None:
         return []
