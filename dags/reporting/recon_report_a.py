@@ -6,7 +6,6 @@ from common.reporting_workflow import (
 )
 from common.trading_calendar import TradingDayCheckDefinition
 
-
 REPORT_A_BASE = ReportingDefinition(
     report_id="recon_report_a",
     dag_id="recon-report-a-base-not-used-directly",
@@ -22,12 +21,6 @@ This report supports multiple scheduled DAG variants and one dedicated adhoc DAG
     sudo_user="reportuser_default",
     working_dir="/opt/reporting/recon-report-a",
     fields={
-        "spring_profile": {
-            "type": "string",
-            "default": "",
-            "description": "Spring profile",
-            "cli_name": "spring.profiles.active",
-        },
         "business_date": {
             "type": "string",
             "default": "",
@@ -96,6 +89,7 @@ REPORT_A_SCHEDULED_VARIANTS = (
         title_suffix="APAC Morning",
         description_suffix="Scheduled APAC morning run.",
         schedule="10 9 * * 1-5",
+        remote_command_prefix_base=["java", "-jar"],
         preset_params={
             "run_mode": "normal",
             "region": "APAC",
@@ -106,9 +100,11 @@ REPORT_A_SCHEDULED_VARIANTS = (
                 "schedule": "15 9 * * 1-5",
                 "sudo_user": "reportuser_dev",
                 "working_dir": "/opt/reporting/dev/recon-report-a",
-                "remote_command_prefix": ["java", "-jar", "recon-report-a-dev.jar"],
+                "remote_command_prefix_append": [
+                    "recon-report-a-dev.jar",
+                    "--spring.profiles.active=dev",
+                ],
                 "preset_params": {
-                    "spring_profile": "dev",
                     "legal_entity": "DEVLE",
                     "output_format": "csv",
                 },
@@ -117,9 +113,11 @@ REPORT_A_SCHEDULED_VARIANTS = (
                 "schedule": "10 9 * * 1-5",
                 "sudo_user": "reportuser_qa",
                 "working_dir": "/opt/reporting/qa/recon-report-a",
-                "remote_command_prefix": ["java", "-jar", "recon-report-a-qa.jar"],
+                "remote_command_prefix_append": [
+                    "recon-report-a-qa.jar",
+                    "--spring.profiles.active=qa",
+                ],
                 "preset_params": {
-                    "spring_profile": "qa",
                     "legal_entity": "QALE",
                     "output_format": "csv",
                 },
@@ -128,9 +126,11 @@ REPORT_A_SCHEDULED_VARIANTS = (
                 "schedule": "5 9 * * 1-5",
                 "sudo_user": "reportuser_prod",
                 "working_dir": "/opt/reporting/prod/recon-report-a",
-                "remote_command_prefix": ["java", "-jar", "recon-report-a-prod.jar"],
+                "remote_command_prefix_append": [
+                    "recon-report-a-prod.jar",
+                    "--spring.profiles.active=prod",
+                ],
                 "preset_params": {
-                    "spring_profile": "prod",
                     "legal_entity": "PRODLE",
                     "output_format": "xlsx",
                 },
@@ -139,9 +139,11 @@ REPORT_A_SCHEDULED_VARIANTS = (
                 "schedule": "20 9 * * 1-5",
                 "sudo_user": "reportuser_dr",
                 "working_dir": "/opt/reporting/dr/recon-report-a",
-                "remote_command_prefix": ["java", "-jar", "recon-report-a-dr.jar"],
+                "remote_command_prefix_append": [
+                    "recon-report-a-dr.jar",
+                    "--spring.profiles.active=dr",
+                ],
                 "preset_params": {
-                    "spring_profile": "dr",
                     "legal_entity": "DRLE",
                     "output_format": "csv",
                 },
@@ -157,6 +159,7 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
     title_suffix="Adhoc",
     description_suffix="Dedicated adhoc DAG with richer manual parameters.",
     schedule=None,
+    remote_command_prefix_base=["java", "-jar"],
     preset_params={
         "run_mode": "adhoc",
     },
@@ -167,9 +170,11 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
         "dev": {
             "sudo_user": "reportuser_dev",
             "working_dir": "/opt/reporting/dev/recon-report-a",
-            "remote_command_prefix": ["java", "-jar", "recon-report-a-dev.jar"],
+            "remote_command_prefix_append": [
+                "recon-report-a-dev.jar",
+                "--spring.profiles.active=dev",
+            ],
             "preset_params": {
-                "spring_profile": "dev",
                 "region": "APAC",
                 "legal_entity": "DEVLE",
             },
@@ -177,9 +182,11 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
         "qa": {
             "sudo_user": "reportuser_qa",
             "working_dir": "/opt/reporting/qa/recon-report-a",
-            "remote_command_prefix": ["java", "-jar", "recon-report-a-qa.jar"],
+            "remote_command_prefix_append": [
+                "recon-report-a-qa.jar",
+                "--spring.profiles.active=qa",
+            ],
             "preset_params": {
-                "spring_profile": "qa",
                 "region": "APAC",
                 "legal_entity": "QALE",
             },
@@ -187,9 +194,11 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
         "prod": {
             "sudo_user": "reportuser_prod",
             "working_dir": "/opt/reporting/prod/recon-report-a",
-            "remote_command_prefix": ["java", "-jar", "recon-report-a-prod.jar"],
+            "remote_command_prefix_append": [
+                "recon-report-a-prod.jar",
+                "--spring.profiles.active=prod",
+            ],
             "preset_params": {
-                "spring_profile": "prod",
                 "region": "APAC",
                 "legal_entity": "PRODLE",
             },
@@ -197,9 +206,11 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
         "dr": {
             "sudo_user": "reportuser_dr",
             "working_dir": "/opt/reporting/dr/recon-report-a",
-            "remote_command_prefix": ["java", "-jar", "recon-report-a-dr.jar"],
+            "remote_command_prefix_append": [
+                "recon-report-a-dr.jar",
+                "--spring.profiles.active=dr",
+            ],
             "preset_params": {
-                "spring_profile": "dr",
                 "region": "APAC",
                 "legal_entity": "DRLE",
             },
