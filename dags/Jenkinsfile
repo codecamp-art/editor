@@ -1,0 +1,35 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Verify DAG Python Syntax') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          python3 --version
+          python3 -m compileall -q dags
+        '''
+      }
+    }
+
+    stage('Run DAG Unit Tests') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          python3 -m unittest discover -s dags/tests -p 'test_*.py'
+        '''
+      }
+    }
+  }
+}
