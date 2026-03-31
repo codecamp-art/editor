@@ -96,7 +96,7 @@ def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
             continue
 
         value = validated.get(field_name)
-        if value in (None, ""):
+        if value in (None, "") or (isinstance(value, list) and not value):
             continue
 
         cli_name = spec.get("cli_name", field_name)
@@ -120,7 +120,7 @@ def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
             continue
 
         value = validated.get(field_name)
-        if value in (None, ""):
+        if value in (None, "") or (isinstance(value, list) and not value):
             continue
 
         env_name = spec.get("env_name")
