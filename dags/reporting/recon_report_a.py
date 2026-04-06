@@ -135,17 +135,6 @@ REPORT_A_SCHEDULED_VARIANTS = (
                     "output_format": "xlsx",
                 },
             },
-            "dr": {
-                "schedule": "20 9 * * 1-5",
-                "sudo_user": "reportuser_dr",
-                "working_dir": "/opt/reporting/dr/recon-report-a",
-                "remote_command_prefix": ["java", "-jar", "recon-report-a-dr.jar"],
-                "preset_params": {
-                    "spring_profile": "dr",
-                    "legal_entity": "DRLE",
-                    "output_format": "csv",
-                },
-            },
         },
         tags_additional=("scheduled", "apac", "morning"),
     ),
@@ -194,16 +183,6 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
                 "legal_entity": "PRODLE",
             },
         },
-        "dr": {
-            "sudo_user": "reportuser_dr",
-            "working_dir": "/opt/reporting/dr/recon-report-a",
-            "remote_command_prefix": ["java", "-jar", "recon-report-a-dr.jar"],
-            "preset_params": {
-                "spring_profile": "dr",
-                "region": "APAC",
-                "legal_entity": "DRLE",
-            },
-        },
     },
     tags_additional=("adhoc",),
 )
@@ -214,10 +193,20 @@ for _variant in REPORT_A_SCHEDULED_VARIANTS:
         base_definition=REPORT_A_BASE,
         variant=_variant,
     )
-    globals()[_definition.dag_id.replace("-", "_")] = create_reporting_dag(definition=_definition)
+    _dag = create_reporting_dag(
+        definition=_definition,
+        source_file=__file__,
+    )
+    if _dag is not None:
+        globals()[_definition.dag_id.replace("-", "_")] = _dag
 
 _report_a_adhoc_definition = create_reporting_definition_variant(
     base_definition=REPORT_A_BASE,
     variant=REPORT_A_ADHOC_VARIANT,
 )
-recon_report_a_adhoc = create_reporting_dag(definition=_report_a_adhoc_definition)
+_report_a_adhoc_dag = create_reporting_dag(
+    definition=_report_a_adhoc_definition,
+    source_file=__file__,
+)
+if _report_a_adhoc_dag is not None:
+    recon_report_a_adhoc = _report_a_adhoc_dag

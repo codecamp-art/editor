@@ -31,6 +31,8 @@ from common.trading_day_tasks import (
     build_trading_day_check_task,
 )
 
+ALL_RUNTIME_ENVS = ("dev", "qa", "prod")
+
 
 @dataclass(frozen=True)
 class ReportingDefinition:
@@ -49,6 +51,7 @@ class ReportingDefinition:
     preset_params: dict | None = None
     command_timeout_seconds: int = 3600
     tags: tuple[str, ...] = ("reporting", "ssh")
+    enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class ReportingScheduleVariant:
     adhoc_rules_override: dict | None = None
     tags_additional: tuple[str, ...] = ()
     env_overrides: dict | None = None
+    enabled_in_envs: tuple[str, ...] | None = None
 
 
 def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
@@ -174,6 +178,9 @@ def create_reporting_dag(
     source_file: str | Path,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ):
+    if not should_register_reporting_dag(definition):
+        return None
+
     runtime_context = build_runtime_context(
         config_file=runtime_env_file,
     )
@@ -255,6 +262,10 @@ def create_reporting_dag(
     return _dag()
 
 
+def should_register_reporting_dag(definition: ReportingDefinition) -> bool:
+    return get_current_env_name() in definition.enabled_in_envs
+
+
 def create_reporting_definition_variant(
     *,
     base_definition: ReportingDefinition,
@@ -303,6 +314,10 @@ def create_reporting_definition_variant(
         "command_timeout_seconds",
         base_definition.command_timeout_seconds,
     )
+    resolved_enabled_in_envs = env_override.get(
+        "enabled_in_envs",
+        variant.enabled_in_envs if variant.enabled_in_envs is not None else base_definition.enabled_in_envs,
+    )
 
     return ReportingDefinition(
         report_id=base_definition.report_id,
@@ -320,4 +335,5 @@ def create_reporting_definition_variant(
         preset_params=preset_params,
         command_timeout_seconds=resolved_timeout,
         tags=tags,
+        enabled_in_envs=tuple(resolved_enabled_in_envs),
     )

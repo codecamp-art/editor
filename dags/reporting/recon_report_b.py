@@ -113,13 +113,6 @@ REPORT_B_SCHEDULED_VARIANTS = (
                     "notify_email": "prod-ops@example.com",
                 },
             },
-            "dr": {
-                "schedule": "30 9 * * 1-5",
-                "sudo_user": "reportuser_dr_b",
-                "preset_params": {
-                    "notify_email": "dr-ops@example.com",
-                },
-            },
         },
         tags_additional=("scheduled", "book1", "morning"),
     ),
@@ -153,13 +146,6 @@ REPORT_B_SCHEDULED_VARIANTS = (
                 "sudo_user": "reportuser_prod_b",
                 "preset_params": {
                     "notify_email": "prod-ops@example.com",
-                },
-            },
-            "dr": {
-                "schedule": "30 18 * * 1-5",
-                "sudo_user": "reportuser_dr_b",
-                "preset_params": {
-                    "notify_email": "dr-ops@example.com",
                 },
             },
         },
@@ -198,12 +184,6 @@ REPORT_B_ADHOC_VARIANT = ReportingScheduleVariant(
                 "notify_email": "prod-ops@example.com",
             },
         },
-        "dr": {
-            "sudo_user": "reportuser_dr_b",
-            "preset_params": {
-                "notify_email": "dr-ops@example.com",
-            },
-        },
     },
     tags_additional=("adhoc",),
 )
@@ -214,10 +194,20 @@ for _variant in REPORT_B_SCHEDULED_VARIANTS:
         base_definition=REPORT_B_BASE,
         variant=_variant,
     )
-    globals()[_definition.dag_id.replace("-", "_")] = create_reporting_dag(definition=_definition)
+    _dag = create_reporting_dag(
+        definition=_definition,
+        source_file=__file__,
+    )
+    if _dag is not None:
+        globals()[_definition.dag_id.replace("-", "_")] = _dag
 
 _report_b_adhoc_definition = create_reporting_definition_variant(
     base_definition=REPORT_B_BASE,
     variant=REPORT_B_ADHOC_VARIANT,
 )
-recon_report_b_adhoc = create_reporting_dag(definition=_report_b_adhoc_definition)
+_report_b_adhoc_dag = create_reporting_dag(
+    definition=_report_b_adhoc_definition,
+    source_file=__file__,
+)
+if _report_b_adhoc_dag is not None:
+    recon_report_b_adhoc = _report_b_adhoc_dag
