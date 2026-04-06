@@ -66,6 +66,8 @@ class ReportingScheduleVariant:
     tags_additional: tuple[str, ...] = ()
     env_overrides: dict | None = None
     enabled_in_envs: tuple[str, ...] | None = None
+    remote_command_prefix_base: list[str] | None = None
+    remote_command_prefix_append: list[str] | None = None
 
 
 def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
@@ -90,6 +92,74 @@ def merge_params_with_priority(*param_maps: dict | None) -> dict:
         if item:
             merged.update(item)
     return merged
+
+
+def _ensure_list_of_strings(name: str, value: object) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"{name} must be a list of strings.")
+    return value
+
+
+def resolve_remote_command_prefix_for_variant(
+    *,
+    base_definition: ReportingDefinition,
+    variant: ReportingScheduleVariant,
+    env_override: dict,
+) -> list[str] | None:
+    explicit_env_prefix = env_override.get("remote_command_prefix")
+    explicit_base_prefix = base_definition.remote_command_prefix
+    explicit_variant_prefix = None
+
+    if explicit_env_prefix is not None:
+        explicit_prefix = _ensure_list_of_strings(
+            "env_overrides.remote_command_prefix",
+            explicit_env_prefix,
+        )
+    else:
+        explicit_prefix = explicit_variant_prefix or explicit_base_prefix
+        if explicit_prefix is not None:
+            explicit_prefix = _ensure_list_of_strings(
+                "remote_command_prefix",
+                explicit_prefix,
+            )
+
+    base_parts = (
+        env_override.get("remote_command_prefix_base")
+        if "remote_command_prefix_base" in env_override
+        else variant.remote_command_prefix_base
+    )
+    append_parts = (
+        env_override.get("remote_command_prefix_append")
+        if "remote_command_prefix_append" in env_override
+        else variant.remote_command_prefix_append
+    )
+
+    resolved_base_parts = _ensure_list_of_strings(
+        "remote_command_prefix_base",
+        base_parts,
+    )
+    resolved_append_parts = _ensure_list_of_strings(
+        "remote_command_prefix_append",
+        append_parts,
+    )
+
+    if explicit_prefix is not None and (resolved_base_parts or resolved_append_parts):
+        raise ValueError(
+            "Use either remote_command_prefix OR "
+            "remote_command_prefix_base/remote_command_prefix_append, not both."
+        )
+
+    if resolved_append_parts and not resolved_base_parts:
+        raise ValueError(
+            "remote_command_prefix_append requires remote_command_prefix_base."
+        )
+
+    if resolved_base_parts:
+        return [*resolved_base_parts, *resolved_append_parts]
+
+    return explicit_prefix
 
 
 def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
@@ -302,9 +372,10 @@ def create_reporting_definition_variant(
     resolved_sudo_user = env_override.get("sudo_user", base_definition.sudo_user)
     resolved_working_dir = env_override.get("working_dir", base_definition.working_dir)
     resolved_remote_script = env_override.get("remote_script", base_definition.remote_script)
-    resolved_remote_command_prefix = env_override.get(
-        "remote_command_prefix",
-        base_definition.remote_command_prefix,
+    resolved_remote_command_prefix = resolve_remote_command_prefix_for_variant(
+        base_definition=base_definition,
+        variant=variant,
+        env_override=env_override,
     )
     resolved_trading_day_check = env_override.get(
         "trading_day_check",
