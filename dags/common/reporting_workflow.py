@@ -34,6 +34,21 @@ from common.trading_day_tasks import (
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod")
 
 
+
+
+def normalize_enabled_in_envs(enabled_in_envs: tuple[str, ...] | list[str] | str | None) -> tuple[str, ...]:
+    """Normalize enabled envs to a tuple, allowing strings and comma-delimited values."""
+    if enabled_in_envs is None:
+        return ()
+
+    if isinstance(enabled_in_envs, str):
+        if "," in enabled_in_envs:
+            return tuple(env.strip() for env in enabled_in_envs.split(",") if env.strip())
+        stripped = enabled_in_envs.strip()
+        return (stripped,) if stripped else ()
+
+    return tuple(str(env).strip() for env in enabled_in_envs if str(env).strip())
+
 @dataclass(frozen=True)
 class ReportingDefinition:
     report_id: str
@@ -263,7 +278,7 @@ def create_reporting_dag(
 
 
 def should_register_reporting_dag(definition: ReportingDefinition) -> bool:
-    return get_current_env_name() in definition.enabled_in_envs
+    return get_current_env_name() in normalize_enabled_in_envs(definition.enabled_in_envs)
 
 
 def create_reporting_definition_variant(
@@ -319,6 +334,8 @@ def create_reporting_definition_variant(
         variant.enabled_in_envs if variant.enabled_in_envs is not None else base_definition.enabled_in_envs,
     )
 
+    normalized_enabled_in_envs = normalize_enabled_in_envs(resolved_enabled_in_envs)
+
     return ReportingDefinition(
         report_id=base_definition.report_id,
         dag_id=variant.dag_id,
@@ -335,5 +352,5 @@ def create_reporting_definition_variant(
         preset_params=preset_params,
         command_timeout_seconds=resolved_timeout,
         tags=tags,
-        enabled_in_envs=tuple(resolved_enabled_in_envs),
+        enabled_in_envs=normalized_enabled_in_envs,
     )
