@@ -6,6 +6,7 @@ from pathlib import Path
 from airflow.sdk import get_current_context, task
 
 from common.config_loader import get_current_env_name
+from common.config_loader import load_runtime_env_config
 
 from common.dag_factory import (
     DEFAULT_RUNTIME_ENV_FILE,
@@ -31,7 +32,8 @@ from common.trading_day_tasks import (
     build_trading_day_check_task,
 )
 
-ALL_RUNTIME_ENVS = ("dev", "qa", "prod")
+ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
+DEFAULT_REPORTING_TARGET_HOST_FILE = Path(__file__).resolve().parents[1] / "reporting" / "target_hosts.json"
 
 
 
@@ -172,10 +174,8 @@ def build_airflow_params_from_preset_keys(
     *,
     all_fields: dict,
     preset_params: dict | None,
+    always_visible_fields: tuple[str, ...] = (),
 ) -> dict:
-    if not preset_params:
-        return {}
-
     visible_fields = {
         field_name: {
             **all_fields[field_name],
@@ -183,8 +183,33 @@ def build_airflow_params_from_preset_keys(
         }
         for field_name in preset_params.keys()
         if field_name in all_fields
-    }
+    } if preset_params else {}
+
+    for field_name in always_visible_fields:
+        if field_name in all_fields:
+            visible_fields[field_name] = all_fields[field_name]
+
     return build_airflow_params_from_fields(visible_fields)
+
+
+def load_reporting_target_host_settings(
+    config_file: str | Path = DEFAULT_REPORTING_TARGET_HOST_FILE,
+) -> tuple[str, list[str]]:
+    cfg = load_runtime_env_config(config_file)
+    target_host_options = cfg.get("target_host_options") or []
+
+    if not isinstance(target_host_options, list) or not target_host_options:
+        raise ValueError(
+            "Reporting target host config must contain a non-empty list in 'target_host_options'."
+        )
+
+    default_target_host = cfg.get("default_target_host") or target_host_options[0]
+    if default_target_host not in target_host_options:
+        raise ValueError(
+            "Reporting target host config 'default_target_host' must be in 'target_host_options'."
+        )
+
+    return default_target_host, target_host_options
 
 
 def create_reporting_dag(
@@ -199,12 +224,26 @@ def create_reporting_dag(
     runtime_context = build_runtime_context(
         config_file=runtime_env_file,
     )
+    default_target_host, target_host_options = load_reporting_target_host_settings()
     owner = runtime_context["owner"]
 
-    merged_fields = merge_field_definitions(COMMON_FIELDS, definition.fields)
+    merged_fields = merge_field_definitions(
+        COMMON_FIELDS,
+        {
+            "target_host": {
+                "type": "enum",
+                "default": default_target_host,
+                "values": target_host_options,
+                "description": "Remote reporting host to run this DAG command on",
+                "include_in_cli": False,
+            }
+        },
+        definition.fields,
+    )
     airflow_params = build_airflow_params_from_preset_keys(
         all_fields=merged_fields,
         preset_params=definition.preset_params,
+        always_visible_fields=("target_host",),
     )
 
     executor_config = build_minimal_tenant_executor_config(runtime_context)
@@ -254,7 +293,7 @@ def create_reporting_dag(
 
             return execute_ssh_command(
                 task_id="run_report__ssh",
-                remote_host=runtime_context["target_host"],
+                remote_host=validated["target_host"],
                 command=command,
                 cmd_timeout=definition.command_timeout_seconds,
             )
