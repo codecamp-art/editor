@@ -1,0 +1,35 @@
+{
+  "dev": {
+    "default": {
+      "default_target_host": "dev-bastion.company.net",
+      "target_host_options": [
+        "dev-bastion.company.net"
+      ]
+    }
+  },
+  "qa": {
+    "default": {
+      "default_target_host": "qa-bastion.company.net",
+      "target_host_options": [
+        "qa-bastion.company.net"
+      ]
+    }
+  },
+  "prod": {
+    "default": {
+      "default_target_host": "prod-bastion.company.net",
+      "target_host_options": [
+        "prod-bastion.company.net"
+      ]
+    }
+  },
+  "dr": {
+    "default": {
+      "default_target_host": "dr-bastion.company.net",
+      "target_host_options": [
+        "dr-bastion.company.net",
+        "prod-bastion.company.net"
+      ]
+    }
+  }
+}

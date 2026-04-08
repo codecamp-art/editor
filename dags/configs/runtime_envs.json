@@ -2,7 +2,6 @@
   "dev": {
     "default": {
       "namespace": "airflow-dev-shared",
-      "target_host": "dev-bastion.company.net",
       "kerberos_principal": "airflow_dev",
       "kerberos_realm": ".COM.CN",
       "keytab_secret_name": "proid-client-keytab",
@@ -16,7 +15,6 @@
   "qa": {
     "default": {
       "namespace": "airflow-qa-shared",
-      "target_host": "qa-bastion.company.net",
       "kerberos_principal": "airflow_qa",
       "kerberos_realm": "COM.CN",
       "keytab_secret_name": "proid-client-keytab",
@@ -30,7 +28,6 @@
   "prod": {
     "default": {
       "namespace": "airflow-prod-shared",
-      "target_host": "prod-bastion.company.net",
       "kerberos_principal": "airflow_prod",
       "kerberos_realm": ".COM.CN",
       "keytab_secret_name": "proid-client-keytab",
@@ -44,7 +41,6 @@
   "dr": {
     "default": {
       "namespace": "airflow-dr-shared",
-      "target_host": "dr-bastion.company.net",
       "kerberos_principal": "airflow_dr",
       "kerberos_realm": ".COM.CN",
       "keytab_secret_name": "proid-client-keytab",

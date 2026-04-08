@@ -25,7 +25,6 @@ def build_runtime_context(
 
     return {
         "owner": runtime_cfg["owner"],
-        "target_host": runtime_cfg.get("target_host"),
         "namespace": runtime_cfg["namespace"],
         "kerberos_principal": runtime_cfg["kerberos_principal"],
         "kerberos_realm": runtime_cfg["kerberos_realm"],
