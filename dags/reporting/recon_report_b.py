@@ -1,13 +1,13 @@
 from common.remote_script_workflow import (
-    ReportingDefinition,
-    ReportingScheduleVariant,
+    RemoteScriptDefinition,
+    RemoteScriptScheduleVariant,
     create_remote_script_dag,
-    create_reporting_definition_variant,
+    create_remote_script_definition_variant,
 )
 from common.trading_calendar import TradingDayCheckDefinition
 
 
-REPORT_B_BASE = ReportingDefinition(
+REPORT_B_BASE = RemoteScriptDefinition(
     report_id="recon_report_b",
     dag_id="recon-report-b-base-not-used-directly",
     title="Recon Report B",
@@ -81,7 +81,7 @@ This report supports multiple scheduled DAG variants and one dedicated adhoc DAG
 
 
 REPORT_B_SCHEDULED_VARIANTS = (
-    ReportingScheduleVariant(
+    RemoteScriptScheduleVariant(
         dag_id="recon-report-b-book1-morning",
         title_suffix="Book1 Morning",
         description_suffix="Scheduled Book1 morning run.",
@@ -116,7 +116,7 @@ REPORT_B_SCHEDULED_VARIANTS = (
         },
         tags_additional=("scheduled", "book1", "morning"),
     ),
-    ReportingScheduleVariant(
+    RemoteScriptScheduleVariant(
         dag_id="recon-report-b-book2-evening",
         title_suffix="Book2 Evening",
         description_suffix="Scheduled Book2 evening run.",
@@ -154,7 +154,7 @@ REPORT_B_SCHEDULED_VARIANTS = (
 )
 
 
-REPORT_B_ADHOC_VARIANT = ReportingScheduleVariant(
+REPORT_B_ADHOC_VARIANT = RemoteScriptScheduleVariant(
     dag_id="recon-report-b-adhoc",
     title_suffix="Adhoc",
     description_suffix="Dedicated adhoc DAG with richer manual parameters.",
@@ -190,7 +190,7 @@ REPORT_B_ADHOC_VARIANT = ReportingScheduleVariant(
 
 
 for _variant in REPORT_B_SCHEDULED_VARIANTS:
-    _definition = create_reporting_definition_variant(
+    _definition = create_remote_script_definition_variant(
         base_definition=REPORT_B_BASE,
         variant=_variant,
     )
@@ -201,7 +201,7 @@ for _variant in REPORT_B_SCHEDULED_VARIANTS:
     if _dag is not None:
         globals()[_definition.dag_id.replace("-", "_")] = _dag
 
-_report_b_adhoc_definition = create_reporting_definition_variant(
+_report_b_adhoc_definition = create_remote_script_definition_variant(
     base_definition=REPORT_B_BASE,
     variant=REPORT_B_ADHOC_VARIANT,
 )

@@ -33,7 +33,7 @@ from common.trading_day_tasks import (
 )
 
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
-DEFAULT_REPORTING_TARGET_HOST_FILE = Path(__file__).resolve().parents[1] / "reporting" / "target_hosts.json"
+DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE = Path(__file__).resolve().parents[1] / "reporting" / "target_hosts.json"
 
 
 
@@ -52,7 +52,7 @@ def normalize_enabled_in_envs(enabled_in_envs: tuple[str, ...] | list[str] | str
     return tuple(str(env).strip() for env in enabled_in_envs if str(env).strip())
 
 @dataclass(frozen=True)
-class ReportingDefinition:
+class RemoteScriptDefinition:
     report_id: str
     dag_id: str
     title: str
@@ -74,7 +74,7 @@ class ReportingDefinition:
 
 
 @dataclass(frozen=True)
-class ReportingScheduleVariant:
+class RemoteScriptScheduleVariant:
     dag_id: str
     title_suffix: str
     description_suffix: str = ""
@@ -163,13 +163,13 @@ def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
     return env_vars
 
 
-def resolve_command_prefix(definition: ReportingDefinition) -> list[str]:
+def resolve_command_prefix(definition: RemoteScriptDefinition) -> list[str]:
     if definition.remote_command_prefix:
         return definition.remote_command_prefix
     if definition.remote_script:
         return [definition.remote_script]
     raise ValueError(
-        f"ReportingDefinition '{definition.dag_id}' must define either "
+        f"RemoteScriptDefinition '{definition.dag_id}' must define either "
         f"remote_script or remote_command_prefix."
     )
 
@@ -196,8 +196,8 @@ def build_airflow_params_from_preset_keys(
     return build_airflow_params_from_fields(visible_fields)
 
 
-def load_reporting_target_host_settings(
-    config_file: str | Path = DEFAULT_REPORTING_TARGET_HOST_FILE,
+def load_remote_script_target_host_settings(
+    config_file: str | Path = DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE,
 ) -> tuple[str, list[str]]:
     cfg = load_runtime_env_config(config_file)
     target_host_options = cfg.get("target_host_options") or []
@@ -216,21 +216,21 @@ def load_reporting_target_host_settings(
     return default_target_host, target_host_options
 
 
-def resolve_target_host_settings(definition: ReportingDefinition) -> tuple[str, list[str]]:
+def resolve_target_host_settings(definition: RemoteScriptDefinition) -> tuple[str, list[str]]:
     configured_options = definition.target_host_options
     if configured_options is None:
-        return load_reporting_target_host_settings()
+        return load_remote_script_target_host_settings()
 
     target_host_options = [str(host).strip() for host in configured_options if str(host).strip()]
     if not target_host_options:
         raise ValueError(
-            "ReportingDefinition 'target_host_options' must contain at least one host."
+            "RemoteScriptDefinition 'target_host_options' must contain at least one host."
         )
 
     default_target_host = definition.default_target_host or target_host_options[0]
     if default_target_host not in target_host_options:
         raise ValueError(
-            "ReportingDefinition 'default_target_host' must be included in "
+            "RemoteScriptDefinition 'default_target_host' must be included in "
             "'target_host_options'."
         )
 
@@ -239,11 +239,11 @@ def resolve_target_host_settings(definition: ReportingDefinition) -> tuple[str, 
 
 def create_remote_script_dag(
     *,
-    definition: ReportingDefinition,
+    definition: RemoteScriptDefinition,
     source_file: str | Path,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ):
-    if not should_register_reporting_dag(definition):
+    if not should_register_remote_script_dag(definition):
         return None
 
     runtime_context = build_runtime_context(
@@ -341,15 +341,15 @@ def create_remote_script_dag(
     return _dag()
 
 
-def should_register_reporting_dag(definition: ReportingDefinition) -> bool:
+def should_register_remote_script_dag(definition: RemoteScriptDefinition) -> bool:
     return get_current_env_name() in normalize_enabled_in_envs(definition.enabled_in_envs)
 
 
-def create_reporting_definition_variant(
+def create_remote_script_definition_variant(
     *,
-    base_definition: ReportingDefinition,
-    variant: ReportingScheduleVariant,
-) -> ReportingDefinition:
+    base_definition: RemoteScriptDefinition,
+    variant: RemoteScriptScheduleVariant,
+) -> RemoteScriptDefinition:
     current_env = get_current_env_name()
     env_override = (variant.env_overrides or {}).get(current_env, {})
 
@@ -412,7 +412,7 @@ def create_reporting_definition_variant(
 
     normalized_enabled_in_envs = normalize_enabled_in_envs(resolved_enabled_in_envs)
 
-    return ReportingDefinition(
+    return RemoteScriptDefinition(
         report_id=base_definition.report_id,
         dag_id=variant.dag_id,
         title=f"{base_definition.title} {variant.title_suffix}".strip(),
