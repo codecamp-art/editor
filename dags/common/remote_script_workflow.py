@@ -34,6 +34,7 @@ from common.trading_day_tasks import (
 
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
 DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE = Path(__file__).resolve().parents[1] / "reporting" / "target_hosts.json"
+REPORTING_DAGS_DIR = Path(__file__).resolve().parents[1] / "reporting"
 
 
 
@@ -71,6 +72,7 @@ class RemoteScriptDefinition:
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     target_host_options: tuple[str, ...] | list[str] | None = None
     default_target_host: str | None = None
+    target_host_config_file: str | Path | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class RemoteScriptScheduleVariant:
     enabled_in_envs: tuple[str, ...] | None = None
     target_host_options: tuple[str, ...] | list[str] | None = None
     default_target_host: str | None = None
+    target_host_config_file: str | Path | None = None
 
 
 def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
@@ -216,25 +219,51 @@ def load_remote_script_target_host_settings(
     return default_target_host, target_host_options
 
 
-def resolve_target_host_settings(definition: RemoteScriptDefinition) -> tuple[str, list[str]]:
+def _is_reporting_dag_source(source_file: str | Path) -> bool:
+    source_path = Path(source_file).resolve()
+    try:
+        source_path.relative_to(REPORTING_DAGS_DIR)
+        return True
+    except ValueError:
+        return False
+
+
+def resolve_target_host_settings(
+    definition: RemoteScriptDefinition,
+    *,
+    source_file: str | Path,
+) -> tuple[str, list[str]]:
     configured_options = definition.target_host_options
-    if configured_options is None:
+
+    if configured_options is not None:
+        target_host_options = [str(host).strip() for host in configured_options if str(host).strip()]
+        if not target_host_options:
+            raise ValueError(
+                "RemoteScriptDefinition 'target_host_options' must contain at least one host."
+            )
+
+        default_target_host = definition.default_target_host or target_host_options[0]
+        if default_target_host not in target_host_options:
+            raise ValueError(
+                "RemoteScriptDefinition 'default_target_host' must be included in "
+                "'target_host_options'."
+            )
+
+        return default_target_host, target_host_options
+
+    if definition.target_host_config_file:
+        config_path = Path(definition.target_host_config_file)
+        if not config_path.is_absolute():
+            config_path = Path(source_file).resolve().parent / config_path
+        return load_remote_script_target_host_settings(config_file=config_path)
+
+    if _is_reporting_dag_source(source_file):
         return load_remote_script_target_host_settings()
 
-    target_host_options = [str(host).strip() for host in configured_options if str(host).strip()]
-    if not target_host_options:
-        raise ValueError(
-            "RemoteScriptDefinition 'target_host_options' must contain at least one host."
-        )
-
-    default_target_host = definition.default_target_host or target_host_options[0]
-    if default_target_host not in target_host_options:
-        raise ValueError(
-            "RemoteScriptDefinition 'default_target_host' must be included in "
-            "'target_host_options'."
-        )
-
-    return default_target_host, target_host_options
+    raise ValueError(
+        "RemoteScriptDefinition must define 'target_host_options' or 'target_host_config_file' "
+        "for non-reporting DAGs."
+    )
 
 
 def create_remote_script_dag(
@@ -249,7 +278,10 @@ def create_remote_script_dag(
     runtime_context = build_runtime_context(
         config_file=runtime_env_file,
     )
-    default_target_host, target_host_options = resolve_target_host_settings(definition)
+    default_target_host, target_host_options = resolve_target_host_settings(
+        definition,
+        source_file=source_file,
+    )
     owner = runtime_context["owner"]
 
     merged_fields = merge_field_definitions(
@@ -409,6 +441,12 @@ def create_remote_script_definition_variant(
         if variant.default_target_host is not None
         else base_definition.default_target_host,
     )
+    resolved_target_host_config_file = env_override.get(
+        "target_host_config_file",
+        variant.target_host_config_file
+        if variant.target_host_config_file is not None
+        else base_definition.target_host_config_file,
+    )
 
     normalized_enabled_in_envs = normalize_enabled_in_envs(resolved_enabled_in_envs)
 
@@ -431,4 +469,5 @@ def create_remote_script_definition_variant(
         enabled_in_envs=normalized_enabled_in_envs,
         target_host_options=resolved_target_host_options,
         default_target_host=resolved_default_target_host,
+        target_host_config_file=resolved_target_host_config_file,
     )
