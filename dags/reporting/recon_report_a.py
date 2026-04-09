@@ -1,7 +1,7 @@
-from common.reporting_workflow import (
+from common.remote_script_workflow import (
     ReportingDefinition,
     ReportingScheduleVariant,
-    create_reporting_dag,
+    create_remote_script_dag,
     create_reporting_definition_variant,
 )
 from common.trading_calendar import TradingDayCheckDefinition
@@ -193,7 +193,7 @@ for _variant in REPORT_A_SCHEDULED_VARIANTS:
         base_definition=REPORT_A_BASE,
         variant=_variant,
     )
-    _dag = create_reporting_dag(
+    _dag = create_remote_script_dag(
         definition=_definition,
         source_file=__file__,
     )
@@ -204,7 +204,7 @@ _report_a_adhoc_definition = create_reporting_definition_variant(
     base_definition=REPORT_A_BASE,
     variant=REPORT_A_ADHOC_VARIANT,
 )
-_report_a_adhoc_dag = create_reporting_dag(
+_report_a_adhoc_dag = create_remote_script_dag(
     definition=_report_a_adhoc_definition,
     source_file=__file__,
 )
