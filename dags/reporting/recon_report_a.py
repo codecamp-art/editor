@@ -1,13 +1,13 @@
 from common.remote_script_workflow import (
-    ReportingDefinition,
-    ReportingScheduleVariant,
+    RemoteScriptDefinition,
+    RemoteScriptScheduleVariant,
     create_remote_script_dag,
-    create_reporting_definition_variant,
+    create_remote_script_definition_variant,
 )
 from common.trading_calendar import TradingDayCheckDefinition
 
 
-REPORT_A_BASE = ReportingDefinition(
+REPORT_A_BASE = RemoteScriptDefinition(
     report_id="recon_report_a",
     dag_id="recon-report-a-base-not-used-directly",
     title="Recon Report A",
@@ -91,7 +91,7 @@ This report supports multiple scheduled DAG variants and one dedicated adhoc DAG
 
 
 REPORT_A_SCHEDULED_VARIANTS = (
-    ReportingScheduleVariant(
+    RemoteScriptScheduleVariant(
         dag_id="recon-report-a-apac-morning",
         title_suffix="APAC Morning",
         description_suffix="Scheduled APAC morning run.",
@@ -141,7 +141,7 @@ REPORT_A_SCHEDULED_VARIANTS = (
 )
 
 
-REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
+REPORT_A_ADHOC_VARIANT = RemoteScriptScheduleVariant(
     dag_id="recon-report-a-adhoc",
     title_suffix="Adhoc",
     description_suffix="Dedicated adhoc DAG with richer manual parameters.",
@@ -189,7 +189,7 @@ REPORT_A_ADHOC_VARIANT = ReportingScheduleVariant(
 
 
 for _variant in REPORT_A_SCHEDULED_VARIANTS:
-    _definition = create_reporting_definition_variant(
+    _definition = create_remote_script_definition_variant(
         base_definition=REPORT_A_BASE,
         variant=_variant,
     )
@@ -200,7 +200,7 @@ for _variant in REPORT_A_SCHEDULED_VARIANTS:
     if _dag is not None:
         globals()[_definition.dag_id.replace("-", "_")] = _dag
 
-_report_a_adhoc_definition = create_reporting_definition_variant(
+_report_a_adhoc_definition = create_remote_script_definition_variant(
     base_definition=REPORT_A_BASE,
     variant=REPORT_A_ADHOC_VARIANT,
 )
