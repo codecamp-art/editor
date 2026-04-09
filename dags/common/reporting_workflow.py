@@ -69,6 +69,8 @@ class ReportingDefinition:
     command_timeout_seconds: int = 3600
     tags: tuple[str, ...] = ("reporting", "ssh")
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
+    target_host_options: tuple[str, ...] | list[str] | None = None
+    default_target_host: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +85,8 @@ class ReportingScheduleVariant:
     tags_additional: tuple[str, ...] = ()
     env_overrides: dict | None = None
     enabled_in_envs: tuple[str, ...] | None = None
+    target_host_options: tuple[str, ...] | list[str] | None = None
+    default_target_host: str | None = None
 
 
 def apply_adhoc_rules(validated: dict, adhoc_rules: dict) -> None:
@@ -212,6 +216,27 @@ def load_reporting_target_host_settings(
     return default_target_host, target_host_options
 
 
+def resolve_target_host_settings(definition: ReportingDefinition) -> tuple[str, list[str]]:
+    configured_options = definition.target_host_options
+    if configured_options is None:
+        return load_reporting_target_host_settings()
+
+    target_host_options = [str(host).strip() for host in configured_options if str(host).strip()]
+    if not target_host_options:
+        raise ValueError(
+            "ReportingDefinition 'target_host_options' must contain at least one host."
+        )
+
+    default_target_host = definition.default_target_host or target_host_options[0]
+    if default_target_host not in target_host_options:
+        raise ValueError(
+            "ReportingDefinition 'default_target_host' must be included in "
+            "'target_host_options'."
+        )
+
+    return default_target_host, target_host_options
+
+
 def create_reporting_dag(
     *,
     definition: ReportingDefinition,
@@ -224,7 +249,7 @@ def create_reporting_dag(
     runtime_context = build_runtime_context(
         config_file=runtime_env_file,
     )
-    default_target_host, target_host_options = load_reporting_target_host_settings()
+    default_target_host, target_host_options = resolve_target_host_settings(definition)
     owner = runtime_context["owner"]
 
     merged_fields = merge_field_definitions(
@@ -372,6 +397,18 @@ def create_reporting_definition_variant(
         "enabled_in_envs",
         variant.enabled_in_envs if variant.enabled_in_envs is not None else base_definition.enabled_in_envs,
     )
+    resolved_target_host_options = env_override.get(
+        "target_host_options",
+        variant.target_host_options
+        if variant.target_host_options is not None
+        else base_definition.target_host_options,
+    )
+    resolved_default_target_host = env_override.get(
+        "default_target_host",
+        variant.default_target_host
+        if variant.default_target_host is not None
+        else base_definition.default_target_host,
+    )
 
     normalized_enabled_in_envs = normalize_enabled_in_envs(resolved_enabled_in_envs)
 
@@ -392,4 +429,6 @@ def create_reporting_definition_variant(
         command_timeout_seconds=resolved_timeout,
         tags=tags,
         enabled_in_envs=normalized_enabled_in_envs,
+        target_host_options=resolved_target_host_options,
+        default_target_host=resolved_default_target_host,
     )
