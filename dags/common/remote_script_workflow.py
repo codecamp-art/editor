@@ -237,7 +237,7 @@ def resolve_target_host_settings(definition: ReportingDefinition) -> tuple[str, 
     return default_target_host, target_host_options
 
 
-def create_reporting_dag(
+def create_remote_script_dag(
     *,
     definition: ReportingDefinition,
     source_file: str | Path,
