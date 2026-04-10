@@ -6,6 +6,7 @@ from pathlib import Path
 from airflow.sdk import get_current_context, task
 
 from common.config_loader import get_current_env_name
+from common.config_loader import load_json_file
 from common.config_loader import load_runtime_env_config
 
 from common.dag_factory import (
@@ -471,3 +472,100 @@ def create_remote_script_definition_variant(
         default_target_host=resolved_default_target_host,
         target_host_config_file=resolved_target_host_config_file,
     )
+
+
+def build_trading_day_check_definition(
+    data: dict | None,
+) -> TradingDayCheckDefinition | None:
+    if not data:
+        return None
+
+    return TradingDayCheckDefinition(
+        check_host=data["check_host"],
+        check_user=data["check_user"],
+        command_template=data["command_template"],
+        market=data["market"],
+        calendar_code=data["calendar_code"],
+        timeout_seconds=int(data.get("timeout_seconds", 300)),
+    )
+
+
+def build_remote_script_definition_from_config(
+    base: dict,
+) -> RemoteScriptDefinition:
+    return RemoteScriptDefinition(
+        report_id=base["report_id"],
+        dag_id=base["dag_id"],
+        title=base["title"],
+        description=base["description"],
+        schedule=base.get("schedule"),
+        remote_script=base.get("remote_script"),
+        remote_command_prefix=base.get("remote_command_prefix"),
+        sudo_user=base["sudo_user"],
+        working_dir=base.get("working_dir"),
+        fields=base.get("fields") or {},
+        adhoc_rules=base.get("adhoc_rules") or {},
+        trading_day_check=build_trading_day_check_definition(base.get("trading_day_check")),
+        preset_params=base.get("preset_params"),
+        command_timeout_seconds=int(base.get("command_timeout_seconds", 3600)),
+        tags=tuple(base.get("tags") or ("reporting", "ssh")),
+        enabled_in_envs=tuple(base.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
+        target_host_options=base.get("target_host_options"),
+        default_target_host=base.get("default_target_host"),
+        target_host_config_file=base.get("target_host_config_file"),
+    )
+
+
+def build_remote_script_variant_from_config(
+    variant: dict,
+) -> RemoteScriptScheduleVariant:
+    return RemoteScriptScheduleVariant(
+        dag_id=variant["dag_id"],
+        title_suffix=variant["title_suffix"],
+        description_suffix=variant.get("description_suffix", ""),
+        schedule=variant.get("schedule"),
+        preset_params=variant.get("preset_params"),
+        fields_override=variant.get("fields_override"),
+        adhoc_rules_override=variant.get("adhoc_rules_override"),
+        tags_additional=tuple(variant.get("tags_additional", [])),
+        env_overrides=variant.get("env_overrides"),
+        enabled_in_envs=tuple(variant["enabled_in_envs"]) if variant.get("enabled_in_envs") else None,
+        target_host_options=variant.get("target_host_options"),
+        default_target_host=variant.get("default_target_host"),
+        target_host_config_file=variant.get("target_host_config_file"),
+    )
+
+
+def register_remote_script_dags_from_json(
+    *,
+    config_file: str | Path,
+    source_file: str | Path,
+    global_namespace: dict,
+) -> None:
+    config_path = Path(config_file)
+    if not config_path.is_absolute():
+        config_path = Path(source_file).resolve().parent / config_path
+
+    config = load_json_file(config_path)
+    base_definition = build_remote_script_definition_from_config(config["base"])
+
+    variants_data = list(config.get("variants", []))
+    if not variants_data:
+        variants_data.extend(config.get("scheduled_variants", []))
+        adhoc_variant_data = config.get("adhoc_variant")
+        if adhoc_variant_data:
+            variants_data.append(adhoc_variant_data)
+
+    for variant_data in variants_data:
+        variant = build_remote_script_variant_from_config(variant_data)
+        definition = create_remote_script_definition_variant(
+            base_definition=base_definition,
+            variant=variant,
+        )
+        dag = create_remote_script_dag(
+            definition=definition,
+            source_file=source_file,
+        )
+        if dag is not None:
+            global_name = variant_data.get("global_name") or definition.dag_id.replace("-", "_")
+            global_namespace[global_name] = dag
