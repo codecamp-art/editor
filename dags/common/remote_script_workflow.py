@@ -34,8 +34,9 @@ from common.trading_day_tasks import (
 )
 
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
-DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE = Path(__file__).resolve().parents[1] / "reporting" / "target_hosts.json"
 REPORTING_DAGS_DIR = Path(__file__).resolve().parents[1] / "reporting"
+DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "configs" / "target_hosts.json"
+LEGACY_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "target_hosts.json"
 
 
 
@@ -203,7 +204,11 @@ def build_airflow_params_from_preset_keys(
 def load_remote_script_target_host_settings(
     config_file: str | Path = DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE,
 ) -> tuple[str, list[str]]:
-    cfg = load_runtime_env_config(config_file)
+    config_path = Path(config_file)
+    if not config_path.exists() and config_path == DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE:
+        config_path = LEGACY_REMOTE_SCRIPT_TARGET_HOST_FILE
+
+    cfg = load_runtime_env_config(config_path)
     target_host_options = cfg.get("target_host_options") or []
 
     if not isinstance(target_host_options, list) or not target_host_options:
