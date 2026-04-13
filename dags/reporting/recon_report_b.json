@@ -12,38 +12,32 @@
     "fields": {
       "from_date": {
         "type": "string",
-        "default": "",
         "description": "Start date in YYYY-MM-DD format",
         "cli_name": "fromDate"
       },
       "to_date": {
         "type": "string",
-        "default": "",
         "description": "End date in YYYY-MM-DD format",
         "cli_name": "toDate"
       },
       "book": {
         "type": "string",
-        "default": "",
         "description": "Optional book name",
         "cli_name": "book"
       },
       "include_exceptions": {
         "type": "boolean",
-        "default": false,
         "description": "Whether to include exceptions",
         "cli_name": "includeExceptions",
         "transform": "lower_bool"
       },
       "notify_email": {
         "type": "string",
-        "default": "",
         "description": "Optional notification email",
         "cli_name": "notifyEmail"
       },
       "desk": {
         "type": "string",
-        "default": "",
         "description": "Optional desk filter for adhoc runs",
         "cli_name": "desk"
       }

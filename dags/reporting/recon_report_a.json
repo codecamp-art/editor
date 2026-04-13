@@ -16,19 +16,16 @@
     "fields": {
       "spring_profile": {
         "type": "string",
-        "default": "",
         "description": "Spring profile",
         "cli_name": "spring.profiles.active"
       },
       "business_date": {
         "type": "string",
-        "default": "",
         "description": "Business date in YYYY-MM-DD format",
         "cli_name": "businessDate"
       },
       "region": {
         "type": "enum",
-        "default": "APAC",
         "values": [
           "APAC",
           "EMEA",
@@ -39,13 +36,11 @@
       },
       "legal_entity": {
         "type": "string",
-        "default": "",
         "description": "Optional legal entity code",
         "cli_name": "legalEntity"
       },
       "output_format": {
         "type": "enum",
-        "default": "csv",
         "values": [
           "csv",
           "xlsx"
@@ -55,14 +50,12 @@
       },
       "rerun_failed_only": {
         "type": "boolean",
-        "default": false,
         "description": "Only rerun failed records",
         "cli_name": "rerunFailedOnly",
         "transform": "lower_bool"
       },
       "batch_id": {
         "type": "string",
-        "default": "",
         "description": "Optional batch id for adhoc runs",
         "cli_name": "batchId"
       }

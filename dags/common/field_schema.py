@@ -92,8 +92,8 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
             params[field_name] = Param(**param_kwargs)
         elif field_type == "boolean":
             params[field_name] = Param(
-                default=bool(default),
-                type="boolean",
+                default=default,
+                type=["boolean", "null"],
                 description=description,
             )
         elif field_type == "integer":
@@ -104,7 +104,7 @@ def build_airflow_params_from_fields(fields: dict) -> dict:
             )
         else:
             params[field_name] = Param(
-                default=default if default is not None else "",
+                default=default,
                 type=["string", "null"],
                 description=description,
             )
@@ -124,7 +124,7 @@ def validate_fields(raw_params: dict, fields: dict) -> dict:
             value = spec["default"]
 
         if field_type == "boolean":
-            value = bool(value) if value is not None else False
+            value = bool(value) if value is not None else None
 
         elif field_type == "integer":
             if value is not None:
