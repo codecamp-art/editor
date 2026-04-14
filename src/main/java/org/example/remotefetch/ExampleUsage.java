@@ -10,7 +10,7 @@ import java.util.Map;
 public final class ExampleUsage {
     public static void main(String[] args) throws Exception {
         OpenSshFileFetcher fetcher = new OpenSshFileFetcher(
-                Path.of("/tmp/openssh-mux"),
+                "/tmp/sshmux",
                 Duration.ofMinutes(5),
                 false);
 
@@ -26,60 +26,74 @@ public final class ExampleUsage {
                 "ABC\\user",
                 RemoteOs.WINDOWS_OPENSSH);
 
-        // 1) Search exact file name under folder
-        List<String> linuxFiles = fetcher.searchFilesByExactName(
+        // 1) Search by exact name under folder
+        List<String> linuxFound = fetcher.searchFilesByExactName(
                 linux,
-                "/opt/app/config",
+                "/opt/配置",
                 "application.properties");
 
-        System.out.println("Linux search result:");
-        linuxFiles.forEach(System.out::println);
+        System.out.println("Linux found:");
+        linuxFound.forEach(System.out::println);
 
         // 2) Search by glob under folder
-        List<String> winFiles = fetcher.searchFilesByGlob(
+        List<String> windowsFound = fetcher.searchFilesByGlob(
                 windows,
-                "D:\\apps\\cfg",
+                "D:\\应用\\配置",
                 "*.xml");
 
-        System.out.println("Windows search result:");
-        winFiles.forEach(System.out::println);
+        System.out.println("Windows found:");
+        windowsFound.forEach(System.out::println);
 
-        // 3) Download exact paths to local disk
-        Map<String, Path> downloadedLinux = fetcher.downloadFiles(
+        // 3) Check explicit paths first
+        Map<String, Boolean> linuxExists = fetcher.checkFilesExist(
                 linux,
                 List.of(
-                        "/opt/app/config/application.properties",
-                        "/opt/app/config/logback.xml"),
+                        "/opt/配置/application.properties",
+                        "/opt/配置/missing.properties"));
+
+        System.out.println("Linux existence:");
+        linuxExists.forEach((k, v) -> System.out.println(k + " -> " + v));
+
+        // 4) Download explicit paths
+        DownloadResult linuxDownload = fetcher.downloadFiles(
+                linux,
+                List.of(
+                        "/opt/配置/application.properties",
+                        "/opt/配置/logback.xml",
+                        "/opt/配置/missing.txt"),
                 Path.of("/tmp/fetched/linux1"));
 
-        System.out.println("Downloaded Linux:");
-        downloadedLinux.forEach((remote, local) -> System.out.println(remote + " -> " + local));
+        System.out.println("Linux downloaded:");
+        linuxDownload.downloaded().forEach((r, l) -> System.out.println(r + " -> " + l));
+        System.out.println("Linux missing: " + linuxDownload.missing());
+        System.out.println("Linux failed: " + linuxDownload.failed());
 
-        // 4) Search and download
-        Map<String, Path> downloadedWindows = fetcher.searchAndDownloadByExactName(
+        // 5) Search then download
+        DownloadResult windowsDownload = fetcher.searchAndDownloadByExactName(
                 windows,
-                "D:\\apps\\cfg",
+                "D:\\应用\\配置",
                 "server.properties",
-                Path.of("/tmp/fetched/server-ab-cd"));
+                Path.of("/tmp/fetched/windows1"));
 
-        System.out.println("Downloaded Windows:");
-        downloadedWindows.forEach((remote, local) -> System.out.println(remote + " -> " + local));
+        System.out.println("Windows downloaded:");
+        windowsDownload.downloaded().forEach((r, l) -> System.out.println(r + " -> " + l));
+        System.out.println("Windows missing: " + windowsDownload.missing());
+        System.out.println("Windows failed: " + windowsDownload.failed());
 
-        // 5) Read remote file as String
-        String text = fetcher.readFileAsString(
+        // 6) Read small text file as String
+        String linuxText = fetcher.readFileAsString(
                 linux,
-                "/opt/app/config/application.properties",
+                "/opt/配置/application.properties",
                 StandardCharsets.UTF_8);
 
-        System.out.println("Remote file text:\n" + text);
+        System.out.println(linuxText);
 
-        // 6) Open InputStream
-        try (InputStream in = fetcher.openInputStream(linux, "/opt/app/config/application.properties")) {
-            byte[] bytes = in.readAllBytes();
-            System.out.println("Read bytes from remote stream: " + bytes.length);
+        // 7) Open InputStream
+        try (InputStream in = fetcher.openInputStream(windows, "/d:/应用/配置/server.properties")) {
+            byte[] data = in.readAllBytes();
+            System.out.println("Read bytes = " + data.length);
         }
 
-        // Optional: close master connections when the app is done
         fetcher.closeMasterConnection(linux);
         fetcher.closeMasterConnection(windows);
     }

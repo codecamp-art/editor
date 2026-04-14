@@ -1,4 +1,4 @@
-package org.example.remotefetch;
+package com.example.sshfetch;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -9,20 +9,23 @@ import java.nio.file.Path;
 public final class RemoteInputStream extends FilterInputStream {
     private final Process process;
     private final Path tempFileToDeleteOnClose;
+    private final Path tempDirToDeleteOnClose;
 
-    public RemoteInputStream(InputStream in, Process process, Path tempFileToDeleteOnClose) {
+    public RemoteInputStream(InputStream in, Process process, Path tempFileToDeleteOnClose, Path tempDirToDeleteOnClose) {
         super(in);
         this.process = process;
         this.tempFileToDeleteOnClose = tempFileToDeleteOnClose;
+        this.tempDirToDeleteOnClose = tempDirToDeleteOnClose;
     }
 
     @Override
     public void close() throws IOException {
-        IOException suppressed = null;
+        IOException first = null;
+
         try {
             super.close();
         } catch (IOException e) {
-            suppressed = e;
+            first = e;
         }
 
         if (process != null) {
@@ -32,16 +35,16 @@ public final class RemoteInputStream extends FilterInputStream {
                     byte[] err = process.getErrorStream().readAllBytes();
                     IOException e = new IOException(
                             "Remote process exited with code " + exit + ", stderr=" + new String(err));
-                    if (suppressed != null) {
-                        e.addSuppressed(suppressed);
+                    if (first != null) {
+                        e.addSuppressed(first);
                     }
                     throw e;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                IOException io = new IOException("Interrupted while waiting remote process to finish", e);
-                if (suppressed != null) {
-                    io.addSuppressed(suppressed);
+                IOException io = new IOException("Interrupted while waiting for remote process", e);
+                if (first != null) {
+                    io.addSuppressed(first);
                 }
                 throw io;
             } finally {
@@ -49,19 +52,22 @@ public final class RemoteInputStream extends FilterInputStream {
             }
         }
 
-        if (tempFileToDeleteOnClose != null) {
-            try {
+        try {
+            if (tempFileToDeleteOnClose != null) {
                 Files.deleteIfExists(tempFileToDeleteOnClose);
-            } catch (IOException e) {
-                if (suppressed != null) {
-                    e.addSuppressed(suppressed);
-                }
-                throw e;
             }
+            if (tempDirToDeleteOnClose != null) {
+                Files.deleteIfExists(tempDirToDeleteOnClose);
+            }
+        } catch (IOException e) {
+            if (first != null) {
+                e.addSuppressed(first);
+            }
+            throw e;
         }
 
-        if (suppressed != null) {
-            throw suppressed;
+        if (first != null) {
+            throw first;
         }
     }
 }

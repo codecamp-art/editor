@@ -14,33 +14,35 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public final class OpenSshFileFetcher {
     private static final Charset UTF_8 = StandardCharsets.UTF_8;
 
-    private final Path controlPathDir;
+    private final String controlPathDir;
     private final Duration commandTimeout;
     private final boolean strictHostKeyChecking;
 
-    public OpenSshFileFetcher(Path controlPathDir, Duration commandTimeout, boolean strictHostKeyChecking) {
+    public OpenSshFileFetcher(String controlPathDir, Duration commandTimeout, boolean strictHostKeyChecking) {
         this.controlPathDir = Objects.requireNonNull(controlPathDir, "controlPathDir");
         this.commandTimeout = commandTimeout == null ? Duration.ofMinutes(10) : commandTimeout;
         this.strictHostKeyChecking = strictHostKeyChecking;
 
         try {
-            Files.createDirectories(controlPathDir);
+            Files.createDirectories(Path.of(controlPathDir));
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to create controlPathDir: " + controlPathDir, e);
+            throw new UncheckedIOException("Failed to create control path dir: " + controlPathDir, e);
         }
     }
 
     /**
-     * Search files recursively under a remote folder by exact filename.
+     * Search exact file name recursively under remoteFolder.
      */
     public List<String> searchFilesByExactName(SshTarget target, String remoteFolder, String fileName) throws IOException {
         Objects.requireNonNull(target, "target");
@@ -48,14 +50,14 @@ public final class OpenSshFileFetcher {
         requireNonBlank(fileName, "fileName");
 
         return switch (target.remoteOs()) {
-            case LINUX -> searchLinux(target, remoteFolder, fileName, true);
-            case WINDOWS_OPENSSH -> searchWindows(target, remoteFolder, fileName, true);
+            case LINUX -> searchLinux(target, remoteFolder, fileName);
+            case WINDOWS_OPENSSH -> searchWindows(target, remoteFolder, fileName);
         };
     }
 
     /**
-     * Search files recursively under a remote folder by glob pattern.
-     * Examples: *.xml, app*.properties
+     * Search by glob recursively under remoteFolder.
+     * Example: *.xml, app*.properties
      */
     public List<String> searchFilesByGlob(SshTarget target, String remoteFolder, String globPattern) throws IOException {
         Objects.requireNonNull(target, "target");
@@ -63,94 +65,92 @@ public final class OpenSshFileFetcher {
         requireNonBlank(globPattern, "globPattern");
 
         return switch (target.remoteOs()) {
-            case LINUX -> searchLinux(target, remoteFolder, globPattern, false);
-            case WINDOWS_OPENSSH -> searchWindows(target, remoteFolder, globPattern, false);
+            case LINUX -> searchLinux(target, remoteFolder, globPattern);
+            case WINDOWS_OPENSSH -> searchWindows(target, remoteFolder, globPattern);
         };
     }
 
     /**
-     * Download exact remote paths to localRoot.
-     *
-     * Returns map: remotePath -> localPath
+     * Check existence first, then batch download only existing files.
      */
-    public Map<String, Path> downloadFiles(SshTarget target, List<String> remotePaths, Path localRoot) throws IOException {
+    public DownloadResult downloadFiles(SshTarget target, List<String> remotePaths, Path localRoot) throws IOException {
         Objects.requireNonNull(target, "target");
         Objects.requireNonNull(remotePaths, "remotePaths");
         Objects.requireNonNull(localRoot, "localRoot");
 
         if (remotePaths.isEmpty()) {
-            return Collections.emptyMap();
+            return new DownloadResult(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList());
         }
 
         Files.createDirectories(localRoot);
 
-        Map<String, Path> mapping = buildLocalMapping(target, remotePaths, localRoot);
-        Path batchFile = Files.createTempFile("sftp-batch-", ".txt");
+        Set<String> uniquePaths = new LinkedHashSet<>(remotePaths);
+        Map<String, Boolean> existence = checkFilesExist(target, new ArrayList<>(uniquePaths));
 
-        try {
-            List<String> lines = new ArrayList<>();
-            for (Map.Entry<String, Path> entry : mapping.entrySet()) {
-                Files.createDirectories(entry.getValue().getParent());
-                lines.add("get " + sftpQuote(entry.getKey()) + " " + sftpQuote(entry.getValue().toString()));
+        List<String> existing = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+
+        for (String path : uniquePaths) {
+            if (Boolean.TRUE.equals(existence.get(path))) {
+                existing.add(path);
+            } else {
+                missing.add(path);
             }
-            Files.write(batchFile, lines, UTF_8);
-
-            List<String> command = new ArrayList<>();
-            command.add("sftp");
-            command.addAll(commonSshOptions(target));
-            command.add("-b");
-            command.add(batchFile.toString());
-            command.add(target.destination());
-
-            ExecResult result = run(command, commandTimeout);
-            if (result.exitCode() != 0) {
-                throw new IOException("sftp download failed: " + new String(result.stderr(), UTF_8));
-            }
-
-            for (Map.Entry<String, Path> entry : mapping.entrySet()) {
-                if (!Files.exists(entry.getValue())) {
-                    throw new IOException("Expected downloaded file does not exist: " + entry.getValue());
-                }
-            }
-            return mapping;
-        } finally {
-            Files.deleteIfExists(batchFile);
         }
+
+        if (existing.isEmpty()) {
+            return new DownloadResult(Collections.emptyMap(), missing, Collections.emptyList());
+        }
+
+        Map<String, Path> mapping = buildLocalMapping(target, existing, localRoot);
+        List<String> failed = batchDownloadExisting(target, mapping);
+
+        Map<String, Path> downloaded = new LinkedHashMap<>();
+        for (Map.Entry<String, Path> entry : mapping.entrySet()) {
+            if (!failed.contains(entry.getKey()) && Files.exists(entry.getValue())) {
+                downloaded.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        return new DownloadResult(downloaded, missing, failed);
     }
 
     /**
-     * Search files then download them.
+     * Search first, then download only found files.
      */
-    public Map<String, Path> searchAndDownloadByExactName(
+    public DownloadResult searchAndDownloadByExactName(
             SshTarget target,
             String remoteFolder,
             String fileName,
             Path localRoot) throws IOException {
-        List<String> paths = searchFilesByExactName(target, remoteFolder, fileName);
-        return downloadFiles(target, paths, localRoot);
+        List<String> found = searchFilesByExactName(target, remoteFolder, fileName);
+        return downloadFiles(target, found, localRoot);
     }
 
     /**
-     * Search files then download them.
+     * Search first, then download only found files.
      */
-    public Map<String, Path> searchAndDownloadByGlob(
+    public DownloadResult searchAndDownloadByGlob(
             SshTarget target,
             String remoteFolder,
             String globPattern,
             Path localRoot) throws IOException {
-        List<String> paths = searchFilesByGlob(target, remoteFolder, globPattern);
-        return downloadFiles(target, paths, localRoot);
+        List<String> found = searchFilesByGlob(target, remoteFolder, globPattern);
+        return downloadFiles(target, found, localRoot);
     }
 
     /**
      * Read remote file as String.
-     * For Linux: direct ssh stream.
-     * For Windows: PowerShell Get-Content -Raw.
+     * This is for small/medium text files only.
      */
     public String readFileAsString(SshTarget target, String remotePath, Charset charset) throws IOException {
         Objects.requireNonNull(target, "target");
         requireNonBlank(remotePath, "remotePath");
         Charset cs = charset == null ? UTF_8 : charset;
+
+        if (!checkFilesExist(target, List.of(remotePath)).getOrDefault(remotePath, false)) {
+            throw new IOException("Remote file does not exist: " + remotePath);
+        }
 
         ExecResult result = switch (target.remoteOs()) {
             case LINUX -> run(buildLinuxReadCommand(target, remotePath), commandTimeout);
@@ -164,14 +164,16 @@ public final class OpenSshFileFetcher {
     }
 
     /**
-     * Open remote file as InputStream.
-     *
-     * Linux: stream via ssh cat
-     * Windows: fallback to temp download via sftp and return local InputStream
+     * Linux: true remote stream.
+     * Windows: temp local file-backed stream after existence check and sftp download.
      */
     public InputStream openInputStream(SshTarget target, String remotePath) throws IOException {
         Objects.requireNonNull(target, "target");
         requireNonBlank(remotePath, "remotePath");
+
+        if (!checkFilesExist(target, List.of(remotePath)).getOrDefault(remotePath, false)) {
+            throw new IOException("Remote file does not exist: " + remotePath);
+        }
 
         return switch (target.remoteOs()) {
             case LINUX -> openLinuxInputStream(target, remotePath);
@@ -180,8 +182,22 @@ public final class OpenSshFileFetcher {
     }
 
     /**
-     * Optional: close shared OpenSSH master connection for a host.
+     * Existence check for explicit path list.
      */
+    public Map<String, Boolean> checkFilesExist(SshTarget target, List<String> remotePaths) throws IOException {
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(remotePaths, "remotePaths");
+
+        if (remotePaths.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        return switch (target.remoteOs()) {
+            case LINUX -> checkLinuxFilesExist(target, remotePaths);
+            case WINDOWS_OPENSSH -> checkWindowsFilesExist(target, remotePaths);
+        };
+    }
+
     public void closeMasterConnection(SshTarget target) {
         try {
             List<String> command = new ArrayList<>();
@@ -192,48 +208,173 @@ public final class OpenSshFileFetcher {
             command.add(target.destination());
             run(command, Duration.ofSeconds(15));
         } catch (Exception ignored) {
-            // best effort
         }
     }
 
-    private List<String> searchLinux(SshTarget target, String remoteFolder, String value, boolean exactName) throws IOException {
-        String predicate = exactName
-                ? "-name " + shQuote(value)
-                : "-name " + shQuote(value);
-
+    private List<String> searchLinux(SshTarget target, String remoteFolder, String pattern) throws IOException {
         String remoteCmd = "find " + shQuote(remoteFolder)
-                + " -type f "
-                + predicate
+                + " -type f -name " + shQuote(pattern)
                 + " -print";
 
         ExecResult result = run(buildSshCommand(target, remoteCmd), commandTimeout);
         if (result.exitCode() != 0) {
             throw new IOException("Linux search failed: " + new String(result.stderr(), UTF_8));
         }
-
         return splitLines(result.stdout());
     }
 
-    private List<String> searchWindows(SshTarget target, String remoteFolder, String value, boolean exactName) throws IOException {
+    private List<String> searchWindows(SshTarget target, String remoteFolder, String pattern) throws IOException {
         String windowsFolder = toWindowsLiteralPath(remoteFolder);
-        String filter = value;
 
-        String ps = "$root = " + psSingleQuote(windowsFolder) + ";"
-                + "$filter = " + psSingleQuote(filter) + ";"
-                + "$items = Get-ChildItem -LiteralPath $root -Recurse -File -Filter $filter -ErrorAction Stop;"
-                + "$items | ForEach-Object { "
-                + "$p = $_.FullName;"
-                + "$drive = $p.Substring(0,1).ToLower();"
-                + "$rest = $p.Substring(2).Replace('\\\\','/');"
-                + "'/' + $drive + ':' + $rest"
-                + "}";
+        String ps =
+                "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);" +
+                "$root = " + psSingleQuote(windowsFolder) + ";" +
+                "$filter = " + psSingleQuote(pattern) + ";" +
+                "$items = Get-ChildItem -LiteralPath $root -Recurse -File -Filter $filter -ErrorAction Stop;" +
+                "$items | ForEach-Object {" +
+                "  $p = $_.FullName;" +
+                "  $drive = $p.Substring(0,1).ToLower();" +
+                "  $rest = $p.Substring(2).Replace('\\\\','/');" +
+                "  '/' + $drive + ':' + $rest" +
+                "}";
 
         ExecResult result = run(buildWindowsPowerShellCommand(target, ps), commandTimeout);
         if (result.exitCode() != 0) {
             throw new IOException("Windows search failed: " + new String(result.stderr(), UTF_8));
         }
-
         return splitLines(result.stdout());
+    }
+
+    private Map<String, Boolean> checkLinuxFilesExist(SshTarget target, List<String> remotePaths) throws IOException {
+        StringBuilder cmd = new StringBuilder();
+        cmd.append("while IFS= read -r line; do ");
+        cmd.append("if [ -f \"$line\" ]; then printf 'EXISTS\\t%s\\n' \"$line\"; ");
+        cmd.append("else printf 'MISSING\\t%s\\n' \"$line\"; fi; ");
+        cmd.append("done");
+
+        Process process = start(buildSshCommand(target, cmd.toString()));
+
+        try {
+            String payload = String.join("\n", remotePaths) + "\n";
+            process.getOutputStream().write(payload.getBytes(UTF_8));
+            process.getOutputStream().flush();
+            process.getOutputStream().close();
+        } catch (IOException e) {
+            process.destroyForcibly();
+            throw e;
+        }
+
+        ExecResult result = waitFor(process, commandTimeout);
+        if (result.exitCode() != 0) {
+            throw new IOException("Linux existence check failed: " + new String(result.stderr(), UTF_8));
+        }
+
+        Map<String, Boolean> map = new LinkedHashMap<>();
+        for (String line : splitLines(result.stdout())) {
+            int idx = line.indexOf('\t');
+            if (idx > 0) {
+                String status = line.substring(0, idx);
+                String path = line.substring(idx + 1);
+                map.put(path, "EXISTS".equals(status));
+            }
+        }
+
+        for (String path : remotePaths) {
+            map.putIfAbsent(path, false);
+        }
+        return map;
+    }
+
+    private Map<String, Boolean> checkWindowsFilesExist(SshTarget target, List<String> remotePaths) throws IOException {
+        List<String> windowsPaths = remotePaths.stream()
+                .map(this::toWindowsLiteralPath)
+                .collect(Collectors.toList());
+
+        String ps =
+                "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);" +
+                "$input | ForEach-Object {" +
+                "  $p = $_;" +
+                "  if (Test-Path -LiteralPath $p -PathType Leaf) {" +
+                "    'EXISTS' + \"`t\" + $p" +
+                "  } else {" +
+                "    'MISSING' + \"`t\" + $p" +
+                "  }" +
+                "}";
+
+        Process process = start(buildWindowsPowerShellCommand(target, ps));
+
+        try {
+            String payload = String.join("\n", windowsPaths) + "\n";
+            process.getOutputStream().write(payload.getBytes(UTF_8));
+            process.getOutputStream().flush();
+            process.getOutputStream().close();
+        } catch (IOException e) {
+            process.destroyForcibly();
+            throw e;
+        }
+
+        ExecResult result = waitFor(process, commandTimeout);
+        if (result.exitCode() != 0) {
+            throw new IOException("Windows existence check failed: " + new String(result.stderr(), UTF_8));
+        }
+
+        Map<String, Boolean> winResult = new LinkedHashMap<>();
+        for (String line : splitLines(result.stdout())) {
+            int idx = line.indexOf('\t');
+            if (idx > 0) {
+                String status = line.substring(0, idx);
+                String path = line.substring(idx + 1);
+                winResult.put(path, "EXISTS".equals(status));
+            }
+        }
+
+        Map<String, Boolean> finalMap = new LinkedHashMap<>();
+        for (int i = 0; i < remotePaths.size(); i++) {
+            String original = remotePaths.get(i);
+            String win = windowsPaths.get(i);
+            finalMap.put(original, winResult.getOrDefault(win, false));
+        }
+        return finalMap;
+    }
+
+    private List<String> batchDownloadExisting(SshTarget target, Map<String, Path> mapping) throws IOException {
+        if (mapping.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Path batchFile = Files.createTempFile("sftp-batch-", ".txt");
+        try {
+            List<String> lines = new ArrayList<>();
+            for (Map.Entry<String, Path> entry : mapping.entrySet()) {
+                Files.createDirectories(entry.getValue().getParent());
+                lines.add("get " + sftpQuote(entry.getKey()) + " " + sftpQuote(entry.getValue().toString()));
+            }
+
+            // UTF-8 helps with Chinese path in batch file.
+            Files.write(batchFile, lines, UTF_8);
+
+            List<String> command = new ArrayList<>();
+            command.add("sftp");
+            command.addAll(commonSshOptions(target));
+            command.add("-b");
+            command.add(batchFile.toString());
+            command.add(target.destination());
+
+            ExecResult result = run(command, commandTimeout);
+
+            List<String> failed = new ArrayList<>();
+            if (result.exitCode() != 0) {
+                for (Map.Entry<String, Path> entry : mapping.entrySet()) {
+                    if (!Files.exists(entry.getValue())) {
+                        failed.add(entry.getKey());
+                    }
+                }
+            }
+
+            return failed;
+        } finally {
+            Files.deleteIfExists(batchFile);
+        }
     }
 
     private List<String> buildSshCommand(SshTarget target, String remoteCommand) {
@@ -246,21 +387,22 @@ public final class OpenSshFileFetcher {
     }
 
     private List<String> buildLinuxReadCommand(SshTarget target, String remotePath) {
-        String remoteCmd = "cat -- " + shQuote(remotePath);
-        return buildSshCommand(target, remoteCmd);
+        return buildSshCommand(target, "cat -- " + shQuote(remotePath));
     }
 
     private List<String> buildWindowsReadStringCommand(SshTarget target, String remotePath) {
         String windowsPath = toWindowsLiteralPath(remotePath);
 
-        String ps = "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);"
-                + "Get-Content -Raw -LiteralPath " + psSingleQuote(windowsPath);
+        String ps =
+                "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);" +
+                "Get-Content -Raw -LiteralPath " + psSingleQuote(windowsPath);
 
         return buildWindowsPowerShellCommand(target, ps);
     }
 
     private List<String> buildWindowsPowerShellCommand(SshTarget target, String powerShellScript) {
-        String encoded = Base64.getEncoder().encodeToString(powerShellScript.getBytes(StandardCharsets.UTF_16LE));
+        String encoded = Base64.getEncoder()
+                .encodeToString(powerShellScript.getBytes(StandardCharsets.UTF_16LE));
 
         return buildSshCommand(
                 target,
@@ -272,28 +414,48 @@ public final class OpenSshFileFetcher {
         return new RemoteInputStream(
                 new BufferedInputStream(process.getInputStream()),
                 process,
+                null,
                 null);
     }
 
     private InputStream openWindowsInputStreamViaTempDownload(SshTarget target, String remotePath) throws IOException {
         Path tempDir = Files.createTempDirectory("remote-win-file-");
-        Map<String, Path> downloaded = downloadFiles(target, List.of(remotePath), tempDir);
-        Path localFile = downloaded.get(remotePath);
+        DownloadResult result = downloadFiles(target, List.of(remotePath), tempDir);
+
+        if (!result.missing().isEmpty()) {
+            Files.deleteIfExists(tempDir);
+            throw new IOException("Remote file does not exist: " + remotePath);
+        }
+        if (!result.failed().isEmpty()) {
+            Files.deleteIfExists(tempDir);
+            throw new IOException("Failed to download remote file: " + remotePath);
+        }
+
+        Path localFile = result.downloaded().get(remotePath);
+        if (localFile == null || !Files.exists(localFile)) {
+            Files.deleteIfExists(tempDir);
+            throw new IOException("Downloaded file not found locally for remote path: " + remotePath);
+        }
+
         return new RemoteInputStream(
                 new BufferedInputStream(Files.newInputStream(localFile)),
                 null,
-                localFile);
+                localFile,
+                tempDir);
     }
 
     private Map<String, Path> buildLocalMapping(SshTarget target, List<String> remotePaths, Path localRoot) {
         Map<String, Path> mapping = new LinkedHashMap<>();
-        for (String remotePath : remotePaths.stream().sorted(Comparator.naturalOrder()).collect(Collectors.toList())) {
+        List<String> sorted = remotePaths.stream()
+                .sorted(Comparator.naturalOrder())
+                .collect(Collectors.toList());
+
+        for (String remotePath : sorted) {
             String relative = switch (target.remoteOs()) {
                 case LINUX -> linuxRemotePathToRelative(remotePath);
                 case WINDOWS_OPENSSH -> windowsSftpPathToRelative(remotePath);
             };
-            Path local = localRoot.resolve(relative);
-            mapping.put(remotePath, local);
+            mapping.put(remotePath, localRoot.resolve(relative));
         }
         return mapping;
     }
@@ -307,8 +469,7 @@ public final class OpenSshFileFetcher {
     }
 
     /**
-     * Example:
-     * /d:/apps/cfg/a.properties -> d/apps/cfg/a.properties
+     * /d:/apps/配置/a.txt -> d/apps/配置/a.txt
      */
     private String windowsSftpPathToRelative(String remotePath) {
         String p = remotePath.trim().replace('\\', '/');
@@ -327,9 +488,9 @@ public final class OpenSshFileFetcher {
     }
 
     /**
-     * Accepts either:
-     * - D:\apps\cfg
-     * - /d:/apps/cfg
+     * Accept:
+     * - D:\应用\配置
+     * - /d:/应用/配置
      */
     private String toWindowsLiteralPath(String path) {
         String p = path.trim();
@@ -347,15 +508,14 @@ public final class OpenSshFileFetcher {
         opts.add("-p");
         opts.add(String.valueOf(target.port()));
 
-        // Reuse one connection per host/user/port
+        // Reuse connection for better performance.
         opts.add("-o");
         opts.add("ControlMaster=auto");
         opts.add("-o");
         opts.add("ControlPersist=5m");
         opts.add("-o");
-        opts.add("ControlPath=" + controlPathDir.resolve("mux-%C"));
+        opts.add("ControlPath=" + controlPathDir + "/mux-%C");
 
-        // Non-interactive
         opts.add("-o");
         opts.add("BatchMode=yes");
 
@@ -371,18 +531,21 @@ public final class OpenSshFileFetcher {
 
     private ExecResult run(List<String> command, Duration timeout) throws IOException {
         Process process = start(command);
+        return waitFor(process, timeout);
+    }
 
+    private ExecResult waitFor(Process process, Duration timeout) throws IOException {
         boolean finished;
         try {
             finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while waiting command: " + command, e);
+            throw new IOException("Interrupted while waiting process", e);
         }
 
         if (!finished) {
             process.destroyForcibly();
-            throw new IOException("Command timed out: " + String.join(" ", command));
+            throw new IOException("Command timed out");
         }
 
         return new ExecResult(
