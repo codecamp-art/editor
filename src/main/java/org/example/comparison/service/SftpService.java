@@ -1,31 +1,34 @@
 package org.example.comparison.service;
 
-import com.jcraft.jsch.*;
 import org.example.comparison.config.ComparisonConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
- * Service for handling SFTP operations to fetch FIX log files
+ * Service for handling remote SSH/SFTP-style operations to fetch FIX log files.
+ * Uses native shell commands via ProcessBuilder instead of JSch.
  */
 @Service
 public class SftpService {
 
     private static final Logger logger = LoggerFactory.getLogger(SftpService.class);
-    
+
     private final ComparisonConfig.SftpConfig sftpConfig;
     private final ExecutorService executorService;
 
@@ -35,59 +38,34 @@ public class SftpService {
     }
 
     /**
-     * Fetches FIX log files from all session directories for a specific date
+     * Fetches FIX log files from all session directories for a specific date.
      */
     public Map<String, String> fetchFixLogFiles(LocalDate date) {
         Map<String, String> logFiles = new ConcurrentHashMap<>();
-        
+
         try {
-            Session session = createSftpSession();
-            ChannelSftp sftpChannel = (ChannelSftp) session.openChannel("sftp");
-            sftpChannel.connect();
-            
-            try {
-                // Get all session directories
-                List<String> sessionDirectories = getSessionDirectories(sftpChannel, date);
-                logger.info("Found {} session directories for date: {}", sessionDirectories.size(), date);
-                
-                // Process directories in parallel
-                List<CompletableFuture<Void>> futures = new ArrayList<>();
-                
-                for (String sessionDir : sessionDirectories) {
-                    CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                        try {
-                            Session threadSession = createSftpSession();
-                            ChannelSftp threadSftpChannel = (ChannelSftp) threadSession.openChannel("sftp");
-                            threadSftpChannel.connect();
-                            
-                            try {
-                                String logContent = fetchLogFromDirectory(threadSftpChannel, sessionDir, date);
-                                if (logContent != null && !logContent.trim().isEmpty()) {
-                                    logFiles.put(sessionDir, logContent);
-                                    logger.info("Successfully fetched log from session: {}", sessionDir);
-                                } else {
-                                    logger.warn("No log content found for session: {}", sessionDir);
-                                }
-                            } finally {
-                                threadSftpChannel.disconnect();
-                                threadSession.disconnect();
-                            }
-                        } catch (Exception e) {
-                            logger.error("Error fetching log from session directory: {}", sessionDir, e);
+            List<String> sessionDirectories = getSessionDirectories(date);
+            logger.info("Found {} session directories for date: {}", sessionDirectories.size(), date);
+
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            for (String sessionDir : sessionDirectories) {
+                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                    try {
+                        String logContent = fetchLogFromDirectory(sessionDir, date);
+                        if (logContent != null && !logContent.trim().isEmpty()) {
+                            logFiles.put(sessionDir, logContent);
+                            logger.info("Successfully fetched log from session: {}", sessionDir);
+                        } else {
+                            logger.warn("No log content found for session: {}", sessionDir);
                         }
-                    }, executorService);
-                    
-                    futures.add(future);
-                }
-                
-                // Wait for all downloads to complete
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-                
-            } finally {
-                sftpChannel.disconnect();
-                session.disconnect();
+                    } catch (Exception e) {
+                        logger.error("Error fetching log from session directory: {}", sessionDir, e);
+                    }
+                }, executorService);
+                futures.add(future);
             }
-            
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         } catch (Exception e) {
             logger.error("Error fetching FIX log files for date: {}", date, e);
             throw new RuntimeException("Failed to fetch FIX log files", e);
@@ -97,132 +75,109 @@ public class SftpService {
         return logFiles;
     }
 
-    /**
-     * Creates and configures SFTP session
-     */
-    private Session createSftpSession() throws JSchException {
-        JSch jsch = new JSch();
-        Session session = jsch.getSession(sftpConfig.getUsername(), sftpConfig.getHost(), sftpConfig.getPort());
-        session.setPassword(sftpConfig.getPassword());
-        
-        // Configure session properties
-        Properties config = new Properties();
-        config.put("StrictHostKeyChecking", "no");
-        config.put("PreferredAuthentications", "password");
-        session.setConfig(config);
-        
-        session.setTimeout(sftpConfig.getSessionTimeout());
-        session.connect(sftpConfig.getConnectionTimeout());
-        
-        return session;
-    }
-
-    /**
-     * Gets all session directories for a specific date
-     */
-    private List<String> getSessionDirectories(ChannelSftp sftpChannel, LocalDate date) throws SftpException {
-        List<String> sessionDirectories = new ArrayList<>();
+    private List<String> getSessionDirectories(LocalDate date) {
         String dateDir = sftpConfig.getRemoteDirectory() + "/" + date.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        
+        String remoteCommand = "if [ -d " + shellQuote(dateDir) + " ]; then find " + shellQuote(dateDir)
+                + " -mindepth 1 -maxdepth 1 -type d -printf '%f\\n'; fi";
+
         try {
-            sftpChannel.cd(dateDir);
-            Vector<ChannelSftp.LsEntry> entries = sftpChannel.ls(".");
-            
-            for (ChannelSftp.LsEntry entry : entries) {
-                if (entry.getAttrs().isDir() && 
-                    !entry.getFilename().equals(".") && 
-                    !entry.getFilename().equals("..")) {
-                    sessionDirectories.add(entry.getFilename());
-                }
+            String output = runSshCommand(remoteCommand);
+            if (output == null || output.isBlank()) {
+                return Collections.emptyList();
             }
-            
-        } catch (SftpException e) {
-            logger.warn("Directory not found or accessible: {}", dateDir);
+            return output.lines()
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            logger.warn("Directory not found or accessible: {}", dateDir, e);
+            return Collections.emptyList();
         }
-        
-        return sessionDirectories;
     }
 
-    /**
-     * Fetches log content from a specific session directory
-     */
-    private String fetchLogFromDirectory(ChannelSftp sftpChannel, String sessionDir, LocalDate date) {
+    private String fetchLogFromDirectory(String sessionDir, LocalDate date) {
+        String sessionPath = sftpConfig.getRemoteDirectory() + "/"
+                + date.format(DateTimeFormatter.ofPattern("yyyyMMdd")) + "/" + sessionDir;
+
+        String remoteCommand = "if [ -d " + shellQuote(sessionPath)
+                + " ]; then find " + shellQuote(sessionPath)
+                + " -maxdepth 1 -type f -name '*.log' -print0 | xargs -0 -r cat; fi";
+
         try {
-            String sessionPath = sftpConfig.getRemoteDirectory() + "/" + 
-                                date.format(DateTimeFormatter.ofPattern("yyyyMMdd")) + "/" + sessionDir;
-            
-            sftpChannel.cd(sessionPath);
-            Vector<ChannelSftp.LsEntry> files = sftpChannel.ls("*.log");
-            
-            StringBuilder logContent = new StringBuilder();
-            
-            for (ChannelSftp.LsEntry file : files) {
-                if (!file.getAttrs().isDir()) {
-                    try {
-                        String fileContent = downloadFile(sftpChannel, file.getFilename());
-                        logContent.append(fileContent);
-                        logger.debug("Downloaded file: {} from session: {}", file.getFilename(), sessionDir);
-                    } catch (Exception e) {
-                        logger.warn("Failed to download file: {} from session: {}", file.getFilename(), sessionDir, e);
-                    }
-                }
-            }
-            
-            return logContent.toString();
-            
-        } catch (SftpException e) {
+            return runSshCommand(remoteCommand);
+        } catch (Exception e) {
             logger.error("Error accessing session directory: {}", sessionDir, e);
             return null;
         }
     }
 
     /**
-     * Downloads a single file content as string
-     */
-    private String downloadFile(ChannelSftp sftpChannel, String filename) throws SftpException, IOException {
-        try (InputStream inputStream = sftpChannel.get(filename);
-             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-            }
-            
-            return outputStream.toString(StandardCharsets.UTF_8);
-        }
-    }
-
-    /**
-     * Tests SFTP connection
+     * Tests SSH connectivity with configured host.
      */
     public boolean testConnection() {
         try {
-            Session session = createSftpSession();
-            ChannelSftp sftpChannel = (ChannelSftp) session.openChannel("sftp");
-            sftpChannel.connect();
-            
-            // Test basic operations
-            sftpChannel.pwd();
-            
-            sftpChannel.disconnect();
-            session.disconnect();
-            
-            logger.info("SFTP connection test successful");
+            runSshCommand("pwd >/dev/null");
+            logger.info("SFTP/SSH connection test successful");
             return true;
-            
         } catch (Exception e) {
-            logger.error("SFTP connection test failed", e);
+            logger.error("SFTP/SSH connection test failed", e);
             return false;
         }
     }
 
+    private String runSshCommand(String remoteCommand) throws IOException, InterruptedException {
+        List<String> command = buildSshCommand(remoteCommand);
+        ProcessBuilder pb = new ProcessBuilder(command);
+        Process process = pb.start();
+
+        boolean finished = process.waitFor(Math.max(1, sftpConfig.getSessionTimeout()), TimeUnit.MILLISECONDS);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("SSH command timed out");
+        }
+
+        int exitCode = process.exitValue();
+        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        if (exitCode != 0) {
+            throw new IOException("SSH command failed (exit=" + exitCode + "): " + stderr.trim());
+        }
+
+        return stdout;
+    }
+
+    private List<String> buildSshCommand(String remoteCommand) {
+        List<String> command = new ArrayList<>();
+        if (sftpConfig.getPassword() != null && !sftpConfig.getPassword().isBlank()) {
+            command.add("sshpass");
+            command.add("-p");
+            command.add(sftpConfig.getPassword());
+        }
+
+        command.add("ssh");
+        command.add("-p");
+        command.add(String.valueOf(sftpConfig.getPort()));
+        command.add("-o");
+        command.add("StrictHostKeyChecking=no");
+        command.add("-o");
+        command.add("UserKnownHostsFile=/dev/null");
+        command.add("-o");
+        command.add("ConnectTimeout=" + Math.max(1, sftpConfig.getConnectionTimeout() / 1000));
+        command.add(sftpConfig.getUsername() + "@" + sftpConfig.getHost());
+        command.add(remoteCommand);
+        return command;
+    }
+
+    private String shellQuote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
+    }
+
     /**
-     * Cleanup resources
+     * Cleanup resources.
      */
     public void shutdown() {
-        if (executorService != null && !executorService.isShutdown()) {
+        if (!executorService.isShutdown()) {
             executorService.shutdown();
         }
     }
