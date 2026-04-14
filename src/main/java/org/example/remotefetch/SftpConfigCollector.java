@@ -1,26 +1,39 @@
 package org.example.remotefetch;
 
+import com.jcraft.jsch.Channel;
+import com.jcraft.jsch.ChannelSftp;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
+import com.jcraft.jsch.SftpATTRS;
+import com.jcraft.jsch.SftpException;
+
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * High-throughput collector for explicit files and recursive filename search.
- * Uses native ssh shell commands via ProcessBuilder instead of JSch.
+ * Uses JSch SFTP session directly (no shell commands).
  */
 public class SftpConfigCollector {
+
+    private static final int SFTP_BUFFER_SIZE = 16 * 1024;
+    private static final int CONNECT_TIMEOUT_MS = 15_000;
 
     private final ExecutorService executorService;
 
@@ -68,18 +81,25 @@ public class SftpConfigCollector {
             List<RemoteFileTask> fileTasks,
             List<RemoteSearchTask> searchTasks,
             Path localRoot
-    ) throws IOException, InterruptedException {
+    ) throws IOException {
         FetchResult result = new FetchResult(server.id());
 
-        for (RemoteFileTask task : fileTasks) {
-            fetchFile(server, server.platform(), task.remoteAbsolutePath(), task.fetchMode(), localRoot, result);
-        }
+        try (SftpSession sftpSession = openSftpSession(server)) {
+            for (RemoteFileTask task : fileTasks) {
+                fetchFile(sftpSession.channelSftp, server.platform(), task.remoteAbsolutePath(), task.fetchMode(), localRoot, result);
+            }
 
-        for (RemoteSearchTask task : searchTasks) {
-            Pattern pattern = Pattern.compile(task.filenamePattern());
-            List<String> matched = walkAndCollectMatches(server, task.searchRootAbsolutePath(), pattern);
-            for (String remotePath : matched) {
-                fetchFile(server, server.platform(), remotePath, task.fetchMode(), localRoot, result);
+            for (RemoteSearchTask task : searchTasks) {
+                Pattern pattern = Pattern.compile(task.filenamePattern());
+                List<String> matched = walkAndCollectMatches(
+                        sftpSession.channelSftp,
+                        server.platform(),
+                        task.searchRootAbsolutePath(),
+                        pattern
+                );
+                for (String remotePath : matched) {
+                    fetchFile(sftpSession.channelSftp, server.platform(), remotePath, task.fetchMode(), localRoot, result);
+                }
             }
         }
 
@@ -87,14 +107,14 @@ public class SftpConfigCollector {
     }
 
     private void fetchFile(
-            RemoteServer server,
+            ChannelSftp channelSftp,
             RemotePlatform platform,
             String remotePath,
             FetchMode fetchMode,
             Path localRoot,
             FetchResult result
-    ) throws IOException, InterruptedException {
-        byte[] content = readBytes(server, remotePath);
+    ) throws IOException {
+        byte[] content = readBytes(channelSftp, platform, remotePath);
 
         if (fetchMode == FetchMode.READ_TO_MEMORY) {
             result.addInMemoryFile(remotePath, content);
@@ -110,80 +130,174 @@ public class SftpConfigCollector {
         result.addLocalFile(remotePath, localPath);
     }
 
-    private byte[] readBytes(RemoteServer server, String remotePath) throws IOException, InterruptedException {
-        String output = runSshCommand(server, "cat " + shellQuote(remotePath));
-        return output.getBytes(StandardCharsets.UTF_8);
-    }
+    private byte[] readBytes(ChannelSftp channelSftp, RemotePlatform platform, String remotePath) throws IOException {
+        String normalizedPath = RemotePathMapper.normalizeRemoteAbsolutePath(platform, remotePath);
 
-    private List<String> walkAndCollectMatches(RemoteServer server, String root, Pattern filenamePattern)
-            throws IOException, InterruptedException {
-        String cmd = "if [ -d " + shellQuote(root) + " ]; then find " + shellQuote(root) + " -type f -printf '%p\\n'; fi";
-        String output = runSshCommand(server, cmd);
-        if (output.isBlank()) {
-            return List.of();
-        }
-        return output.lines()
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .filter(path -> {
-                    String name = path.substring(path.lastIndexOf('/') + 1);
-                    return filenamePattern.matcher(name).matches();
-                })
-                .collect(Collectors.toList());
-    }
-
-    private String runSshCommand(RemoteServer server, String remoteCommand) throws IOException, InterruptedException {
-        List<String> command = buildSshCommand(server, remoteCommand);
-        return runCommand(command, 15_000);
-    }
-
-    private String runCommand(List<String> command, long timeoutMs) throws IOException, InterruptedException {
-        ProcessBuilder pb = new ProcessBuilder(command);
-        Process process = pb.start();
-
-        boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            throw new IOException("Command timed out: " + String.join(" ", command));
+        for (String candidate : remotePathCandidates(platform, normalizedPath)) {
+            try (InputStream in = channelSftp.get(candidate);
+                 ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[SFTP_BUFFER_SIZE];
+                int read;
+                while ((read = in.read(buffer)) >= 0) {
+                    out.write(buffer, 0, read);
+                }
+                return out.toByteArray();
+            } catch (SftpException e) {
+                if (!isNoSuchFile(e)) {
+                    throw new IOException("Failed to read remote file: " + candidate, e);
+                }
+            }
         }
 
-        int exitCode = process.exitValue();
-        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        if (exitCode != 0) {
-            throw new IOException("Command failed (exit=" + exitCode + "): " + stderr.trim());
-        }
-
-        return stdout;
+        throw new IOException("Remote file not found: " + remotePath);
     }
 
-    private List<String> buildSshCommand(RemoteServer server, String remoteCommand) {
-        List<String> command = new ArrayList<>();
-        if (server.password() != null && !server.password().isBlank()) {
-            command.add("sshpass");
-            command.add("-p");
-            command.add(server.password());
+    private List<String> walkAndCollectMatches(
+            ChannelSftp channelSftp,
+            RemotePlatform platform,
+            String root,
+            Pattern filenamePattern
+    ) throws IOException {
+        String normalizedRoot = RemotePathMapper.normalizeRemoteAbsolutePath(platform, root);
+        List<String> matches = new ArrayList<>();
+
+        IOException lastError = null;
+        for (String candidateRoot : remotePathCandidates(platform, normalizedRoot)) {
+            try {
+                walkDirectory(channelSftp, candidateRoot, filenamePattern, matches);
+                return matches;
+            } catch (IOException e) {
+                lastError = e;
+            }
         }
-        command.add("ssh");
-        command.add("-p");
-        command.add(String.valueOf(server.port()));
-        command.add("-o");
-        command.add("StrictHostKeyChecking=no");
-        command.add("-o");
-        command.add("UserKnownHostsFile=/dev/null");
-        command.add("-o");
-        command.add("ConnectTimeout=15");
-        command.add(server.username() + "@" + server.host());
-        command.add(remoteCommand);
-        return command;
+
+        if (lastError != null) {
+            throw lastError;
+        }
+
+        return List.of();
     }
 
-    private String shellQuote(String value) {
-        return "'" + value.replace("'", "'\\''") + "'";
+    private void walkDirectory(
+            ChannelSftp channelSftp,
+            String directory,
+            Pattern filenamePattern,
+            List<String> matches
+    ) throws IOException {
+        Vector<ChannelSftp.LsEntry> entries;
+        try {
+            @SuppressWarnings("unchecked")
+            Vector<ChannelSftp.LsEntry> listed = channelSftp.ls(directory);
+            entries = listed;
+        } catch (SftpException e) {
+            if (isNoSuchFile(e)) {
+                return;
+            }
+            throw new IOException("Failed to list directory: " + directory, e);
+        }
+
+        entries.sort(Comparator.comparing(ChannelSftp.LsEntry::getFilename));
+        for (ChannelSftp.LsEntry entry : entries) {
+            String name = entry.getFilename();
+            if (".".equals(name) || "..".equals(name)) {
+                continue;
+            }
+
+            String child = directory.endsWith("/") ? directory + name : directory + "/" + name;
+            SftpATTRS attrs = entry.getAttrs();
+            if (attrs.isDir()) {
+                walkDirectory(channelSftp, child, filenamePattern, matches);
+            } else if (filenamePattern.matcher(name).matches()) {
+                matches.add(child);
+            }
+        }
+    }
+
+    private SftpSession openSftpSession(RemoteServer server) throws IOException {
+        try {
+            JSch jsch = new JSch();
+
+            if (server.authMode() == RemoteAuthMode.PRIVATE_KEY) {
+                if (server.privateKeyPassphrase() != null && !server.privateKeyPassphrase().isBlank()) {
+                    jsch.addIdentity(server.privateKeyPath(), server.privateKeyPassphrase());
+                } else {
+                    jsch.addIdentity(server.privateKeyPath());
+                }
+            }
+
+            Session session = jsch.getSession(server.username(), server.host(), server.port());
+            Properties config = new Properties();
+            config.put("StrictHostKeyChecking", "no");
+
+            if (server.authMode() == RemoteAuthMode.KERBEROS) {
+                config.put("PreferredAuthentications", "gssapi-with-mic");
+                config.put("GSSAPIAuthentication", "yes");
+                if (server.kerberosPrincipal() != null && !server.kerberosPrincipal().isBlank()) {
+                    session.setConfig("userauth.gssapi-with-mic", "com.jcraft.jsch.UserAuthGSSAPIWithMIC");
+                }
+            } else if (server.authMode() == RemoteAuthMode.PRIVATE_KEY) {
+                config.put("PreferredAuthentications", "publickey,password");
+            } else {
+                session.setPassword(server.password());
+                config.put("PreferredAuthentications", "password,publickey");
+            }
+
+            session.setConfig(config);
+            session.connect(CONNECT_TIMEOUT_MS);
+
+            Channel channel = session.openChannel("sftp");
+            channel.connect(CONNECT_TIMEOUT_MS);
+
+            return new SftpSession(session, (ChannelSftp) channel);
+        } catch (JSchException e) {
+            throw new IOException("Failed to open SFTP connection to " + server.id(), e);
+        }
+    }
+
+    private List<String> remotePathCandidates(RemotePlatform platform, String normalizedPath) {
+        if (platform != RemotePlatform.WINDOWS) {
+            return List.of(normalizedPath);
+        }
+
+        if (!normalizedPath.matches("/[a-zA-Z]/.*")) {
+            return List.of(normalizedPath);
+        }
+
+        String drive = normalizedPath.substring(1, 2).toUpperCase();
+        String rest = normalizedPath.substring(2);
+
+        List<String> candidates = new ArrayList<>();
+        candidates.add(normalizedPath);        // /c/ProgramData/file
+        candidates.add("/" + drive + ":" + rest); // /C:/ProgramData/file
+        candidates.add(drive + ":" + rest);  // C:/ProgramData/file
+        return candidates;
+    }
+
+    private boolean isNoSuchFile(SftpException e) {
+        return e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE;
     }
 
     public void shutdown() {
         executorService.shutdown();
+    }
+
+    private static final class SftpSession implements AutoCloseable {
+        private final Session session;
+        private final ChannelSftp channelSftp;
+
+        private SftpSession(Session session, ChannelSftp channelSftp) {
+            this.session = session;
+            this.channelSftp = channelSftp;
+        }
+
+        @Override
+        public void close() {
+            if (channelSftp != null && channelSftp.isConnected()) {
+                channelSftp.disconnect();
+            }
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+        }
     }
 }
