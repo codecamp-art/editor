@@ -23,6 +23,7 @@ This solution uses Java + JSch API directly (no shell commands) to pull config f
 ## Main classes
 
 - `org.example.remotefetch.SftpConfigCollector`
+- `org.example.remotefetch.ProcessBuilderConfigCollector`
 - `org.example.remotefetch.RemotePathMapper`
 - `org.example.remotefetch.RemoteServer`
 - `org.example.remotefetch.RemoteAuthMode`
@@ -73,4 +74,51 @@ List<RemoteSearchTask> searches = List.of(
 
 Map<String, FetchResult> result = collector.collect(servers, files, searches, Path.of("./downloaded-configs"));
 collector.shutdown();
+```
+
+## Separate ProcessBuilder solution (Linux + Windows)
+
+If you must use local `ssh` binaries (instead of JSch), use `ProcessBuilderConfigCollector`.
+
+### Capabilities
+
+- Works with Linux and Windows remote hosts over SSH.
+- Supports password (`sshpass`), private key (`ssh -i`), and Kerberos (`gssapi-with-mic`) auth.
+- Fetch modes:
+  - to local disk (`fetchFileToDisk`)
+  - to `InputStream` (`fetchFileAsInputStream`)
+  - to `String` (`fetchFileAsString`)
+  - batch mode via `collect(...)` with `SAVE_TO_DISK` / `READ_TO_MEMORY`
+
+```java
+ProcessBuilderConfigCollector shellCollector = new ProcessBuilderConfigCollector(8);
+
+RemoteServer linux = new RemoteServer("linux-a", "10.10.1.10", 22, "ops", "***", RemotePlatform.LINUX);
+RemoteServer win = RemoteServer.withKerberos(
+    "win-a",
+    "10.10.2.20",
+    22,
+    "svc_fetch",
+    "svc_fetch@EXAMPLE.COM",
+    RemotePlatform.WINDOWS
+);
+
+// single file -> String
+String text = shellCollector.fetchFileAsString(linux, "/etc/myapp/app.conf");
+
+// single file -> InputStream
+InputStream in = shellCollector.fetchFileAsInputStream(win, "C:/ProgramData/MyApp/runtime.properties");
+
+// single file -> disk
+Path saved = shellCollector.fetchFileToDisk(win, "C:/ProgramData/MyApp/runtime.properties", Path.of("./downloaded-shell"));
+
+// batch collect (same task model as SftpConfigCollector)
+Map<String, FetchResult> shellResults = shellCollector.collect(
+    List.of(linux, win),
+    List.of(new RemoteFileTask("/etc/myapp/app.conf", FetchMode.SAVE_TO_DISK)),
+    List.of(new RemoteSearchTask("C:/ProgramData/MyApp", "(?i).*\\.properties$", FetchMode.READ_TO_MEMORY)),
+    Path.of("./downloaded-shell")
+);
+
+shellCollector.shutdown();
 ```
