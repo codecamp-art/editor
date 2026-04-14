@@ -24,6 +24,7 @@ This solution uses Java + JSch API directly (no shell commands) to pull config f
 
 - `org.example.remotefetch.SftpConfigCollector`
 - `org.example.remotefetch.ProcessBuilderConfigCollector`
+- `org.example.remotefetch.ProcessBuilderRemoteFileFetcher`
 - `org.example.remotefetch.RemotePathMapper`
 - `org.example.remotefetch.RemoteServer`
 - `org.example.remotefetch.RemoteAuthMode`
@@ -121,4 +122,16 @@ Map<String, FetchResult> shellResults = shellCollector.collect(
 );
 
 shellCollector.shutdown();
+```
+
+### Minimal single-file fetcher
+
+For a lightweight, separate API dedicated to one-file reads/writes, use `ProcessBuilderRemoteFileFetcher`:
+
+```java
+ProcessBuilderRemoteFileFetcher fetcher = new ProcessBuilderRemoteFileFetcher();
+
+String linuxText = fetcher.fetchAsString(linux, "/etc/myapp/app.conf");
+InputStream winStream = fetcher.fetchAsInputStream(win, "C:/ProgramData/MyApp/runtime.properties");
+Path winSaved = fetcher.fetchToDisk(win, "C:/ProgramData/MyApp/runtime.properties", Path.of("./downloaded-shell"));
 ```
