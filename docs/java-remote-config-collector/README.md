@@ -6,8 +6,12 @@ This solution uses Java + JSch API directly (no shell commands) to pull config f
 
 1. **Many servers (Linux + Windows)** in parallel with a configurable thread pool.
 2. **Path-preserving local download**: remote absolute path is kept under local root.
-   - Linux `/etc/app/a.conf` -> `<localRoot>/etc/app/a.conf`
-   - Windows `C:\\ProgramData\\app\\a.ini` -> `<localRoot>/c/ProgramData/app/a.ini`
+   - Single-file download:
+     - Linux `/etc/app/a.conf` -> `<localRoot>/etc/app/a.conf`
+     - Windows `C:\\ProgramData\\app\\a.ini` -> `<localRoot>/c/ProgramData/app/a.ini`
+   - Batch multi-server download:
+     - Linux `/etc/app/a.conf` from server `linux-a` -> `<localRoot>/linux-a/etc/app/a.conf`
+     - Windows `C:\\ProgramData\\app\\a.ini` from server `win-a` -> `<localRoot>/win-a/c/ProgramData/app/a.ini`
 3. **Read to memory** without writing to local disk (`byte[]` from SFTP stream).
 4. Two input models:
    - explicit remote path list
@@ -28,6 +32,7 @@ This solution uses Java + JSch API directly (no shell commands) to pull config f
 - `org.example.remotefetch.RemotePathMapper`
 - `org.example.remotefetch.RemoteServer`
 - `org.example.remotefetch.RemoteAuthMode`
+- `org.example.remotefetch.RemoteFetchRequest`
 - `org.example.remotefetch.RemoteFileTask`
 - `org.example.remotefetch.RemoteSearchTask`
 - `org.example.remotefetch.FetchResult`
@@ -79,17 +84,20 @@ collector.shutdown();
 
 ## Separate ProcessBuilder solution (Linux + Windows)
 
-If you must use local `ssh` binaries (instead of JSch), use `ProcessBuilderConfigCollector`.
+If you must use local `ssh`/`sftp` binaries (instead of JSch), use `ProcessBuilderConfigCollector`.
 
 ### Capabilities
 
-- Works with Linux and Windows remote hosts over SSH.
+- Uses native `sftp -b` for file transfer, opening one SFTP session per server.
+- Works with Linux and Windows remote hosts over SSH/SFTP.
 - Supports password (`sshpass`), private key (`ssh -i`), and Kerberos (`gssapi-with-mic`) auth.
+- Supports different path lists per server via `RemoteFetchRequest`.
 - Fetch modes:
   - to local disk (`fetchFileToDisk`)
   - to `InputStream` (`fetchFileAsInputStream`)
   - to `String` (`fetchFileAsString`)
   - batch mode via `collect(...)` with `SAVE_TO_DISK` / `READ_TO_MEMORY`
+- Batch downloads are stored under `<localRoot>/<serverId>/...` to avoid collisions across hosts.
 
 ```java
 ProcessBuilderConfigCollector shellCollector = new ProcessBuilderConfigCollector(8);
@@ -113,11 +121,22 @@ InputStream in = shellCollector.fetchFileAsInputStream(win, "C:/ProgramData/MyAp
 // single file -> disk
 Path saved = shellCollector.fetchFileToDisk(win, "C:/ProgramData/MyApp/runtime.properties", Path.of("./downloaded-shell"));
 
-// batch collect (same task model as SftpConfigCollector)
+// batch collect with per-server file lists
 Map<String, FetchResult> shellResults = shellCollector.collect(
-    List.of(linux, win),
-    List.of(new RemoteFileTask("/etc/myapp/app.conf", FetchMode.SAVE_TO_DISK)),
-    List.of(new RemoteSearchTask("C:/ProgramData/MyApp", "(?i).*\\.properties$", FetchMode.READ_TO_MEMORY)),
+    List.of(
+        new RemoteFetchRequest(
+            linux,
+            List.of(
+                new RemoteFileTask("/etc/myapp/app.conf", FetchMode.SAVE_TO_DISK),
+                new RemoteFileTask("/opt/myapp/runtime.yml", FetchMode.SAVE_TO_DISK)
+            )
+        ),
+        new RemoteFetchRequest(
+            win,
+            List.of(new RemoteFileTask("C:/ProgramData/MyApp/runtime.properties", FetchMode.SAVE_TO_DISK)),
+            List.of(new RemoteSearchTask("C:/ProgramData/MyApp", "(?i).*\\.properties$", FetchMode.READ_TO_MEMORY))
+        )
+    ),
     Path.of("./downloaded-shell")
 );
 

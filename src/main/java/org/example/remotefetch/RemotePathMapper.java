@@ -16,6 +16,22 @@ public final class RemotePathMapper {
         return localRoot.resolve(relative);
     }
 
+    public static Path toServerLocalPath(
+            Path localRoot,
+            String serverId,
+            RemotePlatform platform,
+            String remoteAbsolutePath
+    ) {
+        if (serverId == null || serverId.isBlank()) {
+            throw new IllegalArgumentException("Server id is required");
+        }
+        if (serverId.contains("/") || serverId.contains("\\") || ".".equals(serverId) || "..".equals(serverId)) {
+            throw new IllegalArgumentException("Server id must be a single safe path segment");
+        }
+
+        return toLocalPath(localRoot.resolve(serverId), platform, remoteAbsolutePath);
+    }
+
     /**
      * Linux: /etc/app/a.conf -> /etc/app/a.conf
      * Windows: C:\\ProgramData\\a.ini or /C:/ProgramData/a.ini -> /c/ProgramData/a.ini

@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
- * ProcessBuilder-based collector that invokes local ssh/sshpass binaries.
- * Supports Linux and Windows remote hosts and can fetch to disk or in-memory.
+ * ProcessBuilder-based collector that uses native sftp/ssh binaries.
+ * Opens at most one SFTP session per server and batches all downloads for that host.
  */
 public class ProcessBuilderConfigCollector {
 
@@ -40,6 +40,13 @@ public class ProcessBuilderConfigCollector {
             List<RemoteSearchTask> searchTasks,
             Path localRoot
     ) {
+        List<RemoteFetchRequest> requests = servers.stream()
+                .map(server -> new RemoteFetchRequest(server, fileTasks, searchTasks))
+                .toList();
+        return collect(requests, localRoot);
+    }
+
+    public Map<String, FetchResult> collect(List<RemoteFetchRequest> requests, Path localRoot) {
         try {
             Files.createDirectories(localRoot);
         } catch (IOException e) {
@@ -47,8 +54,8 @@ public class ProcessBuilderConfigCollector {
         }
 
         List<Future<FetchResult>> futures = new ArrayList<>();
-        for (RemoteServer server : servers) {
-            futures.add(executorService.submit(() -> collectForServer(server, fileTasks, searchTasks, localRoot)));
+        for (RemoteFetchRequest request : requests) {
+            futures.add(executorService.submit(() -> collectForRequest(request, localRoot)));
         }
 
         Map<String, FetchResult> results = new ConcurrentHashMap<>();
@@ -75,66 +82,141 @@ public class ProcessBuilderConfigCollector {
     }
 
     public Path fetchFileToDisk(RemoteServer server, String remotePath, Path localRoot) throws IOException, InterruptedException {
-        byte[] bytes = fetchFileAsBytes(server, remotePath);
         Path localPath = RemotePathMapper.toLocalPath(localRoot, server.platform(), remotePath);
-        if (localPath.getParent() != null) {
-            Files.createDirectories(localPath.getParent());
-        }
-        Files.write(localPath, bytes);
+        executeSftpBatch(server, List.of(plannedDiskDownload(server, remotePath, localPath)));
         return localPath;
     }
 
-    private FetchResult collectForServer(
-            RemoteServer server,
-            List<RemoteFileTask> fileTasks,
-            List<RemoteSearchTask> searchTasks,
-            Path localRoot
-    ) throws IOException, InterruptedException {
-        FetchResult result = new FetchResult(server.id());
+    public byte[] fetchFileAsBytes(RemoteServer server, String remotePath) throws IOException, InterruptedException {
+        Path stagingRoot = Files.createTempDirectory("pb-sftp-single-");
+        try {
+            Path stagingPath = RemotePathMapper.toLocalPath(stagingRoot, server.platform(), remotePath);
+            PlannedDownload download = plannedMemoryDownload(server, remotePath, stagingPath, stagingRoot);
+            executeSftpBatch(server, List.of(download));
+            byte[] content = Files.readAllBytes(stagingPath);
+            Files.deleteIfExists(stagingPath);
+            return content;
+        } finally {
+            deleteRecursively(stagingRoot);
+        }
+    }
 
-        for (RemoteFileTask task : fileTasks) {
-            fetchFile(server, task.remoteAbsolutePath(), task.fetchMode(), localRoot, result);
+    private FetchResult collectForRequest(RemoteFetchRequest request, Path localRoot) throws IOException, InterruptedException {
+        RemoteServer server = request.server();
+        FetchResult result = new FetchResult(server.id());
+        List<PlannedDownload> downloads = new ArrayList<>();
+
+        for (RemoteFileTask task : request.fileTasks()) {
+            downloads.add(buildPlannedDownload(server, task.remoteAbsolutePath(), task.fetchMode(), localRoot));
         }
 
-        for (RemoteSearchTask task : searchTasks) {
+        for (RemoteSearchTask task : request.searchTasks()) {
             List<String> paths = listFilesRecursively(server, task.searchRootAbsolutePath(), Pattern.compile(task.filenamePattern()));
             for (String path : paths) {
-                fetchFile(server, path, task.fetchMode(), localRoot, result);
+                downloads.add(buildPlannedDownload(server, path, task.fetchMode(), localRoot));
             }
         }
 
-        return result;
+        if (downloads.isEmpty()) {
+            return result;
+        }
+
+        try {
+            executeSftpBatch(server, downloads);
+
+            for (PlannedDownload download : downloads) {
+                if (download.fetchMode() == FetchMode.READ_TO_MEMORY) {
+                    result.addInMemoryFile(download.originalRemotePath(), Files.readAllBytes(download.localPath()));
+                    Files.deleteIfExists(download.localPath());
+                } else {
+                    result.addLocalFile(download.originalRemotePath(), download.localPath());
+                }
+            }
+            return result;
+        } finally {
+            cleanupMemoryDownloads(downloads);
+        }
     }
 
-    private void fetchFile(
+    private void cleanupMemoryDownloads(List<PlannedDownload> downloads) {
+        for (PlannedDownload download : downloads) {
+            if (download.fetchMode() != FetchMode.READ_TO_MEMORY) {
+                continue;
+            }
+
+            try {
+                deleteRecursively(download.temporaryRoot());
+            } catch (IOException ignored) {
+                // Best-effort cleanup for transient staging files.
+            }
+        }
+    }
+
+    private PlannedDownload buildPlannedDownload(
             RemoteServer server,
             String remotePath,
             FetchMode fetchMode,
-            Path localRoot,
-            FetchResult result
-    ) throws IOException, InterruptedException {
-        byte[] content = fetchFileAsBytes(server, remotePath);
-
-        if (fetchMode == FetchMode.READ_TO_MEMORY) {
-            result.addInMemoryFile(remotePath, content);
-            return;
+            Path localRoot
+    ) throws IOException {
+        if (fetchMode == FetchMode.SAVE_TO_DISK) {
+            Path localPath = RemotePathMapper.toServerLocalPath(localRoot, server.id(), server.platform(), remotePath);
+            return plannedDiskDownload(server, remotePath, localPath);
         }
 
-        Path localPath = RemotePathMapper.toLocalPath(localRoot, server.platform(), remotePath);
-        if (localPath.getParent() != null) {
-            Files.createDirectories(localPath.getParent());
-        }
-        Files.write(localPath, content);
-        result.addLocalFile(remotePath, localPath);
+        Path tempRoot = Files.createTempDirectory("pb-sftp-memory-" + server.id() + "-");
+        Path localPath = RemotePathMapper.toLocalPath(tempRoot, server.platform(), remotePath);
+        return plannedMemoryDownload(server, remotePath, localPath, tempRoot);
     }
 
-    private byte[] fetchFileAsBytes(RemoteServer server, String remotePath) throws IOException, InterruptedException {
-        String remoteCommand = buildReadCommand(server.platform(), remotePath);
-        CommandResult result = runCommand(buildSshCommand(server, remoteCommand), COMMAND_TIMEOUT_MS);
-        if (result.exitCode != 0) {
-            throw new IOException("Failed to fetch remote file " + remotePath + ": " + result.stderrText());
+    private PlannedDownload plannedDiskDownload(RemoteServer server, String remotePath, Path localPath) {
+        return new PlannedDownload(
+                remotePath,
+                remotePathCandidates(server.platform(), remotePath),
+                FetchMode.SAVE_TO_DISK,
+                localPath,
+                null
+        );
+    }
+
+    private PlannedDownload plannedMemoryDownload(RemoteServer server, String remotePath, Path localPath, Path temporaryRoot) {
+        return new PlannedDownload(
+                remotePath,
+                remotePathCandidates(server.platform(), remotePath),
+                FetchMode.READ_TO_MEMORY,
+                localPath,
+                temporaryRoot
+        );
+    }
+
+    private void executeSftpBatch(RemoteServer server, List<PlannedDownload> downloads) throws IOException, InterruptedException {
+        Path batchFile = Files.createTempFile("pb-sftp-", ".batch");
+        try {
+            List<String> batchLines = new ArrayList<>();
+            for (PlannedDownload download : downloads) {
+                if (download.localPath().getParent() != null) {
+                    Files.createDirectories(download.localPath().getParent());
+                }
+                Files.deleteIfExists(download.localPath());
+                for (String candidate : download.remoteCandidates()) {
+                    batchLines.add("-get " + sftpQuote(candidate) + " " + sftpQuote(localPathForSftp(download.localPath())));
+                }
+            }
+
+            Files.write(batchFile, batchLines, StandardCharsets.UTF_8);
+            CommandResult result = runCommand(buildSftpCommand(server, batchFile), COMMAND_TIMEOUT_MS);
+
+            List<String> missing = downloads.stream()
+                    .filter(download -> !Files.exists(download.localPath()))
+                    .map(PlannedDownload::originalRemotePath)
+                    .toList();
+
+            if (!missing.isEmpty()) {
+                throw new IOException("Failed to download remote files from " + server.id()
+                        + ": " + missing + ". " + result.stderrText());
+            }
+        } finally {
+            Files.deleteIfExists(batchFile);
         }
-        return result.stdout;
     }
 
     private List<String> listFilesRecursively(RemoteServer server, String searchRoot, Pattern fileNamePattern)
@@ -175,15 +257,6 @@ public class ProcessBuilderConfigCollector {
         return idx >= 0 ? remotePath.substring(idx + 1) : remotePath;
     }
 
-    private String buildReadCommand(RemotePlatform platform, String remotePath) {
-        if (platform == RemotePlatform.WINDOWS) {
-            return "powershell -NoProfile -NonInteractive -Command \"$p='" + psQuote(remotePath)
-                    + "'; if (Test-Path -LiteralPath $p -PathType Leaf) { Get-Content -LiteralPath $p -Raw } else { exit 2 }\"";
-        }
-
-        return "cat " + shellQuote(remotePath);
-    }
-
     private String buildRecursiveListCommand(RemotePlatform platform, String searchRoot) {
         if (platform == RemotePlatform.WINDOWS) {
             return "powershell -NoProfile -NonInteractive -Command \"$p='" + psQuote(searchRoot)
@@ -191,6 +264,43 @@ public class ProcessBuilderConfigCollector {
         }
 
         return "if [ -d " + shellQuote(searchRoot) + " ]; then find " + shellQuote(searchRoot) + " -type f -print; fi";
+    }
+
+    private List<String> buildSftpCommand(RemoteServer server, Path batchFile) {
+        List<String> command = new ArrayList<>();
+
+        if (server.authMode() == RemoteAuthMode.PASSWORD) {
+            command.add("sshpass");
+            command.add("-p");
+            command.add(server.password());
+        }
+
+        command.add("sftp");
+        command.add("-b");
+        command.add(batchFile.toString());
+        command.add("-P");
+        command.add(String.valueOf(server.port()));
+        command.add("-o");
+        command.add("StrictHostKeyChecking=no");
+        command.add("-o");
+        command.add("UserKnownHostsFile=/dev/null");
+        command.add("-o");
+        command.add("ConnectTimeout=15");
+
+        if (server.authMode() == RemoteAuthMode.PRIVATE_KEY) {
+            command.add("-i");
+            command.add(server.privateKeyPath());
+        }
+
+        if (server.authMode() == RemoteAuthMode.KERBEROS) {
+            command.add("-o");
+            command.add("PreferredAuthentications=gssapi-with-mic");
+            command.add("-o");
+            command.add("GSSAPIAuthentication=yes");
+        }
+
+        command.add(server.username() + "@" + server.host());
+        return command;
     }
 
     private List<String> buildSshCommand(RemoteServer server, String remoteCommand) {
@@ -232,16 +342,49 @@ public class ProcessBuilderConfigCollector {
     protected CommandResult runCommand(List<String> command, long timeoutMs) throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command).start();
 
+        StreamCollector stdoutCollector = new StreamCollector(process.getInputStream());
+        StreamCollector stderrCollector = new StreamCollector(process.getErrorStream());
+        stdoutCollector.start();
+        stderrCollector.start();
+
         boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
         if (!finished) {
             process.destroyForcibly();
             throw new IOException("Command timed out: " + String.join(" ", command));
         }
 
-        int exitCode = process.exitValue();
-        byte[] stdout = process.getInputStream().readAllBytes();
-        byte[] stderr = process.getErrorStream().readAllBytes();
-        return new CommandResult(exitCode, stdout, stderr);
+        stdoutCollector.await();
+        stderrCollector.await();
+
+        return new CommandResult(process.exitValue(), stdoutCollector.bytes(), stderrCollector.bytes());
+    }
+
+    private List<String> remotePathCandidates(RemotePlatform platform, String remotePath) {
+        String normalizedPath = RemotePathMapper.normalizeRemoteAbsolutePath(platform, remotePath);
+        if (platform != RemotePlatform.WINDOWS) {
+            return List.of(normalizedPath);
+        }
+
+        if (!normalizedPath.matches("/[a-zA-Z]/.*")) {
+            return List.of(normalizedPath);
+        }
+
+        String drive = normalizedPath.substring(1, 2).toUpperCase();
+        String rest = normalizedPath.substring(2);
+
+        return List.of(
+                normalizedPath,
+                "/" + drive + ":" + rest,
+                drive + ":" + rest
+        );
+    }
+
+    private String localPathForSftp(Path localPath) {
+        return localPath.toAbsolutePath().normalize().toString().replace('\\', '/');
+    }
+
+    private String sftpQuote(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     private String shellQuote(String value) {
@@ -252,8 +395,69 @@ public class ProcessBuilderConfigCollector {
         return value.replace("'", "''");
     }
 
+    private void deleteRecursively(Path root) throws IOException {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+
+        try (var stream = Files.walk(root)) {
+            for (Path path : stream.sorted((a, b) -> b.getNameCount() - a.getNameCount()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
+    }
+
     public void shutdown() {
         executorService.shutdown();
+    }
+
+    private record PlannedDownload(
+            String originalRemotePath,
+            List<String> remoteCandidates,
+            FetchMode fetchMode,
+            Path localPath,
+            Path temporaryRoot
+    ) {
+    }
+
+    private static final class StreamCollector {
+        private final InputStream inputStream;
+        private final java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
+        private final Thread thread;
+        private volatile IOException failure;
+
+        private StreamCollector(InputStream inputStream) {
+            this.inputStream = inputStream;
+            this.thread = new Thread(this::collect);
+            this.thread.setDaemon(true);
+        }
+
+        private void start() {
+            thread.start();
+        }
+
+        private void await() throws IOException, InterruptedException {
+            thread.join();
+            if (failure != null) {
+                throw failure;
+            }
+        }
+
+        private byte[] bytes() {
+            return outputStream.toByteArray();
+        }
+
+        private void collect() {
+            try (InputStream in = inputStream) {
+                byte[] buffer = new byte[8_192];
+                int read;
+                while ((read = in.read(buffer)) >= 0) {
+                    outputStream.write(buffer, 0, read);
+                }
+            } catch (IOException e) {
+                failure = e;
+            }
+        }
     }
 
     protected static final class CommandResult {
@@ -272,7 +476,11 @@ public class ProcessBuilderConfigCollector {
         }
 
         private String stderrText() {
-            return new String(stderr, StandardCharsets.UTF_8).trim();
+            String stderrText = new String(stderr, StandardCharsets.UTF_8).trim();
+            if (!stderrText.isEmpty()) {
+                return stderrText;
+            }
+            return new String(stdout, StandardCharsets.UTF_8).trim();
         }
     }
 }

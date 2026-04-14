@@ -31,4 +31,15 @@ class RemotePathMapperTest {
         Path mapped = RemotePathMapper.toLocalPath(Path.of("/tmp/download"), RemotePlatform.WINDOWS, "C:/ProgramData/MyApp/a.ini");
         assertEquals(Path.of("/tmp/download/c/ProgramData/MyApp/a.ini"), mapped);
     }
+
+    @Test
+    void mapToServerLocalPath() {
+        Path mapped = RemotePathMapper.toServerLocalPath(
+                Path.of("/tmp/download"),
+                "win-a",
+                RemotePlatform.WINDOWS,
+                "C:/ProgramData/MyApp/a.ini"
+        );
+        assertEquals(Path.of("/tmp/download/win-a/c/ProgramData/MyApp/a.ini"), mapped);
+    }
 }
