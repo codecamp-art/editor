@@ -347,7 +347,9 @@ public final class OpenSshFileFetcher {
             List<String> lines = new ArrayList<>();
             for (Map.Entry<String, Path> entry : mapping.entrySet()) {
                 Files.createDirectories(entry.getValue().getParent());
-                lines.add("get " + sftpQuote(entry.getKey()) + " " + sftpQuote(entry.getValue().toString()));
+                String localPathForSftp = entry.getValue().toAbsolutePath().toString().replace('\\', '/');
+                lines.add("get " + sftpQuote(entry.getKey()) + " " + sftpQuote(localPathForSftp));
+                // lines.add("get " + sftpQuote(entry.getKey()) + " " + sftpQuote(entry.getValue().toString()));
             }
 
             // UTF-8 helps with Chinese path in batch file.
