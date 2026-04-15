@@ -349,44 +349,75 @@ public final class OpenSshFileFetcher {
     }
 
     private List<String> batchDownloadExisting(SshTarget target, Map<String, Path> mapping) throws IOException {
-        if (mapping.isEmpty()) {
-            return Collections.emptyList();
+    if (mapping.isEmpty()) {
+        return Collections.emptyList();
+    }
+
+    Path batchFile = Files.createTempFile("sftp-batch-", ".txt");
+    try {
+        List<String> lines = new ArrayList<>();
+        for (Map.Entry<String, Path> entry : mapping.entrySet()) {
+            Files.createDirectories(entry.getValue().getParent());
+
+            String remotePathForSftp = toSftpRemotePath(target, entry.getKey());
+            String localPathForSftp = entry.getValue().toAbsolutePath().toString().replace('\\', '/');
+
+            lines.add("get " + sftpQuote(remotePathForSftp) + " " + sftpQuote(localPathForSftp));
         }
 
-        Path batchFile = Files.createTempFile("sftp-batch-", ".txt");
-        try {
-            List<String> lines = new ArrayList<>();
+        Files.write(batchFile, lines, UTF_8);
+
+        List<String> command = new ArrayList<>();
+        command.add("sftp");
+        command.addAll(commonSshOptions(target));
+        command.add("-b");
+        command.add(batchFile.toString());
+        command.add(target.destination());
+
+        ExecResult result = run(command, commandTimeout);
+
+        List<String> failed = new ArrayList<>();
+        if (result.exitCode() != 0) {
             for (Map.Entry<String, Path> entry : mapping.entrySet()) {
-                Files.createDirectories(entry.getValue().getParent());
-                String localPathForSftp = entry.getValue().toAbsolutePath().toString().replace('\\', '/');
-                lines.add("get " + sftpQuote(entry.getKey()) + " " + sftpQuote(localPathForSftp));
-            }
-
-            Files.write(batchFile, lines, UTF_8);
-
-            List<String> command = new ArrayList<>();
-            command.add("sftp");
-            command.addAll(commonSshOptions(target));
-            command.add("-b");
-            command.add(batchFile.toString());
-            command.add(target.destination());
-
-            ExecResult result = run(command, commandTimeout);
-
-            List<String> failed = new ArrayList<>();
-            if (result.exitCode() != 0) {
-                for (Map.Entry<String, Path> entry : mapping.entrySet()) {
-                    if (!Files.exists(entry.getValue())) {
-                        failed.add(entry.getKey());
-                    }
+                if (!Files.exists(entry.getValue())) {
+                    failed.add(entry.getKey());
                 }
             }
-
-            return failed;
-        } finally {
-            Files.deleteIfExists(batchFile);
         }
+
+        return failed;
+    } finally {
+        Files.deleteIfExists(batchFile);
     }
+}
+
+    private String toSftpRemotePath(SshTarget target, String remotePath) {
+    String p = remotePath.trim().replace('\\', '/');
+
+    if (target.remoteOs() == RemoteOs.LINUX) {
+        return p;
+    }
+
+    // Windows OpenSSH SFTP wants /d:/path/to/file
+    if (p.length() >= 4
+            && p.charAt(0) == '/'
+            && Character.isLetter(p.charAt(1))
+            && p.charAt(2) == ':'
+            && p.charAt(3) == '/') {
+        char drive = Character.toLowerCase(p.charAt(1));
+        return "/" + drive + ":" + p.substring(3);
+    }
+
+    if (p.length() >= 3
+            && Character.isLetter(p.charAt(0))
+            && p.charAt(1) == ':'
+            && p.charAt(2) == '/') {
+        char drive = Character.toLowerCase(p.charAt(0));
+        return "/" + drive + ":" + p.substring(2);
+    }
+
+    return p;
+}
 
     private List<String> buildSshCommand(SshTarget target, String remoteCommand) {
         List<String> command = new ArrayList<>();
