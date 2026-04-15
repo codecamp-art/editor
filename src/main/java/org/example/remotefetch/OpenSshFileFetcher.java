@@ -484,36 +484,42 @@ public final class OpenSshFileFetcher {
      * /d:/apps/配置/a.txt -> d/apps/配置/a.txt
      */
     private String windowsSftpPathToRelative(String remotePath) {
-        String p = remotePath.trim().replace('\\', '/');
-        if (p.matches("^/[a-zA-Z]:/.*")) {
-            char drive = Character.toLowerCase(p.charAt(1));
-            String rest = p.substring(4);
-            if (rest.startsWith("/")) {
-                rest = rest.substring(1);
-            }
-            return drive + "/" + rest;
-        }
-        while (p.startsWith("/")) {
-            p = p.substring(1);
-        }
-        return p;
+    String p = remotePath.trim().replace('\\', '/');
+
+    if (p.length() >= 4 && p.charAt(0) == '/' && Character.isLetter(p.charAt(1)) && p.charAt(2) == ':' && p.charAt(3) == '/') {
+        char drive = Character.toLowerCase(p.charAt(1));
+        String rest = p.substring(4);
+        return rest.isEmpty() ? String.valueOf(drive) : drive + "/" + rest;
     }
 
-    /**
-     * Accept:
-     * - D:\应用\配置
-     * - /d:/应用/配置
-     */
-    private String toWindowsLiteralPath(String path) {
-        String p = path.trim();
-
-        if (p.matches("^/[a-zA-Z]:/.*")) {
-            char drive = Character.toUpperCase(p.charAt(1));
-            String rest = p.substring(4).replace('/', '\\');
-            return drive + ":\\" + rest;
-        }
-        return p;
+    if (p.length() >= 3 && Character.isLetter(p.charAt(0)) && p.charAt(1) == ':' && p.charAt(2) == '/') {
+        char drive = Character.toLowerCase(p.charAt(0));
+        String rest = p.substring(3);
+        return rest.isEmpty() ? String.valueOf(drive) : drive + "/" + rest;
     }
+
+    while (p.startsWith("/")) {
+        p = p.substring(1);
+    }
+    return p;
+}
+private String toWindowsLiteralPath(String path) {
+    String p = path.trim().replace('/', '\\');
+
+    if (p.length() >= 4 && p.charAt(0) == '\\' && Character.isLetter(p.charAt(1)) && p.charAt(2) == ':' && p.charAt(3) == '\\') {
+        char drive = Character.toUpperCase(p.charAt(1));
+        String rest = p.substring(4);
+        return rest.isEmpty() ? drive + ":\\" : drive + ":\\" + rest;
+    }
+
+    if (p.length() >= 3 && Character.isLetter(p.charAt(0)) && p.charAt(1) == ':' && p.charAt(2) == '\\') {
+        char drive = Character.toUpperCase(p.charAt(0));
+        String rest = p.substring(3);
+        return rest.isEmpty() ? drive + ":\\" : drive + ":\\" + rest;
+    }
+
+    return p;
+}  
 
     private List<String> commonSshOptions(SshTarget target) {
         List<String> opts = new ArrayList<>();
