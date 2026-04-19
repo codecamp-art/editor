@@ -1,0 +1,89 @@
+pipeline {
+  agent { label 'rhel8' }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
+  }
+
+  parameters {
+    string(name: 'TDS_VENDOR_LIBRARY', defaultValue: '/opt/tds/lib/tds_api.so', description: 'Absolute path to the vendor .so on the Jenkins node')
+    string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
+    booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a live dry-run against DRTP after staging')
+    string(name: 'SMOKE_ENV', defaultValue: 'qa', description: 'Environment name for the optional live smoke run')
+    string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional live smoke run')
+  }
+
+  environment {
+    PROJECT_DIR = "${env.WORKSPACE}/tds_reporter"
+    BUILD_DIR = "${env.WORKSPACE}/tds_reporter/build_release"
+    STAGE_DIR = "${env.WORKSPACE}/tds_reporter/build_release/stage"
+    PACKAGE_NAME = "tds_reporter-rhel8-${env.BUILD_NUMBER}.tar.gz"
+  }
+
+  stages {
+    stage('Configure') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          cd "$PROJECT_DIR"
+          cmake -S . -B "$BUILD_DIR" \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DTDS_VENDOR_LIBRARY="$TDS_VENDOR_LIBRARY" \
+            -DTDS_REPORTER_STAGE_DIR="$STAGE_DIR"
+        '''
+      }
+    }
+
+    stage('Build') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          cmake --build "$BUILD_DIR" --parallel
+        '''
+      }
+    }
+
+    stage('Unit Test') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          ctest --test-dir "$BUILD_DIR" --output-on-failure
+        '''
+      }
+    }
+
+    stage('Stage Release') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          cmake --build "$BUILD_DIR" --target tds_reporter_stage
+          tar -C "$STAGE_DIR" -czf "$BUILD_DIR/$PACKAGE_NAME" .
+        '''
+      }
+    }
+
+    stage('Live Smoke') {
+      when {
+        expression { return params.RUN_LIVE_SMOKE }
+      }
+      steps {
+        sh '''
+          set -euxo pipefail
+          "$STAGE_DIR/bin/tds_reporter" \
+            --env "$SMOKE_ENV" \
+            --config "$STAGE_DIR/config/${SMOKE_ENV}.properties" \
+            --dry-run \
+            --to "$SMOKE_TO"
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: 'tds_reporter/build_release/stage/**, tds_reporter/build_release/*.tar.gz, tds_reporter/output/*', allowEmptyArchive: false
+    }
+  }
+}

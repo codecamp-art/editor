@@ -1,0 +1,19 @@
+# Local build trees
+build*/
+cmake-build-*/
+out/
+
+# Generated reports and mail previews
+output/
+tds_reporter/output/
+
+# Local runtime config overrides
+config/prod.properties
+config/*.local.properties
+
+# Local CMake and IDE user state
+CMakeUserPresets.json
+.vs/
+*.user
+*.suo
+*.vcxproj.user

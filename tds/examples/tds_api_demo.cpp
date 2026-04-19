@@ -156,7 +156,7 @@ int main()
     }
 
     /*增加一个接入点（在调用相关请求功能前必须先调用它），ip为IP地址，port为端口号 */
-    if (!TdsApi_addTrtpNode(const_cast<char *>(drtp), drtp_port))
+    if (!TdsApi_addDrtpNode(const_cast<char *>(drtp), drtp_port))
     {
         printf("增加接入点失败\n");
     }

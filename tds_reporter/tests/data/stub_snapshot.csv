@@ -1,0 +1,3 @@
+trade_date,cust_no,cust_name,fund_account_no,currency_code,dyn_rights,hold_profit,avail_fund,risk_degree1,risk_degree2
+20260418,1001,Alpha Capital,FA1001,CNY,1000000.25,1200.5,500000.75,0.12,0.15
+20260418,1002,Beta Futures,FA1002,CNY,2000000,-500.25,1500000,0.08,0.11

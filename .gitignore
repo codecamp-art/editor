@@ -34,5 +34,12 @@ build/
 ### VS Code ###
 .vscode/
 
+### Vendor Binaries ###
+tds/win32/
+tds/**/*.dll
+tds/**/*.lib
+tds/**/*.so
+tds/**/*.a
+
 ### Mac OS ###
 .DS_Store

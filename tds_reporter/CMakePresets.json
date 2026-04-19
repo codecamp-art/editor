@@ -1,0 +1,94 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "windows-stub-x64",
+      "inherits": "windows-base",
+      "architecture": "x64"
+    },
+    {
+      "name": "windows-live-x64",
+      "inherits": "windows-base",
+      "architecture": "x64"
+    },
+    {
+      "name": "windows-live-x86",
+      "inherits": "windows-base",
+      "architecture": "Win32"
+    },
+    {
+      "name": "linux-rhel8-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "TDS_VENDOR_LIBRARY": "/opt/tds/lib/tds_api.so"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-stub-x64-debug",
+      "configurePreset": "windows-stub-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-live-x64-debug",
+      "configurePreset": "windows-live-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-live-x86-debug",
+      "configurePreset": "windows-live-x86",
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-rhel8-release",
+      "configurePreset": "linux-rhel8-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-stub-x64-debug",
+      "configurePreset": "windows-stub-x64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-live-x64-debug",
+      "configurePreset": "windows-live-x64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-live-x86-debug",
+      "configurePreset": "windows-live-x86",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-rhel8-release",
+      "configurePreset": "linux-rhel8-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

@@ -39,14 +39,14 @@ typedef void* TDS_HANDLE;
  * @param data_value  收到的数据
  * 注:不能在本函数调用在本头文件内声明的其它功能
  */
-typedef void (* TdsApiCB_onDataReceived)(TDS_HANDLE handle, int data_type, char *data_value);
+typedef void (* TdsApiCB_OnDataReceived)(TDS_HANDLE handle, int data_type, char *data_value);
 
 /**
  * 当没有更多的数据需要提交给用户时，会调用该函数
  * @param handle      对应的处理句柄
  * 注:不能在本函数调用在本头文件内声明的其它功能
  */
-typedef void (* TdsApiCB_onNoMoreData)(TDS_HANDLE handle);
+typedef void (* TdsApiCB_OnNoMoreData)(TDS_HANDLE handle);
 
 /**
  * 在数据请求过程中出现问题时，会调用该函数，错误信息见err_code 和err_msg
@@ -56,7 +56,7 @@ typedef void (* TdsApiCB_onNoMoreData)(TDS_HANDLE handle);
  * @return:           返回NGTF_FIELD_HANDLE_RESULT(成功返回NGTF_FIELD_HANDLE_SUCCESS, 否则返回其它值)
  * 注:不能在本函数调用在本头文件内声明的其它功能
  */
-typedef void (* TdsApiCB_onError)(TDS_HANDLE handle, int err_code, char *err_msg);
+typedef void (* TdsApiCB_OnError)(TDS_HANDLE handle, int err_code, char *err_msg);
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,7 +80,7 @@ bool TDS_API TdsApi_getVersion(char* version, int len);
 bool TDS_API TdsApi_init(int req_timeout, int log_level, bool klg_enable, int function_no, int *err_code, char *err_msg);
 
 //增加一个接入点（在调用相关请求功能前必须先调用它），ip为IP地址，port为端口号，成功返回true
-bool TDS_API TdsApi_addTrtpNode(char *ip, int port);
+bool TDS_API TdsApi_addDrtpNode(char *ip, int port);
 
 //接口库销毁方法
 void TDS_API TdsApi_finalize();
