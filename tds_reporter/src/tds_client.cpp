@@ -4,6 +4,7 @@
 #include <cctype>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -87,6 +88,16 @@ std::string ExtractFixedString(const char* raw, std::size_t max_length)
         ++length;
     }
     return DecodeVendorText(std::string(raw, length));
+}
+
+std::string QueryApiVersion()
+{
+    char version[100] = {0};
+    if (!TdsApi_getVersion(version, static_cast<int>(sizeof(version))))
+    {
+        return "";
+    }
+    return DecodeVendorText(version);
 }
 
 class VendorTdsClient final : public ITdsClient
@@ -209,6 +220,24 @@ public:
     }
 
 private:
+    std::string BuildConnectionContext(bool password_is_set) const
+    {
+        std::ostringstream output;
+        output << "host=" << config_.tds.drtp_host
+               << ", port=" << config_.tds.drtp_port
+               << ", user=" << config_.tds.user
+               << ", function_no=" << config_.tds.function_no
+               << ", password_set=" << (password_is_set ? "yes" : "no")
+               << ", req_timeout_ms=" << config_.tds.req_timeout_ms
+               << ", log_level=" << config_.tds.log_level
+               << ", klg_enable=" << (config_.tds.klg_enable ? "true" : "false");
+        if (!api_version_.empty())
+        {
+            output << ", api_version=" << api_version_;
+        }
+        return output.str();
+    }
+
     void InitializeSession()
     {
         int err_code = 0;
@@ -224,11 +253,13 @@ private:
             throw std::runtime_error(FormatTdsApiError("TdsApi_init", err_code, err_msg));
         }
         initialized_ = true;
+        api_version_ = QueryApiVersion();
 
         std::string drtp_host = config_.tds.drtp_host;
         if (!TdsApi_addDrtpNode(drtp_host.data(), config_.tds.drtp_port))
         {
-            throw std::runtime_error("TdsApi_addDrtpNode failed");
+            throw std::runtime_error(
+                "TdsApi_addDrtpNode failed (" + BuildConnectionContext(false) + ")");
         }
 
         std::string user = config_.tds.user;
@@ -236,7 +267,9 @@ private:
         const int result = TdsApi_reqLogin(user.data(), password.data(), &err_code, err_msg);
         if (result != 0)
         {
-            throw std::runtime_error(FormatTdsApiError("TdsApi_reqLogin", err_code, err_msg));
+            throw std::runtime_error(
+                FormatTdsApiError("TdsApi_reqLogin", err_code, err_msg) +
+                " (" + BuildConnectionContext(!password.empty()) + ")");
         }
         logged_in_ = true;
     }
@@ -259,6 +292,7 @@ private:
     AppConfig config_;
     bool initialized_ = false;
     bool logged_in_ = false;
+    std::string api_version_;
 };
 #endif
 
