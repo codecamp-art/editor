@@ -101,6 +101,8 @@ cmake --build build --config Release
 ctest --test-dir build --output-on-failure
 ```
 
+On GCC 8 era toolchains such as the default RHEL8 compiler, `std::filesystem` may still require the separate `stdc++fs` compatibility library at link time. The CMake project now detects that case during configure and links it automatically. If you are building from an older checkout and see `undefined reference` errors for `std::filesystem`, add `-lstdc++fs` or update to this CMake change.
+
 In this mode:
 
 - `src/tds_client.cpp` includes the vendor `tds_api.h`

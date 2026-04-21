@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(tds_reporter LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(CheckCXXSourceCompiles)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +24,40 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/../tds/include
 )
+
+set(TDS_REPORTER_FILESYSTEM_TEST_SOURCE
+"#include <filesystem>
+int main() {
+    const std::filesystem::path path{\".\"};
+    return std::filesystem::absolute(path).empty() ? 1 : 0;
+}
+")
+
+check_cxx_source_compiles(
+    "${TDS_REPORTER_FILESYSTEM_TEST_SOURCE}"
+    TDS_REPORTER_FILESYSTEM_LINKS_WITHOUT_EXTRA_LIB
+)
+
+if(NOT TDS_REPORTER_FILESYSTEM_LINKS_WITHOUT_EXTRA_LIB)
+    set(TDS_REPORTER_FILESYSTEM_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
+    list(APPEND CMAKE_REQUIRED_LIBRARIES stdc++fs)
+    check_cxx_source_compiles(
+        "${TDS_REPORTER_FILESYSTEM_TEST_SOURCE}"
+        TDS_REPORTER_FILESYSTEM_LINKS_WITH_STDCXXFS
+    )
+    set(CMAKE_REQUIRED_LIBRARIES "${TDS_REPORTER_FILESYSTEM_REQUIRED_LIBRARIES}")
+
+    if(TDS_REPORTER_FILESYSTEM_LINKS_WITH_STDCXXFS)
+        message(STATUS "Linking stdc++fs for std::filesystem compatibility on this toolchain")
+        target_link_libraries(tds_reporter_lib PUBLIC stdc++fs)
+    else()
+        message(
+            FATAL_ERROR
+            "The current C++ toolchain cannot link std::filesystem symbols, even with stdc++fs. "
+            "Install a newer libstdc++ or use a toolchain with complete C++17 filesystem support."
+        )
+    endif()
+endif()
 
 set(TDS_VENDOR_LIBRARY_DIR "")
 set(TDS_VENDOR_LIBRARY_ABS "")
