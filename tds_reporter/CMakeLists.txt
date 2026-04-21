@@ -15,6 +15,7 @@ set(TDS_REPORTER_STAGE_DIR "${CMAKE_BINARY_DIR}/stage" CACHE PATH "Directory use
 add_library(
     tds_reporter_lib
     src/app.cpp
+    src/text_utils.cpp
     src/tds_client.cpp
 )
 

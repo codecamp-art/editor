@@ -1,4 +1,5 @@
 #include "app.h"
+#include "text_utils.h"
 
 #include <cctype>
 #include <fstream>
@@ -85,7 +86,7 @@ std::string ExtractFixedString(const char* raw, std::size_t max_length)
     {
         ++length;
     }
-    return Trim(std::string(raw, length));
+    return DecodeVendorText(std::string(raw, length));
 }
 
 class VendorTdsClient final : public ITdsClient
@@ -109,8 +110,7 @@ public:
         const int result = TdsApi_reqTradeDate(&trade_date, &err_code, err_msg);
         if (result != 0)
         {
-            throw std::runtime_error(
-                "TdsApi_reqTradeDate failed: " + std::to_string(err_code) + " " + err_msg);
+            throw std::runtime_error(FormatTdsApiError("TdsApi_reqTradeDate", err_code, err_msg));
         }
         return trade_date;
     }
@@ -127,7 +127,7 @@ public:
             if (!TdsApi_subscribeDataByCust(joined.c_str(), &err_code, err_msg))
             {
                 throw std::runtime_error(
-                    "TdsApi_subscribeDataByCust failed: " + std::to_string(err_code) + " " + err_msg);
+                    FormatTdsApiError("TdsApi_subscribeDataByCust", err_code, err_msg));
             }
         }
 
@@ -136,8 +136,7 @@ public:
         TDS_HANDLE handle = TdsApi_reqSnapshot(trade_date, TDS_TABLE_ID_CUST_REAL_FUND, &err_code, err_msg);
         if (handle == nullptr)
         {
-            throw std::runtime_error(
-                "TdsApi_reqSnapshot failed: " + std::to_string(err_code) + " " + err_msg);
+            throw std::runtime_error(FormatTdsApiError("TdsApi_reqSnapshot", err_code, err_msg));
         }
 
         std::unordered_set<std::string> filter_set(cust_filters.begin(), cust_filters.end());
@@ -154,8 +153,7 @@ public:
                 {
                     if (err_code != 0)
                     {
-                        throw std::runtime_error(
-                            "TdsApi_hasNext failed: " + std::to_string(err_code) + " " + err_msg);
+                        throw std::runtime_error(FormatTdsApiError("TdsApi_hasNext", err_code, err_msg));
                     }
                     break;
                 }
@@ -171,8 +169,7 @@ public:
                         &err_code,
                         err_msg))
                 {
-                    throw std::runtime_error(
-                        "TdsApi_getNext failed: " + std::to_string(err_code) + " " + err_msg);
+                    throw std::runtime_error(FormatTdsApiError("TdsApi_getNext", err_code, err_msg));
                 }
 
                 if (data_type != TDS_TABLE_ID_CUST_REAL_FUND)
@@ -224,8 +221,7 @@ private:
                 &err_code,
                 err_msg))
         {
-            throw std::runtime_error(
-                "TdsApi_init failed: " + std::to_string(err_code) + " " + err_msg);
+            throw std::runtime_error(FormatTdsApiError("TdsApi_init", err_code, err_msg));
         }
         initialized_ = true;
 
@@ -240,8 +236,7 @@ private:
         const int result = TdsApi_reqLogin(user.data(), password.data(), &err_code, err_msg);
         if (result != 0)
         {
-            throw std::runtime_error(
-                "TdsApi_reqLogin failed: " + std::to_string(err_code) + " " + err_msg);
+            throw std::runtime_error(FormatTdsApiError("TdsApi_reqLogin", err_code, err_msg));
         }
         logged_in_ = true;
     }

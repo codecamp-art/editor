@@ -1,4 +1,5 @@
 #include "app.h"
+#include "text_utils.h"
 
 #include <filesystem>
 #include <fstream>
@@ -207,6 +208,24 @@ void TestCurlConfigWithClientCertificate()
     AssertContains(curl_config, "ssl-reqd", "curl starttls requirement");
 }
 
+void TestVendorTextDecodingAndErrorFormatting()
+{
+    const std::string gbk_error = "\xB4\xB4\xBD\xA8\x54\x44\x53\xBE\xE4\xB1\xFA\xCA\xA7\xB0\xDC";
+    const std::string decoded = tds_reporter::DecodeVendorText(gbk_error);
+    const std::string formatted =
+        tds_reporter::FormatTdsApiError("TdsApi_reqLogin", 430000103, gbk_error);
+
+    AssertTrue(
+        decoded == u8"\u521B\u5EFATDS\u53E5\u67C4\u5931\u8D25",
+        "GBK vendor text should decode to UTF-8");
+    AssertContains(
+        tds_reporter::DescribeTdsErrorCode(430000103),
+        "failed to create TDS handle",
+        "known TDS error code description");
+    AssertContains(formatted, "430000103", "formatted error code");
+    AssertContains(formatted, "failed to create TDS handle", "formatted error description");
+}
+
 } // namespace
 
 int main()
@@ -218,6 +237,7 @@ int main()
         TestStubClientAndCsv();
         TestMimeAndDryRun();
         TestCurlConfigWithClientCertificate();
+        TestVendorTextDecodingAndErrorFormatting();
         std::cout << "All tds_reporter tests passed\n";
         return 0;
     }
