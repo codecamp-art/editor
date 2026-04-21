@@ -126,13 +126,15 @@ cmake --build --preset windows-stub-x64-debug
 ctest --preset windows-stub-x64-debug
 ```
 
-Typical local Windows live flow after the supplier installs `tds\win32\*.lib` and `*.dll`:
+Typical local Windows live flow for **x64 vendor binaries**:
 
 ```powershell
-cmake --preset windows-live-x64
+cmake --preset windows-live-x64 -DTDS_VENDOR_LIBRARY=D:/vendor/tds/win64/tds_api.lib -DTDS_VENDOR_RUNTIME=D:/vendor/tds/win64/tds_api.dll
 cmake --build --preset windows-live-x64-debug
 ctest --preset windows-live-x64-debug
 ```
+
+> Note: `../tds/win32` auto-detection is intentionally disabled for x64 builds to prevent `LNK4272` (x86 library vs x64 target) mismatches.
 
 Check the configure output once:
 
