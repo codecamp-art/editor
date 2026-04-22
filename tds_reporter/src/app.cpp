@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,9 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 namespace tds_reporter {
 namespace {
@@ -329,7 +333,7 @@ std::string QuoteForShell(const std::string& value)
     {
         if (ch == '"')
         {
-            quoted += "\\\"";
+            quoted += "\"\"";
         }
         else
         {
@@ -394,6 +398,324 @@ std::string ResolveConfigRelativePath(
     }
 
     return std::filesystem::absolute(config_dir / path_value).string();
+}
+
+std::string GetEnvironmentValue(const std::string& key)
+{
+    const char* value = std::getenv(key.c_str());
+    if (value == nullptr)
+    {
+        return "";
+    }
+    return value;
+}
+
+void SetEnvironmentValue(const std::string& key, const std::string& value)
+{
+#ifdef _WIN32
+    _putenv_s(key.c_str(), value.c_str());
+#else
+    setenv(key.c_str(), value.c_str(), 1);
+#endif
+}
+
+void ClearEnvironmentValue(const std::string& key)
+{
+#ifdef _WIN32
+    _putenv_s(key.c_str(), "");
+#else
+    unsetenv(key.c_str());
+#endif
+}
+
+std::string EffectiveVaultValue(
+    const std::string& configured_value,
+    const std::string& env_name,
+    const std::string& fallback = "")
+{
+    if (!configured_value.empty())
+    {
+        return configured_value;
+    }
+
+    const std::string env_value = GetEnvironmentValue(env_name);
+    if (!env_value.empty())
+    {
+        return env_value;
+    }
+
+    return fallback;
+}
+
+VaultConfig BuildEffectiveVaultConfig(const VaultConfig& configured)
+{
+    VaultConfig effective = configured;
+    effective.executable = EffectiveVaultValue(configured.executable, "VAULT_BIN", "vault");
+    effective.address = EffectiveVaultValue(configured.address, "VAULT_ADDR");
+    effective.namespace_name = EffectiveVaultValue(configured.namespace_name, "VAULT_NAMESPACE");
+    effective.auth_method = ToLower(EffectiveVaultValue(configured.auth_method, "VAULT_AUTH_METHOD", "token"));
+    effective.auth_path = EffectiveVaultValue(configured.auth_path, "VAULT_AUTH_PATH");
+    effective.token = EffectiveVaultValue(configured.token, "VAULT_TOKEN");
+    effective.cert_role = EffectiveVaultValue(configured.cert_role, "VAULT_CERT_ROLE");
+    effective.ca_cert_path = EffectiveVaultValue(configured.ca_cert_path, "VAULT_CA_CERT");
+    effective.client_cert_path = EffectiveVaultValue(configured.client_cert_path, "VAULT_CLIENT_CERT");
+    effective.client_key_path = EffectiveVaultValue(configured.client_key_path, "VAULT_CLIENT_KEY");
+    effective.kerberos_username = EffectiveVaultValue(configured.kerberos_username, "VAULT_KERBEROS_USERNAME");
+    effective.kerberos_service = EffectiveVaultValue(configured.kerberos_service, "VAULT_KERBEROS_SERVICE");
+    effective.kerberos_realm = EffectiveVaultValue(configured.kerberos_realm, "VAULT_KERBEROS_REALM");
+    effective.kerberos_keytab_path = EffectiveVaultValue(configured.kerberos_keytab_path, "VAULT_KERBEROS_KEYTAB");
+    effective.kerberos_krb5conf_path = EffectiveVaultValue(configured.kerberos_krb5conf_path, "VAULT_KRB5CONF");
+
+    if (configured.kerberos_disable_fast_negotiation)
+    {
+        effective.kerberos_disable_fast_negotiation = true;
+    }
+    else
+    {
+        const std::string disable_fast =
+            EffectiveVaultValue("", "VAULT_DISABLE_FAST_NEGOTIATION", "false");
+        effective.kerberos_disable_fast_negotiation =
+            ParseBoolValue(disable_fast, "vault.disable_fast_negotiation");
+    }
+
+    return effective;
+}
+
+class ScopedEnvOverride
+{
+public:
+    ScopedEnvOverride(const std::string& key, const std::string& value)
+        : key_(key),
+          previous_value_(GetEnvironmentValue(key)),
+          had_previous_(std::getenv(key.c_str()) != nullptr)
+    {
+        SetEnvironmentValue(key_, value);
+    }
+
+    ~ScopedEnvOverride()
+    {
+        if (had_previous_)
+        {
+            SetEnvironmentValue(key_, previous_value_);
+        }
+        else
+        {
+            ClearEnvironmentValue(key_);
+        }
+    }
+
+private:
+    std::string key_;
+    std::string previous_value_;
+    bool had_previous_ = false;
+};
+
+std::string TrimTrailingWhitespace(std::string value)
+{
+    while (!value.empty() &&
+           (value.back() == '\n' || value.back() == '\r' || std::isspace(static_cast<unsigned char>(value.back()))))
+    {
+        value.pop_back();
+    }
+    return value;
+}
+
+struct CommandResult
+{
+    int exit_code = 0;
+    std::string output;
+};
+
+CommandResult RunCommandCapture(const std::string& command)
+{
+#ifdef _WIN32
+    const std::string redirected_command = "cmd /s /c \"" + command + " 2>&1\"";
+    FILE* pipe = _popen(redirected_command.c_str(), "r");
+#else
+    const std::string redirected_command = command + " 2>&1";
+    FILE* pipe = popen(redirected_command.c_str(), "r");
+#endif
+    if (pipe == nullptr)
+    {
+        throw std::runtime_error("failed to execute command: " + command);
+    }
+
+    std::string output;
+    char buffer[512];
+    while (std::fgets(buffer, static_cast<int>(sizeof(buffer)), pipe) != nullptr)
+    {
+        output += buffer;
+    }
+
+#ifdef _WIN32
+    const int raw_exit_code = _pclose(pipe);
+    const int exit_code = raw_exit_code;
+#else
+    const int raw_exit_code = pclose(pipe);
+    const int exit_code = WIFEXITED(raw_exit_code) ? WEXITSTATUS(raw_exit_code) : raw_exit_code;
+#endif
+
+    return {exit_code, TrimTrailingWhitespace(output)};
+}
+
+struct VaultSecretReference
+{
+    std::string path;
+    std::string field;
+};
+
+bool IsVaultSecretReference(const std::string& value)
+{
+    return value.rfind("vault://", 0) == 0;
+}
+
+VaultSecretReference ParseVaultSecretReference(const std::string& value)
+{
+    const std::string body = value.substr(std::string("vault://").size());
+    const std::size_t delimiter = body.rfind('#');
+    if (body.empty() || delimiter == std::string::npos || delimiter == 0 || delimiter + 1 >= body.size())
+    {
+        throw std::runtime_error(
+            "invalid vault secret reference, expected vault://<secret-path>#<field>: " + value);
+    }
+
+    return {body.substr(0, delimiter), body.substr(delimiter + 1)};
+}
+
+std::vector<std::unique_ptr<ScopedEnvOverride>> ApplyVaultEnvironment(
+    const VaultConfig& vault,
+    const std::string& token = "")
+{
+    std::vector<std::unique_ptr<ScopedEnvOverride>> overrides;
+
+    if (!vault.address.empty())
+    {
+        overrides.push_back(std::make_unique<ScopedEnvOverride>("VAULT_ADDR", vault.address));
+    }
+    if (!vault.namespace_name.empty())
+    {
+        overrides.push_back(std::make_unique<ScopedEnvOverride>("VAULT_NAMESPACE", vault.namespace_name));
+    }
+    if (!token.empty())
+    {
+        overrides.push_back(std::make_unique<ScopedEnvOverride>("VAULT_TOKEN", token));
+    }
+
+    return overrides;
+}
+
+std::string LoginToVault(const VaultConfig& configured_vault)
+{
+    const VaultConfig vault = BuildEffectiveVaultConfig(configured_vault);
+    if (!vault.token.empty())
+    {
+        return vault.token;
+    }
+
+    if (vault.auth_method.empty() || vault.auth_method == "token")
+    {
+        throw std::runtime_error(
+            "vault token is required for vault-backed secrets when vault.auth_method=token");
+    }
+
+    auto env_overrides = ApplyVaultEnvironment(vault);
+    std::string command = QuoteForShell(vault.executable) + " login -token-only -no-store";
+
+    if (!vault.auth_path.empty())
+    {
+        command += " -path=" + QuoteForShell(vault.auth_path);
+    }
+
+    if (vault.auth_method == "cert")
+    {
+        if (vault.client_cert_path.empty() || vault.client_key_path.empty())
+        {
+            throw std::runtime_error(
+                "vault.client_cert_path and vault.client_key_path are required for vault.auth_method=cert");
+        }
+
+        command += " -method=cert";
+        if (!vault.ca_cert_path.empty())
+        {
+            command += " -ca-cert=" + QuoteForShell(vault.ca_cert_path);
+        }
+        command += " -client-cert=" + QuoteForShell(vault.client_cert_path);
+        command += " -client-key=" + QuoteForShell(vault.client_key_path);
+        if (!vault.cert_role.empty())
+        {
+            command += " name=" + QuoteForShell(vault.cert_role);
+        }
+    }
+    else if (vault.auth_method == "kerberos")
+    {
+        if (vault.kerberos_username.empty() ||
+            vault.kerberos_service.empty() ||
+            vault.kerberos_realm.empty() ||
+            vault.kerberos_keytab_path.empty() ||
+            vault.kerberos_krb5conf_path.empty())
+        {
+            throw std::runtime_error(
+                "vault kerberos auth requires username, service, realm, keytab path, and krb5.conf path");
+        }
+
+        command += " -method=kerberos";
+        command += " username=" + QuoteForShell(vault.kerberos_username);
+        command += " service=" + QuoteForShell(vault.kerberos_service);
+        command += " realm=" + QuoteForShell(vault.kerberos_realm);
+        command += " keytab_path=" + QuoteForShell(vault.kerberos_keytab_path);
+        command += " krb5conf_path=" + QuoteForShell(vault.kerberos_krb5conf_path);
+        command += " disable_fast_negotiation=" +
+                   QuoteForShell(vault.kerberos_disable_fast_negotiation ? "true" : "false");
+    }
+    else
+    {
+        throw std::runtime_error("unsupported vault.auth_method: " + vault.auth_method);
+    }
+
+    const CommandResult result = RunCommandCapture(command);
+    if (result.exit_code != 0 || result.output.empty())
+    {
+        throw std::runtime_error(
+            "vault login failed: " + (result.output.empty() ? std::string("no output") : result.output));
+    }
+
+    return result.output;
+}
+
+std::string ReadVaultSecret(const std::string& reference, const VaultConfig& configured_vault)
+{
+    const VaultSecretReference secret = ParseVaultSecretReference(reference);
+    const VaultConfig vault = BuildEffectiveVaultConfig(configured_vault);
+    const std::string token = LoginToVault(vault);
+    auto env_overrides = ApplyVaultEnvironment(vault, token);
+
+    const std::string command =
+        QuoteForShell(vault.executable) + " kv get -field=" + QuoteForShell(secret.field) +
+        " " + QuoteForShell(secret.path);
+    const CommandResult result = RunCommandCapture(command);
+
+    if (result.exit_code != 0)
+    {
+        throw std::runtime_error(
+            "vault kv get failed for " + secret.path + "#" + secret.field + ": " + result.output);
+    }
+    if (result.output.empty())
+    {
+        throw std::runtime_error(
+            "vault secret resolved to an empty value: " + secret.path + "#" + secret.field);
+    }
+
+    return result.output;
+}
+
+std::string ResolveSecretReference(const std::string& value, const VaultConfig& vault)
+{
+    if (!IsVaultSecretReference(value))
+    {
+        return value;
+    }
+
+    return ReadVaultSecret(value, vault);
 }
 
 std::vector<CustomerFundRecord> SortRecords(std::vector<CustomerFundRecord> records)
@@ -810,12 +1132,39 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.log.directory = ResolveConfigRelativePath(config_dir, GetValue(properties, "log.dir", "../logs"));
     config.log.level = ParseLogLevelValue(GetValue(properties, "log.level", config.log.level));
 
+    config.vault.executable = GetValue(properties, "vault.executable", config.vault.executable);
+    config.vault.address = GetValue(properties, "vault.address");
+    config.vault.namespace_name = GetValue(properties, "vault.namespace");
+    config.vault.auth_method = ToLower(GetValue(properties, "vault.auth_method", config.vault.auth_method));
+    config.vault.auth_path = GetValue(properties, "vault.auth_path");
+    config.vault.token = GetValue(properties, "vault.token");
+    config.vault.cert_role = GetValue(properties, "vault.cert_role");
+    config.vault.ca_cert_path =
+        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.ca_cert_path"));
+    config.vault.client_cert_path =
+        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.client_cert_path"));
+    config.vault.client_key_path =
+        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.client_key_path"));
+    config.vault.kerberos_username = GetValue(properties, "vault.kerberos_username");
+    config.vault.kerberos_service = GetValue(properties, "vault.kerberos_service");
+    config.vault.kerberos_realm = GetValue(properties, "vault.kerberos_realm");
+    config.vault.kerberos_keytab_path =
+        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.kerberos_keytab_path"));
+    config.vault.kerberos_krb5conf_path =
+        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.kerberos_krb5conf_path"));
+    config.vault.kerberos_disable_fast_negotiation = ParseBoolValue(
+        GetValue(
+            properties,
+            "vault.disable_fast_negotiation",
+            config.vault.kerberos_disable_fast_negotiation ? "true" : "false"),
+        "vault.disable_fast_negotiation");
+
     config.tds.drtp_host = GetRequiredValue(properties, "tds.drtp_host");
     config.tds.drtp_port = ParseIntValue(
         GetValue(properties, "tds.drtp_port", "0"),
         "tds.drtp_port");
     config.tds.user = GetRequiredValue(properties, "tds.user");
-    config.tds.password = GetValue(properties, "tds.password");
+    config.tds.password = ResolveSecretReference(GetValue(properties, "tds.password"), config.vault);
     config.tds.req_timeout_ms = ParseIntValue(
         GetValue(properties, "tds.req_timeout_ms", std::to_string(config.tds.req_timeout_ms)),
         "tds.req_timeout_ms");

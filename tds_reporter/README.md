@@ -82,7 +82,8 @@ Properties support `${ENV_VAR:default}` syntax, so passwords can stay in environ
 Important keys:
 
 - `tds.drtp_host` and `tds.drtp_port`: DRTP endpoint for each environment
-- `tds.user` and `tds.password`: TDS login
+- `tds.user` and `tds.password`: TDS login. `tds.password` may be a plain value, an `${ENV_VAR:default}` reference, or a Vault reference such as `vault://secret/tds/qa#password`
+- `vault.*`: optional Vault CLI settings used when a config value references `vault://...`
 - `smtp.*`: SMTP connection settings used by `curl`
 - `email.default_to` and `email.default_cc`: default recipients
 - `report.output_dir`: where CSV and dry-run `.eml` previews are written
@@ -99,6 +100,8 @@ The SMTP transport settings are aligned with the company JavaMailSender example:
 - `smtp.client_key_path=/app/.cert/server.key`
 
 The three environment config files keep different TDS endpoints, but use the same mail transport block. The default host is intentionally left as `mta-hub.REPLACE_ME.com.cn` because the screenshot only showed the prefix and suffix. Replace it in the config file or set `SMTP_HOST`.
+
+When `tds.password` starts with `vault://`, the program reads the secret through the local `vault` CLI. The simplest production setup is to provide `VAULT_ADDR` and `VAULT_TOKEN` through the environment. If you prefer the program to log in on demand, set `vault.auth_method=cert` or `vault.auth_method=kerberos` and fill the matching `vault.*` settings from `config/tds_reporter.properties` or environment variables.
 
 ## Build On RHEL8
 
@@ -276,6 +279,14 @@ If the build runs on a RHEL8 Jenkins node, the simplest approach is:
 4. If the vendor files live elsewhere, pass `-DTDS_VENDOR_LIBRARY=/absolute/path/to/libtds_api.so`
 5. Run unit tests on the node with `ctest`
 6. Stage a release directory with `cmake --build build --target tds_reporter_stage`
+
+If the supplier package is a password-protected zip, configure the release job with:
+
+- `VAULT_ADDR`, `VAULT_AUTH_METHOD`, and the matching Jenkins credentials for either cert auth or kerberos auth
+- `VENDOR_PACKAGE_PASSWORD_VAULT_PATH`
+- optional `VENDOR_PACKAGE_PASSWORD_VAULT_FIELD` when the secret field is not `password`
+
+The release pipeline uses the local `vault` CLI to read the zip password from Vault, retries `unzip` with that password, and forwards the resulting Vault token to the optional live smoke stage.
 7. Archive the stage directory as the Jenkins build artifact
 8. Use `--stub-file` only for non-Linux local debugging, not for the Jenkins integration build
 
@@ -333,7 +344,7 @@ Recommended Jenkins pipeline script paths:
 Pipeline intent:
 
 - `Jenkinsfile.pr`: configure, build, unit test, then run a deterministic `--stub-file --dry-run` smoke test
-- `Jenkinsfile.release`: download the supplier install package from Artifactory with client certificate authentication, extract the required `tds/` files into the workspace, configure, build, unit test, stage the release directory, package it as `tar.gz`, and optionally run a live DRTP dry-run smoke test
+- `Jenkinsfile.release`: download the supplier install package from Artifactory with client certificate authentication, optionally read the zip password from Vault, extract the required `tds/` files into the workspace, configure, build, unit test, stage the release directory, package it as `tar.gz`, and optionally run a live DRTP dry-run smoke test with the same Vault token available to the application
 
 ## Run On RHEL8
 

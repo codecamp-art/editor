@@ -56,6 +56,26 @@ struct LogConfig
     std::string level = "info";
 };
 
+struct VaultConfig
+{
+    std::string executable;
+    std::string address;
+    std::string namespace_name;
+    std::string auth_method;
+    std::string auth_path;
+    std::string token;
+    std::string cert_role;
+    std::string ca_cert_path;
+    std::string client_cert_path;
+    std::string client_key_path;
+    std::string kerberos_username;
+    std::string kerberos_service;
+    std::string kerberos_realm;
+    std::string kerberos_keytab_path;
+    std::string kerberos_krb5conf_path;
+    bool kerberos_disable_fast_negotiation = false;
+};
+
 struct AppConfig
 {
     std::string env_name = "dev";
@@ -67,6 +87,7 @@ struct AppConfig
     TdsConnectionConfig tds;
     SmtpConfig smtp;
     LogConfig log;
+    VaultConfig vault;
 };
 
 struct CliOptions

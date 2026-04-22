@@ -60,6 +60,59 @@ std::string ReadFile(const std::filesystem::path& path)
     return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
 
+void WriteFile(const std::filesystem::path& path, const std::string& content)
+{
+    std::ofstream output(path, std::ios::binary);
+    output << content;
+}
+
+std::filesystem::path CreateFakeVaultExecutable(const std::filesystem::path& temp_dir)
+{
+#ifdef _WIN32
+    const std::filesystem::path script_path = temp_dir / "fake-vault.cmd";
+    WriteFile(
+        script_path,
+        "@echo off\r\n"
+        "set args=%*\r\n"
+        "echo %args% | findstr /C:\"login\" >nul\r\n"
+        "if %errorlevel%==0 (\r\n"
+        "  echo fake-vault-token\r\n"
+        "  exit /b 0\r\n"
+        ")\r\n"
+        "echo %args% | findstr /C:\"kv get\" >nul\r\n"
+        "if %errorlevel%==0 (\r\n"
+            "  echo vault-secret-value\r\n"
+        "  exit /b 0\r\n"
+        ")\r\n"
+        "echo unexpected vault command: %args% 1>&2\r\n"
+        "exit /b 1\r\n");
+    return script_path;
+#else
+    const std::filesystem::path script_path = temp_dir / "fake-vault.sh";
+    WriteFile(
+        script_path,
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if printf '%s\\n' \"$*\" | grep -q 'login'; then\n"
+        "  printf 'fake-vault-token\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if printf '%s\\n' \"$*\" | grep -q 'kv get'; then\n"
+        "  printf 'vault-secret-value\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'unexpected vault command: %s\\n' \"$*\" >&2\n"
+        "exit 1\n");
+    std::filesystem::permissions(
+        script_path,
+        std::filesystem::perms::owner_exec |
+            std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::add);
+    return script_path;
+#endif
+}
+
 void TestParseCli()
 {
     const char* argv[] = {
@@ -126,6 +179,36 @@ void TestLoadConfig()
         std::filesystem::path(config.log.directory).filename() == "logs",
         "log directory should be resolved relative to the config");
     AssertTrue(config.log.level == "warn", "log level should be parsed");
+}
+
+void TestLoadConfigWithVaultBackedTdsPassword()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "tds_reporter_vault_test";
+    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path config_path = temp_dir / "vault.properties";
+    const std::filesystem::path vault_executable = CreateFakeVaultExecutable(temp_dir);
+
+    std::ofstream output(config_path);
+    output
+        << "env.name=qa\n"
+        << "tds.drtp_host=10.0.0.1\n"
+        << "tds.drtp_port=6003\n"
+        << "tds.user=10000\n"
+        << "tds.password=vault://secret/tds/qa#password\n"
+        << "vault.executable=" << vault_executable.string() << "\n"
+        << "vault.auth_method=cert\n"
+        << "vault.address=https://vault.example.com\n"
+        << "vault.client_cert_path=/tmp/vault-client.pem\n"
+        << "vault.client_key_path=/tmp/vault-client.key\n"
+        << "smtp.host=mail.local\n"
+        << "smtp.port=2587\n"
+        << "smtp.from=sender@example.com\n";
+    output.close();
+
+    tds_reporter::CliOptions cli;
+    const tds_reporter::AppConfig config = tds_reporter::LoadConfig(config_path.string(), cli);
+
+    AssertTrue(config.tds.password == "vault-secret-value", "vault-backed tds password should be resolved");
 }
 
 void TestStubClientAndCsv()
@@ -293,6 +376,7 @@ int main()
     {
         TestParseCli();
         TestLoadConfig();
+        TestLoadConfigWithVaultBackedTdsPassword();
         TestStubClientAndCsv();
         TestMimeAndDryRun();
         TestCurlConfigWithClientCertificate();

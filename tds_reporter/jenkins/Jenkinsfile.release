@@ -19,6 +19,23 @@ pipeline {
     booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a live dry-run against DRTP after staging')
     string(name: 'SMOKE_ENV', defaultValue: 'qa', description: 'Environment name for the optional live smoke run')
     string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional live smoke run')
+    string(name: 'VAULT_BIN', defaultValue: 'vault', description: 'Vault CLI executable used to authenticate and read secrets')
+    string(name: 'VAULT_ADDR', defaultValue: '', description: 'Vault address, for example https://vault.example.com:8200')
+    string(name: 'VAULT_NAMESPACE', defaultValue: '', description: 'Optional Vault namespace')
+    string(name: 'VAULT_AUTH_METHOD', defaultValue: '', description: 'Optional Vault auth method used by Jenkins: cert or kerberos')
+    string(name: 'VAULT_AUTH_PATH', defaultValue: '', description: 'Optional non-default Vault auth mount path')
+    string(name: 'VAULT_CERT_ROLE', defaultValue: '', description: 'Optional Vault cert auth role name')
+    string(name: 'VAULT_CERT_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Vault client certificate')
+    string(name: 'VAULT_KEY_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Vault client private key')
+    string(name: 'VAULT_CA_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Vault CA bundle')
+    string(name: 'VAULT_KERBEROS_USERNAME', defaultValue: '', description: 'Vault kerberos username')
+    string(name: 'VAULT_KERBEROS_SERVICE', defaultValue: '', description: 'Vault kerberos service principal, for example HTTP/vault.example.com')
+    string(name: 'VAULT_KERBEROS_REALM', defaultValue: '', description: 'Vault kerberos realm')
+    string(name: 'VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Vault kerberos keytab')
+    string(name: 'VAULT_KRB5CONF_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for krb5.conf')
+    booleanParam(name: 'VAULT_DISABLE_FAST_NEGOTIATION', defaultValue: false, description: 'Pass disable_fast_negotiation=true to vault kerberos login')
+    string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the supplier zip password')
+    string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the supplier zip password')
   }
 
   environment {
@@ -29,12 +46,132 @@ pipeline {
     VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
     VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
     VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
+    VAULT_RUNTIME_TOKEN = ""
   }
 
   stages {
+    stage('Prepare Vault Access') {
+      when {
+        expression { return params.VAULT_AUTH_METHOD?.trim() }
+      }
+      steps {
+        script {
+          if (!params.VAULT_ADDR?.trim()) {
+            error('VAULT_ADDR is required when VAULT_AUTH_METHOD is set')
+          }
+
+          def authMethod = params.VAULT_AUTH_METHOD.trim().toLowerCase()
+          def credentialBindings = []
+          def vaultEnv = [
+            "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
+            "VAULT_ADDR=${params.VAULT_ADDR.trim()}",
+            "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
+            "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}",
+            "VAULT_AUTH_METHOD=${authMethod}",
+            "VAULT_CERT_ROLE=${params.VAULT_CERT_ROLE?.trim() ?: ''}",
+            "VAULT_KERBEROS_USERNAME=${params.VAULT_KERBEROS_USERNAME?.trim() ?: ''}",
+            "VAULT_KERBEROS_SERVICE=${params.VAULT_KERBEROS_SERVICE?.trim() ?: ''}",
+            "VAULT_KERBEROS_REALM=${params.VAULT_KERBEROS_REALM?.trim() ?: ''}",
+            "VAULT_DISABLE_FAST_NEGOTIATION=${params.VAULT_DISABLE_FAST_NEGOTIATION ? 'true' : 'false'}"
+          ]
+
+          if (authMethod == 'cert') {
+            if (!params.VAULT_CERT_FILE_CREDENTIALS_ID?.trim() || !params.VAULT_KEY_FILE_CREDENTIALS_ID?.trim()) {
+              error('VAULT_CERT_FILE_CREDENTIALS_ID and VAULT_KEY_FILE_CREDENTIALS_ID are required for VAULT_AUTH_METHOD=cert')
+            }
+
+            credentialBindings << file(credentialsId: params.VAULT_CERT_FILE_CREDENTIALS_ID.trim(), variable: 'VAULT_CERT_FILE')
+            credentialBindings << file(credentialsId: params.VAULT_KEY_FILE_CREDENTIALS_ID.trim(), variable: 'VAULT_KEY_FILE')
+            if (params.VAULT_CA_FILE_CREDENTIALS_ID?.trim()) {
+              credentialBindings << file(credentialsId: params.VAULT_CA_FILE_CREDENTIALS_ID.trim(), variable: 'VAULT_CA_FILE')
+            }
+          } else if (authMethod == 'kerberos') {
+            if (!params.VAULT_KERBEROS_USERNAME?.trim() ||
+                !params.VAULT_KERBEROS_SERVICE?.trim() ||
+                !params.VAULT_KERBEROS_REALM?.trim() ||
+                !params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID?.trim() ||
+                !params.VAULT_KRB5CONF_CREDENTIALS_ID?.trim()) {
+              error('Vault kerberos auth requires username, service, realm, VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID, and VAULT_KRB5CONF_CREDENTIALS_ID')
+            }
+
+            credentialBindings << file(credentialsId: params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID.trim(), variable: 'VAULT_KEYTAB_FILE')
+            credentialBindings << file(credentialsId: params.VAULT_KRB5CONF_CREDENTIALS_ID.trim(), variable: 'VAULT_KRB5CONF_FILE')
+          } else {
+            error("Unsupported VAULT_AUTH_METHOD: ${params.VAULT_AUTH_METHOD}")
+          }
+
+          withCredentials(credentialBindings) {
+            withEnv(vaultEnv) {
+              env.VAULT_RUNTIME_TOKEN = sh(
+                returnStdout: true,
+                script: '''#!/usr/bin/env bash
+                  set -euo pipefail
+
+                  login_cmd=("$VAULT_BIN" login -token-only -no-store)
+                  if [ -n "${VAULT_AUTH_PATH:-}" ]; then
+                    login_cmd+=("-path=$VAULT_AUTH_PATH")
+                  fi
+
+                  if [ "$VAULT_AUTH_METHOD" = "cert" ]; then
+                    login_cmd+=("-method=cert")
+                    if [ -n "${VAULT_CA_FILE:-}" ]; then
+                      login_cmd+=("-ca-cert=$VAULT_CA_FILE")
+                    fi
+                    login_cmd+=("-client-cert=$VAULT_CERT_FILE" "-client-key=$VAULT_KEY_FILE")
+                    if [ -n "${VAULT_CERT_ROLE:-}" ]; then
+                      login_cmd+=("name=$VAULT_CERT_ROLE")
+                    fi
+                  else
+                    login_cmd+=("-method=kerberos")
+                    login_cmd+=("username=$VAULT_KERBEROS_USERNAME")
+                    login_cmd+=("service=$VAULT_KERBEROS_SERVICE")
+                    login_cmd+=("realm=$VAULT_KERBEROS_REALM")
+                    login_cmd+=("keytab_path=$VAULT_KEYTAB_FILE")
+                    login_cmd+=("krb5conf_path=$VAULT_KRB5CONF_FILE")
+                    login_cmd+=("disable_fast_negotiation=$VAULT_DISABLE_FAST_NEGOTIATION")
+                  fi
+
+                  "${login_cmd[@]}"
+                '''
+              ).trim()
+            }
+          }
+
+          if (!env.VAULT_RUNTIME_TOKEN?.trim()) {
+            error('Vault login did not return a token')
+          }
+        }
+      }
+    }
+
     stage('Prepare Vendor SDK') {
       steps {
         script {
+          def vendorZipPassword = ''
+
+          if (params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim()) {
+            if (!env.VAULT_RUNTIME_TOKEN?.trim()) {
+              error('VENDOR_PACKAGE_PASSWORD_VAULT_PATH requires a Vault token. Configure VAULT_AUTH_METHOD and related Vault parameters.')
+            }
+
+            withEnv([
+              "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
+              "VAULT_ADDR=${params.VAULT_ADDR?.trim() ?: ''}",
+              "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
+              "VAULT_TOKEN=${env.VAULT_RUNTIME_TOKEN}",
+              "VAULT_SECRET_PATH=${params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH.trim()}",
+              "VAULT_SECRET_FIELD=${params.VENDOR_PACKAGE_PASSWORD_VAULT_FIELD?.trim() ?: 'password'}"
+            ]) {
+              vendorZipPassword = sh(
+                returnStdout: true,
+                script: '''#!/usr/bin/env bash
+                  set -euo pipefail
+                  "$VAULT_BIN" kv get "-field=$VAULT_SECRET_FIELD" "$VAULT_SECRET_PATH"
+                '''
+              ).trim()
+            }
+          }
+
           if (params.ARTIFACTORY_PACKAGE_URL?.trim()) {
             if (!params.ARTIFACTORY_CERT_FILE_CREDENTIALS_ID?.trim()) {
               error('ARTIFACTORY_CERT_FILE_CREDENTIALS_ID is required when ARTIFACTORY_PACKAGE_URL is set')
@@ -55,8 +192,9 @@ pipeline {
             }
 
             withCredentials(credentialBindings) {
-              sh '''
-                set -euxo pipefail
+              withEnv(["VENDOR_PACKAGE_ZIP_PASSWORD=${vendorZipPassword}"]) {
+                sh '''
+                set -euo pipefail
 
                 rm -rf "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR"
                 mkdir -p "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR/include" "$VENDOR_TDS_DIR/linux_x86_64"
@@ -82,12 +220,14 @@ pipeline {
 
                 if unzip -tq "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
                   unzip -q "$VENDOR_ARCHIVE" -d "$VENDOR_EXTRACT_DIR"
+                elif [ -n "${VENDOR_PACKAGE_ZIP_PASSWORD:-}" ] && unzip -P "$VENDOR_PACKAGE_ZIP_PASSWORD" -tq "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
+                  unzip -P "$VENDOR_PACKAGE_ZIP_PASSWORD" -q "$VENDOR_ARCHIVE" -d "$VENDOR_EXTRACT_DIR"
                 elif tar -tzf "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
                   tar -C "$VENDOR_EXTRACT_DIR" -xzf "$VENDOR_ARCHIVE"
                 elif tar -tf "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
                   tar -C "$VENDOR_EXTRACT_DIR" -xf "$VENDOR_ARCHIVE"
                 else
-                  echo "Unsupported vendor package format: $ARTIFACTORY_PACKAGE_URL" >&2
+                  echo "Unsupported vendor package format or missing ZIP password: $ARTIFACTORY_PACKAGE_URL" >&2
                   exit 1
                 fi
 
@@ -119,6 +259,7 @@ pipeline {
 
                 find "$VENDOR_TDS_DIR" -maxdepth 2 -type f | sort
               '''
+              }
             }
           } else {
             sh '''
@@ -194,18 +335,25 @@ pipeline {
         expression { return params.RUN_LIVE_SMOKE }
       }
       steps {
-        sh '''
-          set -euxo pipefail
-          CONFIG_PATH="$STAGE_DIR/config/${SMOKE_ENV}.properties"
-          if [ -f "$STAGE_DIR/config/tds_reporter.properties" ]; then
-            CONFIG_PATH="$STAGE_DIR/config/tds_reporter.properties"
-          fi
-          "$STAGE_DIR/bin/tds_reporter" \
-            --env "$SMOKE_ENV" \
-            --config "$CONFIG_PATH" \
-            --dry-run \
-            --to "$SMOKE_TO"
-        '''
+        withEnv([
+          "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
+          "VAULT_ADDR=${params.VAULT_ADDR?.trim() ?: ''}",
+          "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
+          "VAULT_TOKEN=${env.VAULT_RUNTIME_TOKEN ?: ''}"
+        ]) {
+          sh '''
+            set -euxo pipefail
+            CONFIG_PATH="$STAGE_DIR/config/${SMOKE_ENV}.properties"
+            if [ -f "$STAGE_DIR/config/tds_reporter.properties" ]; then
+              CONFIG_PATH="$STAGE_DIR/config/tds_reporter.properties"
+            fi
+            "$STAGE_DIR/bin/tds_reporter" \
+              --env "$SMOKE_ENV" \
+              --config "$CONFIG_PATH" \
+              --dry-run \
+              --to "$SMOKE_TO"
+          '''
+        }
       }
     }
   }
