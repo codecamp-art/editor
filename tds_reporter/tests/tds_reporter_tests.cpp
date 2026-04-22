@@ -1,4 +1,5 @@
 #include "app.h"
+#include "logging.h"
 #include "text_utils.h"
 
 #include <filesystem>
@@ -48,6 +49,8 @@ tds_reporter::AppConfig BuildTestConfig(const std::filesystem::path& output_dir)
     config.smtp.from = "sender@example.com";
     config.smtp.security = "plain";
     config.smtp.insecure = true;
+    config.log.directory = (output_dir / "logs").string();
+    config.log.level = "debug";
     return config;
 }
 
@@ -102,7 +105,9 @@ void TestLoadConfig()
         << "smtp.from=sender@example.com\n"
         << "smtp.security=starttls\n"
         << "smtp.client_cert_path=/app/.cert/server.pem\n"
-        << "smtp.client_key_path=/app/.cert/server.key\n";
+        << "smtp.client_key_path=/app/.cert/server.key\n"
+        << "log.dir=../logs\n"
+        << "log.level=warn\n";
     output.close();
 
     tds_reporter::CliOptions cli;
@@ -117,6 +122,10 @@ void TestLoadConfig()
     AssertTrue(config.smtp.security == "starttls", "smtp security should be parsed");
     AssertTrue(config.smtp.client_cert_path == "/app/.cert/server.pem", "smtp client cert should be parsed");
     AssertTrue(config.smtp.client_key_path == "/app/.cert/server.key", "smtp client key should be parsed");
+    AssertTrue(
+        std::filesystem::path(config.log.directory).filename() == "logs",
+        "log directory should be resolved relative to the config");
+    AssertTrue(config.log.level == "warn", "log level should be parsed");
 }
 
 void TestStubClientAndCsv()
@@ -249,6 +258,33 @@ void TestNoMoreDataDetection()
         "real snapshot errors must not be ignored");
 }
 
+void TestLoggerWritesJsonLine()
+{
+    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "tds_reporter_logger_test";
+    std::filesystem::create_directories(output_dir);
+
+    tds_reporter::AppConfig config = BuildTestConfig(output_dir);
+    tds_reporter::InitializeLogger(config);
+    tds_reporter::LogInfo(
+        "logger_test",
+        "Logger writes json lines",
+        {
+            {"trade_date", "20260418"},
+            {"mode", "test"}
+        });
+    const std::string log_path = tds_reporter::CurrentLogFilePath();
+    tds_reporter::ShutdownLogger();
+
+    AssertTrue(!log_path.empty(), "logger should expose the current log file path");
+    AssertTrue(std::filesystem::exists(log_path), "log file should be created");
+
+    const std::string log_content = ReadFile(log_path);
+    AssertContains(log_content, "\"event\":\"logger_test\"", "log event");
+    AssertContains(log_content, "\"msg\":\"Logger writes json lines\"", "log message");
+    AssertContains(log_content, "\"trade_date\":\"20260418\"", "log field");
+    AssertContains(log_content, "\"level\":\"info\"", "log level");
+}
+
 } // namespace
 
 int main()
@@ -262,6 +298,7 @@ int main()
         TestCurlConfigWithClientCertificate();
         TestVendorTextDecodingAndErrorFormatting();
         TestNoMoreDataDetection();
+        TestLoggerWritesJsonLine();
         std::cout << "All tds_reporter tests passed\n";
         return 0;
     }

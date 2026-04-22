@@ -17,6 +17,7 @@ set(TDS_REPORTER_STAGE_DIR "${CMAKE_BINARY_DIR}/stage" CACHE PATH "Directory use
 add_library(
     tds_reporter_lib
     src/app.cpp
+    src/logging.cpp
     src/text_utils.cpp
     src/tds_client.cpp
 )
@@ -238,9 +239,26 @@ install(
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/config/dev.properties"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/qa.properties"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/tds_reporter.properties.template"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/prod.properties.template"
     DESTINATION config
 )
+
+install(
+    PROGRAMS
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/render-config.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/render-config.ps1"
+    DESTINATION scripts
+)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config/tds_reporter.properties")
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/tds_reporter.properties"
+        DESTINATION config
+    )
+endif()
+
+install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/logs\")")
 
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md"

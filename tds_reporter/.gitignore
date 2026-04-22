@@ -10,6 +10,7 @@ tds/
 
 # Local runtime config overrides
 config/prod.properties
+config/tds_reporter.properties
 config/*.local.properties
 
 # Local CMake and IDE user state

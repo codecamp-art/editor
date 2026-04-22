@@ -1,4 +1,5 @@
 #include "app.h"
+#include "logging.h"
 #include "text_utils.h"
 
 #include <cctype>
@@ -115,6 +116,7 @@ public:
 
     int FetchTradeDate() override
     {
+        LogDebug("tds_trade_date_request", "Requesting trade date from TDS");
         int trade_date = 0;
         int err_code = 0;
         char err_msg[256] = {0};
@@ -123,6 +125,7 @@ public:
         {
             throw std::runtime_error(FormatTdsApiError("TdsApi_reqTradeDate", err_code, err_msg));
         }
+        LogInfo("tds_trade_date_response", "Received trade date from TDS", {{"trade_date", std::to_string(trade_date)}});
         return trade_date;
     }
 
@@ -130,6 +133,13 @@ public:
         int trade_date,
         const std::vector<std::string>& cust_filters) override
     {
+        LogInfo(
+            "tds_snapshot_start",
+            "Requesting customer fund snapshot",
+            {
+                {"trade_date", std::to_string(trade_date)},
+                {"cust_filter_count", std::to_string(cust_filters.size())}
+            });
         if (!cust_filters.empty())
         {
             const std::string joined = Join(cust_filters, "|");
@@ -213,6 +223,13 @@ public:
             }
 
             TdsApi_closeHandle(handle);
+            LogInfo(
+                "tds_snapshot_complete",
+                "Customer fund snapshot loaded",
+                {
+                    {"trade_date", std::to_string(trade_date)},
+                    {"record_count", std::to_string(records.size())}
+                });
             return records;
         }
         catch (...)
@@ -243,6 +260,14 @@ private:
 
     void InitializeSession()
     {
+        LogInfo(
+            "tds_session_init",
+            "Initializing vendor TDS session",
+            {
+                {"drtp_host", config_.tds.drtp_host},
+                {"drtp_port", std::to_string(config_.tds.drtp_port)},
+                {"function_no", std::to_string(config_.tds.function_no)}
+            });
         int err_code = 0;
         char err_msg[256] = {0};
         if (!TdsApi_init(
@@ -275,6 +300,14 @@ private:
                 " (" + BuildConnectionContext(!password.empty()) + ")");
         }
         logged_in_ = true;
+        LogInfo(
+            "tds_session_ready",
+            "Vendor TDS session is ready",
+            {
+                {"drtp_host", config_.tds.drtp_host},
+                {"user", config_.tds.user},
+                {"api_version", api_version_}
+            });
     }
 
     void Cleanup() noexcept
@@ -290,6 +323,7 @@ private:
         {
             TdsApi_finalize();
         }
+        LogDebug("tds_session_cleanup", "Vendor TDS session cleaned up");
     }
 
     AppConfig config_;
@@ -305,6 +339,7 @@ public:
     explicit StubTdsClient(const std::string& csv_path)
     {
         Load(csv_path);
+        LogInfo("stub_client_ready", "Stub CSV client loaded", {{"stub_file", csv_path}});
     }
 
     int FetchTradeDate() override
@@ -408,10 +443,19 @@ std::unique_ptr<ITdsClient> CreateClient(const AppConfig& config, const CliOptio
 {
     if (!cli.stub_file.empty())
     {
+        LogInfo("client_create", "Using stub TDS client", {{"stub_file", cli.stub_file}});
         return std::make_unique<StubTdsClient>(cli.stub_file);
     }
 
 #ifdef TDS_REPORTER_HAS_VENDOR_API
+    LogInfo(
+        "client_create",
+        "Using live vendor TDS client",
+        {
+            {"drtp_host", config.tds.drtp_host},
+            {"drtp_port", std::to_string(config.tds.drtp_port)},
+            {"function_no", std::to_string(config.tds.function_no)}
+        });
     return std::make_unique<VendorTdsClient>(config);
 #else
     throw std::runtime_error(

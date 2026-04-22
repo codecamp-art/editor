@@ -57,9 +57,13 @@ pipeline {
         sh '''
           set -euxo pipefail
           cd "$PROJECT_DIR"
+          CONFIG_PATH="$PROJECT_DIR/config/dev.properties"
+          if [ -f "$PROJECT_DIR/config/tds_reporter.properties" ]; then
+            CONFIG_PATH="$PROJECT_DIR/config/tds_reporter.properties"
+          fi
           "$BUILD_DIR/tds_reporter" \
             --env dev \
-            --config "$PROJECT_DIR/config/dev.properties" \
+            --config "$CONFIG_PATH" \
             --stub-file "$PROJECT_DIR/tests/data/stub_snapshot.csv" \
             --dry-run \
             --to pr-smoke@example.com

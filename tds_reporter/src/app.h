@@ -50,6 +50,12 @@ struct SmtpConfig
     int connect_timeout_seconds = 15;
 };
 
+struct LogConfig
+{
+    std::string directory = "./logs";
+    std::string level = "info";
+};
+
 struct AppConfig
 {
     std::string env_name = "dev";
@@ -60,6 +66,7 @@ struct AppConfig
     std::vector<std::string> default_cc;
     TdsConnectionConfig tds;
     SmtpConfig smtp;
+    LogConfig log;
 };
 
 struct CliOptions

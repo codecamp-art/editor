@@ -1,12 +1,12 @@
-env.name=qa
-tds.drtp_host=10.10.20.30
-tds.drtp_port=6003
+env.name=${APP_ENV:dev}
+tds.drtp_host=${TDS_DRTP_HOST:127.0.0.1}
+tds.drtp_port=${TDS_DRTP_PORT:6003}
 tds.user=${TDS_USER:10000}
 tds.password=${TDS_PASSWORD:}
-tds.req_timeout_ms=300000
-tds.log_level=2000
-tds.klg_enable=false
-tds.function_no=20100
+tds.req_timeout_ms=${TDS_REQ_TIMEOUT_MS:300000}
+tds.log_level=${TDS_VENDOR_LOG_LEVEL:2000}
+tds.klg_enable=${TDS_KLG_ENABLE:false}
+tds.function_no=${TDS_FUNCTION_NO:20100}
 
 smtp.host=${SMTP_HOST:mta-hub.REPLACE_ME.com.cn}
 smtp.port=${SMTP_PORT:2587}
@@ -20,10 +20,10 @@ smtp.client_cert_type=${SMTP_CLIENT_CERT_TYPE:PEM}
 smtp.client_key_type=${SMTP_CLIENT_KEY_TYPE:PEM}
 smtp.client_key_password=${SMTP_CLIENT_KEY_PASSWORD:}
 smtp.insecure=${SMTP_INSECURE:false}
-smtp.connect_timeout_seconds=15
+smtp.connect_timeout_seconds=${SMTP_CONNECT_TIMEOUT_SECONDS:15}
 
-email.default_to=${EMAIL_TO:qa-ops@example.com}
-email.default_cc=${EMAIL_CC:risk-qa@example.com}
+email.default_to=${EMAIL_TO:ops@example.com}
+email.default_cc=${EMAIL_CC:}
 email.subject=${EMAIL_SUBJECT:TDS Client Funding and Risk Ratio Report}
 report.output_dir=${REPORT_OUTPUT_DIR:../output}
 report.attachment_name=${REPORT_ATTACHMENT_NAME:tds_customer_funds}

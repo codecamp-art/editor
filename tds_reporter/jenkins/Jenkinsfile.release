@@ -196,9 +196,13 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
+          CONFIG_PATH="$STAGE_DIR/config/${SMOKE_ENV}.properties"
+          if [ -f "$STAGE_DIR/config/tds_reporter.properties" ]; then
+            CONFIG_PATH="$STAGE_DIR/config/tds_reporter.properties"
+          fi
           "$STAGE_DIR/bin/tds_reporter" \
             --env "$SMOKE_ENV" \
-            --config "$STAGE_DIR/config/${SMOKE_ENV}.properties" \
+            --config "$CONFIG_PATH" \
             --dry-run \
             --to "$SMOKE_TO"
         '''

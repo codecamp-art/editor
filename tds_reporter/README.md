@@ -63,6 +63,20 @@ The default config file path is selected by `--env`:
 
 `prod.properties.template` is included as a template. Copy it to `prod.properties` and fill the real values.
 
+If you want to maintain only one config file, copy `config/tds_reporter.properties.template` to `config/tds_reporter.properties`. The program will prefer that file over `config/dev.properties`, `config/qa.properties`, and `config/prod.properties`. You can either replace the placeholders during install, or leave the `${ENV_VAR:default}` syntax in place and provide values through environment variables at runtime.
+
+Two small helper scripts are included if you want to render the template into a concrete `config/tds_reporter.properties` during install or deployment:
+
+- Linux/macOS shell: `./scripts/render-config.sh`
+- Windows PowerShell: `powershell -ExecutionPolicy Bypass -File .\scripts\render-config.ps1`
+
+Both scripts also accept optional `template` and `output` paths:
+
+- `./scripts/render-config.sh config/tds_reporter.properties.template config/tds_reporter.properties`
+- `powershell -ExecutionPolicy Bypass -File .\scripts\render-config.ps1 -TemplatePath .\config\tds_reporter.properties.template -OutputPath .\config\tds_reporter.properties`
+
+The rendering semantics match the program itself: `${ENV_VAR:default}` resolves to the environment variable value when it exists and is non-empty; otherwise it falls back to `default`.
+
 Properties support `${ENV_VAR:default}` syntax, so passwords can stay in environment variables instead of config files. Relative paths inside the config are resolved from the config file directory, not from the current shell directory.
 
 Important keys:
@@ -72,6 +86,10 @@ Important keys:
 - `smtp.*`: SMTP connection settings used by `curl`
 - `email.default_to` and `email.default_cc`: default recipients
 - `report.output_dir`: where CSV and dry-run `.eml` previews are written
+- `log.dir`: runtime application log directory, default `../logs` relative to the config file
+- `log.level`: `debug`, `info`, `warn`, or `error`
+
+Application logs are written as JSON Lines to `logs/tds_reporter-YYYY-MM-DD.log`. Each line includes stable keys such as `ts`, `level`, `service`, `env`, `event`, and `msg`, so Loki can ingest and parse them directly.
 
 The SMTP transport settings are aligned with the company JavaMailSender example:
 
@@ -168,6 +186,34 @@ Or with plain CMake install:
 cmake --install build --prefix /tmp/tds_reporter_release
 ```
 
+Practical local packaging commands:
+
+Windows x86 package using supplier `tds/win32` files:
+
+```bat
+cd /d D:\path\to\tds_reporter
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars32.bat"
+cmake -S . -B build_win32_release -G "Visual Studio 17 2022" -A Win32 -DTDS_VENDOR_LIBRARY="%CD%\tds\win32\tds_api.lib" -DTDS_VENDOR_RUNTIME="%CD%\tds\win32\tds_api.dll" -DTDS_REPORTER_STAGE_DIR="%CD%\build_win32_release\stage"
+cmake --build build_win32_release --config Release --parallel
+ctest --test-dir build_win32_release -C Release --output-on-failure
+cmake --build build_win32_release --target tds_reporter_stage --config Release
+powershell -NoProfile -Command "Compress-Archive -Path 'build_win32_release\stage\*' -DestinationPath 'build_win32_release\tds_reporter-windows-x86.zip' -Force"
+```
+
+RHEL8 package using supplier `tds/linux_x86_64` files:
+
+```bash
+cd /path/to/tds_reporter
+cmake -S . -B build_release -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DTDS_VENDOR_LIBRARY="$PWD/tds/linux_x86_64/libtds_api.so" \
+  -DTDS_REPORTER_STAGE_DIR="$PWD/build_release/stage"
+cmake --build build_release --parallel
+ctest --test-dir build_release --output-on-failure
+cmake --build build_release --target tds_reporter_stage
+tar -C build_release/stage -czf build_release/tds_reporter-rhel8-local.tar.gz .
+```
+
 The staged layout on RHEL8 is:
 
 ```text
@@ -176,10 +222,16 @@ stage/
     tds_reporter
   lib/
     tds_api.so
+    cpack.dat
   config/
     dev.properties
     qa.properties
+    tds_reporter.properties.template
     prod.properties.template
+  scripts/
+    render-config.sh
+    render-config.ps1
+  logs/
   README.md
 ```
 
@@ -192,10 +244,16 @@ stage/
   bin/
     tds_reporter.exe
     tds_api.dll
+    cpack.dat
   config/
     dev.properties
     qa.properties
+    tds_reporter.properties.template
     prod.properties.template
+  scripts/
+    render-config.sh
+    render-config.ps1
+  logs/
   README.md
 ```
 
@@ -275,7 +333,7 @@ Recommended Jenkins pipeline script paths:
 Pipeline intent:
 
 - `Jenkinsfile.pr`: configure, build, unit test, then run a deterministic `--stub-file --dry-run` smoke test
-- `Jenkinsfile.release`: configure, build, unit test, stage the release directory, package it as `tar.gz`, and optionally run a live DRTP dry-run smoke test
+- `Jenkinsfile.release`: download the supplier install package from Artifactory with client certificate authentication, extract the required `tds/` files into the workspace, configure, build, unit test, stage the release directory, package it as `tar.gz`, and optionally run a live DRTP dry-run smoke test
 
 ## Run On RHEL8
 

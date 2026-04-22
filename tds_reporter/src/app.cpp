@@ -1,4 +1,5 @@
 #include "app.h"
+#include "logging.h"
 
 #include <algorithm>
 #include <chrono>
@@ -154,6 +155,16 @@ bool ParseBoolValue(const std::string& raw, const std::string& field_name)
         return false;
     }
     throw std::runtime_error("invalid boolean for " + field_name + ": " + raw);
+}
+
+std::string ParseLogLevelValue(const std::string& raw)
+{
+    const std::string normalized = ToLower(Trim(raw));
+    if (normalized == "debug" || normalized == "info" || normalized == "warn" || normalized == "error")
+    {
+        return normalized;
+    }
+    throw std::runtime_error("invalid log.level: " + raw);
 }
 
 std::string CurrentTimestamp()
@@ -774,6 +785,11 @@ CliOptions ParseCli(int argc, char** argv)
 
 std::string DefaultConfigPath(const std::string& env_name)
 {
+    const std::filesystem::path single_config("config/tds_reporter.properties");
+    if (std::filesystem::exists(single_config))
+    {
+        return single_config.string();
+    }
     return "config/" + env_name + ".properties";
 }
 
@@ -791,6 +807,8 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
         : cli.output_dir;
     config.default_to = SplitList(GetValue(properties, "email.default_to"));
     config.default_cc = SplitList(GetValue(properties, "email.default_cc"));
+    config.log.directory = ResolveConfigRelativePath(config_dir, GetValue(properties, "log.dir", "../logs"));
+    config.log.level = ParseLogLevelValue(GetValue(properties, "log.level", config.log.level));
 
     config.tds.drtp_host = GetRequiredValue(properties, "tds.drtp_host");
     config.tds.drtp_port = ParseIntValue(
@@ -871,6 +889,14 @@ std::string WriteCsvReport(const std::vector<CustomerFundRecord>& records, const
                << FormatDouble(record.risk_degree2) << '\n';
     }
 
+    LogInfo(
+        "csv_report_written",
+        "CSV report written",
+        {
+            {"trade_date", std::to_string(trade_date)},
+            {"row_count", std::to_string(records.size())},
+            {"path", output_path.string()}
+        });
     return output_path.string();
 }
 
@@ -998,6 +1024,13 @@ SendMailResult SendMailWithCurl(const MailRequest& request, const AppConfig& con
             std::filesystem::absolute(output_dir / ("mail_preview_" + CurrentTimestamp() + ".eml"));
         std::ofstream preview(preview_path, std::ios::binary);
         preview << mime_message;
+        LogInfo(
+            "mail_preview_written",
+            "Dry-run preview file written",
+            {
+                {"path", preview_path.string()},
+                {"recipient_count", std::to_string(request.to.size() + request.cc.size())}
+            });
         return SendMailResult {false, preview_path.string()};
     }
 
@@ -1028,6 +1061,14 @@ SendMailResult SendMailWithCurl(const MailRequest& request, const AppConfig& con
         }
 
         const std::string command = "curl --config " + QuoteForShell(curl_config_path.string());
+        LogInfo(
+            "smtp_send_start",
+            "Invoking curl SMTP delivery",
+            {
+                {"smtp_host", config.smtp.host},
+                {"smtp_port", std::to_string(config.smtp.port)},
+                {"recipient_count", std::to_string(request.to.size() + request.cc.size())}
+            });
         const int exit_code = std::system(command.c_str());
         std::filesystem::remove(message_path);
         std::filesystem::remove(curl_config_path);
@@ -1037,6 +1078,7 @@ SendMailResult SendMailWithCurl(const MailRequest& request, const AppConfig& con
             throw std::runtime_error("curl exited with code " + std::to_string(exit_code));
         }
 
+        LogInfo("smtp_send_complete", "curl SMTP delivery completed successfully");
         return SendMailResult {true, ""};
     }
     catch (...)
