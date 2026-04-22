@@ -226,6 +226,19 @@ void TestVendorTextDecodingAndErrorFormatting()
     AssertContains(formatted, "failed to create TDS handle", "formatted error description");
 }
 
+void TestNoMoreDataDetection()
+{
+    AssertTrue(
+        tds_reporter::IsTdsNoMoreDataResult(1009, ""),
+        "error code 1009 should be treated as end-of-data");
+    AssertTrue(
+        tds_reporter::IsTdsNoMoreDataResult(1, u8"\u6ca1\u6709\u66f4\u591a\u6570\u636e"),
+        "decoded vendor message should be treated as end-of-data");
+    AssertTrue(
+        !tds_reporter::IsTdsNoMoreDataResult(430000111, "snapshot failed"),
+        "real snapshot errors must not be ignored");
+}
+
 } // namespace
 
 int main()
@@ -238,6 +251,7 @@ int main()
         TestMimeAndDryRun();
         TestCurlConfigWithClientCertificate();
         TestVendorTextDecodingAndErrorFormatting();
+        TestNoMoreDataDetection();
         std::cout << "All tds_reporter tests passed\n";
         return 0;
     }

@@ -162,11 +162,14 @@ public:
                 err_msg[0] = '\0';
                 if (!TdsApi_hasNext(handle, &err_code, err_msg))
                 {
+                    if (err_code == 0 || IsTdsNoMoreDataResult(err_code, err_msg))
+                    {
+                        break;
+                    }
                     if (err_code != 0)
                     {
                         throw std::runtime_error(FormatTdsApiError("TdsApi_hasNext", err_code, err_msg));
                     }
-                    break;
                 }
 
                 int data_type = -1;

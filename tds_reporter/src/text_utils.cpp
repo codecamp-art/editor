@@ -28,6 +28,7 @@ constexpr int kTdsApiQuerySerialFail = 430000110;
 constexpr int kTdsApiQuerySnapshotFail = 430000111;
 constexpr int kTdsApiSubscribeFail = 430000112;
 constexpr int kTdsApiUnsubscribeFail = 430000113;
+constexpr int kTdsNoMoreData = 1009;
 
 std::string Trim(const std::string& value)
 {
@@ -317,6 +318,37 @@ std::string DescribeTdsErrorCode(int error_code)
 {
     const char* description = DescribeTdsErrorCodeInternal(error_code);
     return description == nullptr ? "" : description;
+}
+
+bool IsTdsNoMoreDataResult(int error_code, const std::string& error_message)
+{
+    if (error_code == kTdsNoMoreData)
+    {
+        return true;
+    }
+
+    const std::string decoded_message = DecodeVendorText(error_message);
+    if (decoded_message.empty())
+    {
+        return false;
+    }
+
+    for (const std::string& marker : {
+             "no more data",
+             "no more result",
+             "end of data",
+             u8"\u6ca1\u6709\u66f4\u591a\u6570\u636e",
+             u8"\u65e0\u66f4\u591a\u6570\u636e",
+             u8"\u65e0\u540e\u7eed\u6570\u636e",
+             u8"\u6570\u636e\u83b7\u53d6\u5b8c\u6bd5"})
+    {
+        if (decoded_message.find(marker) != std::string::npos)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::string FormatTdsApiError(
