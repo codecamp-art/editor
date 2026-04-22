@@ -510,129 +510,129 @@ std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const 
     const std::string report_title = BuildReportTitle(config, trade_date);
 
     std::ostringstream output;
-    output << "<html><body style=\"margin:0;padding:24px 36px;font-family:Calibri,Arial,sans-serif;"
-              "font-size:16px;line-height:1.4;color:#111;\">";
-    output << "<div style=\"max-width:1280px;\">";
-    output << "<p style=\"margin:0 0 28px 0;font-size:18px;font-weight:700;\">"
+    output << "<html><body style=\"margin:0;padding:18px 28px;font-family:Calibri,Arial,sans-serif;"
+              "font-size:14px;line-height:1.35;color:#111;\">";
+    output << "<div style=\"max-width:768px;\">";
+    output << "<p style=\"margin:0 0 22px 0;font-size:16px;font-weight:700;\">"
            << EscapeHtml(report_title) << "</p>";
 
     if (issue_count == 0)
     {
-        output << "<p style=\"margin:0 0 28px 0;font-size:18px;\">"
+        output << "<p style=\"margin:0 0 22px 0;font-size:15px;\">"
                << "As of 15:00 of T Day, no client funding and risk ratio issues identified from Risk Management."
                << "</p>";
     }
     else
     {
-        output << "<p style=\"margin:0 0 28px 0;font-size:18px;\">"
+        output << "<p style=\"margin:0 0 22px 0;font-size:15px;\">"
                << "As of 15:00 of T Day, "
                << issue_count
                << " client funding and risk ratio issue(s) identified from Risk Management."
                << "</p>";
     }
 
-    output << "<p style=\"margin:0 0 10px 0;font-size:18px;font-weight:700;\">"
+    output << "<p style=\"margin:0 0 8px 0;font-size:16px;font-weight:700;\">"
            << u8"\u5BA2\u6237\u8D44\u91D1\u53CA\u98CE\u9669\u5EA6 Funding &amp; Risk ratio"
            << "</p>";
-    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;"
+    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:768px;max-width:100%;border-collapse:collapse;"
               "border:1px solid #29445d;table-layout:fixed;\">";
     output << "<tr style=\"background:#0f4f8a;color:#fff;font-weight:700;text-align:center;\">"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:12%;\">"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:12%;font-size:13px;\">"
            << u8"\u5BA2\u6237\u53F7"
            << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:16%;\">"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:16%;font-size:13px;\">"
            << u8"\u5BA2\u6237\u540D\u79F0"
            << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:14%;\">"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:14%;font-size:13px;\">"
            << u8"\u5BA2\u6237\u6743\u76CA"
            << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:14%;\">"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:14%;font-size:13px;\">"
            << u8"\u6D6E\u52A8\u76C8\u4E8F"
            << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:18%;\">"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:18%;font-size:13px;\">"
            << u8"\u53EF\u7528\u8D44\u91D1"
            << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:13%;\">"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:13%;font-size:13px;\">"
            << u8"*\u98CE\u9669\u5EA6 1"
            << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:13%;\">"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:13%;font-size:13px;\">"
            << u8"*\u98CE\u9669\u5EA6 2"
            << "</th>"
            << "</tr>";
     output << "<tr style=\"background:#0f4f8a;color:#fff;font-weight:700;text-align:center;\">"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Account</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Client</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Total Equity</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">MTM PnL</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Available Funds</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">*Risk Ratio 1</th>"
-           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">*Risk Ratio 2</th>"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Account</th>"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Client</th>"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Total Equity</th>"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">MTM PnL</th>"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Available Funds</th>"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">*Risk Ratio 1</th>"
+           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">*Risk Ratio 2</th>"
            << "</tr>";
     output << "<tr style=\"background:#ffffff;\">"
-           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;font-weight:700;\">"
+           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;font-weight:700;\">"
            << u8"Total \u5408\u8BA1:"
            << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;\">&nbsp;</td>"
-           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;\">&nbsp;</td>"
+           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
            << FormatAmount(total_dyn_rights) << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
            << FormatAmount(total_hold_profit) << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
            << FormatAmount(total_avail_fund) << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:8px 10px;background:#dfe9d9;\">&nbsp;</td>"
-           << "<td style=\"border:1px solid #29445d;padding:8px 10px;background:#dfe9d9;\">&nbsp;</td>"
+           << "<td style=\"border:1px solid #29445d;padding:7px 8px;background:#dfe9d9;\">&nbsp;</td>"
+           << "<td style=\"border:1px solid #29445d;padding:7px 8px;background:#dfe9d9;\">&nbsp;</td>"
            << "</tr>";
 
     for (const MailReportRow& row : rows)
     {
         output << "<tr style=\"background:#ffffff;\">"
-               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;\">"
+               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;\">"
                << EscapeHtml(row.cust_no) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;\">"
+               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;\">"
                << EscapeHtml(row.cust_name) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
                << FormatAmount(row.total_equity) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
                << FormatAmount(row.mtm_pnl) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
                << FormatAmount(row.available_funds) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;background:#dfe9d9;\">"
+               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;background:#dfe9d9;\">"
                << FormatPercentage(row.risk_ratio1) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;background:#dfe9d9;\">"
+               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;background:#dfe9d9;\">"
                << FormatPercentage(row.risk_ratio2) << "</td>"
                << "</tr>";
     }
 
     output << "</table>";
-    output << "<div style=\"margin-top:42px;max-width:460px;\">";
-    output << "<p style=\"margin:0 0 8px 0;font-size:16px;font-weight:700;\">"
+    output << "<div style=\"margin-top:32px;max-width:360px;\">";
+    output << "<p style=\"margin:0 0 8px 0;font-size:14px;font-weight:700;\">"
            << "*Note: Risk ratio escalation threshold"
            << "</p>";
-    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;min-width:460px;\">";
+    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;min-width:360px;\">";
     output << "<tr>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#dcead2;font-weight:700;\">No Action Required</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#dcead2;font-weight:700;\">&lt;70%</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#dcead2;font-size:12px;font-weight:700;\">No Action Required</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#dcead2;font-size:12px;font-weight:700;\">&lt;70%</td>"
            << "</tr>";
     output << "<tr>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#f1d54d;font-weight:700;\">Alert</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#f1d54d;font-weight:700;\">&gt;70%</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#f1d54d;font-size:12px;font-weight:700;\">Alert</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#f1d54d;font-size:12px;font-weight:700;\">&gt;70%</td>"
            << "</tr>";
     output << "<tr>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#d8a06c;font-weight:700;\">Official Margin Call</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#d8a06c;font-weight:700;\">&gt;80%</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#d8a06c;font-size:12px;font-weight:700;\">Official Margin Call</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#d8a06c;font-size:12px;font-weight:700;\">&gt;80%</td>"
            << "</tr>";
     output << "<tr>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#c41212;color:#111;font-weight:700;\">Final Official Margin</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#c41212;color:#111;font-weight:700;\">&gt;100%</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#c41212;color:#111;font-size:12px;font-weight:700;\">Final Official Margin</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#c41212;color:#111;font-size:12px;font-weight:700;\">&gt;100%</td>"
            << "</tr>";
     output << "<tr>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#3b0202;color:#fff;font-weight:700;\">Forced Liquidation</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 2</td>"
-           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#3b0202;color:#fff;font-weight:700;\">&gt;100%</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#3b0202;color:#fff;font-size:12px;font-weight:700;\">Forced Liquidation</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 2</td>"
+           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#3b0202;color:#fff;font-size:12px;font-weight:700;\">&gt;100%</td>"
            << "</tr>";
     output << "</table>";
     output << "</div>";
