@@ -57,9 +57,9 @@ Short version:
 
 The default config file path is selected by `--env`:
 
-- `--env dev` -> `tds_reporter/config/dev.properties`
-- `--env qa` -> `tds_reporter/config/qa.properties`
-- `--env prod` -> provide `tds_reporter/config/prod.properties`
+- `--env dev` -> `config/dev.properties`
+- `--env qa` -> `config/qa.properties`
+- `--env prod` -> provide `config/prod.properties`
 
 `prod.properties.template` is included as a template. Copy it to `prod.properties` and fill the real values.
 
@@ -136,12 +136,12 @@ cmake --build --preset windows-live-x64-debug
 ctest --preset windows-live-x64-debug
 ```
 
-> Note: `../tds/win32` auto-detection is intentionally disabled for x64 builds to prevent `LNK4272` (x86 library vs x64 target) mismatches.
+> Note: `./tds/win32` auto-detection is intentionally disabled for x64 builds to prevent `LNK4272` (x86 library vs x64 target) mismatches.
 
 Check the configure output once:
 
 - if you see `Windows build will enable live TDS calls`, local live mode is active
-- if you still see `Windows build is stub-only`, the supplier `win32` package was not detected and you should either install it under `../tds/win32/` or pass explicit library paths
+- if you still see `Windows build is stub-only`, the supplier `win32` package was not detected and you should either install it under `tds/win32/` or pass explicit library paths
 
 If the supplier package is truly 32-bit, use the x86 preset instead:
 
@@ -213,9 +213,9 @@ Runtime prerequisites on RHEL8:
 If the build runs on a RHEL8 Jenkins node, the simplest approach is:
 
 1. Install build tools on the node once: `gcc-c++`, `cmake`, `make`, `curl`
-2. Make sure the supplier header directory is present in the workspace at `../tds/include`
-3. Make sure the supplier library exists on the node, for example `/opt/tds/lib/tds_api.so`
-4. In the pipeline, pass `-DTDS_VENDOR_LIBRARY=/opt/tds/lib/tds_api.so`
+2. Put the supplier files in the workspace under `./tds/include` and `./tds/linux_x86_64`, or let `Jenkinsfile.release` download and extract them there
+3. Make sure `./tds/linux_x86_64/libtds_api.so` and `./tds/linux_x86_64/cpack.dat` exist before the stage target runs
+4. If the vendor files live elsewhere, pass `-DTDS_VENDOR_LIBRARY=/absolute/path/to/libtds_api.so`
 5. Run unit tests on the node with `ctest`
 6. Stage a release directory with `cmake --build build --target tds_reporter_stage`
 7. Archive the stage directory as the Jenkins build artifact
@@ -231,10 +231,8 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
-          cd tds_reporter
           cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DTDS_VENDOR_LIBRARY=/opt/tds/lib/tds_api.so
+            -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release --parallel
           ctest --test-dir build --output-on-failure
           cmake --build build --target tds_reporter_stage --config Release
@@ -247,9 +245,10 @@ pipeline {
 
 Recommended artifact to archive from Jenkins:
 
-- `tds_reporter/build/stage/bin/tds_reporter`
-- `tds_reporter/build/stage/lib/tds_api.so`
-- `tds_reporter/build/stage/config/*`
+- `build/stage/bin/tds_reporter`
+- `build/stage/lib/*.so*`
+- `build/stage/lib/cpack.dat`
+- `build/stage/config/*`
 
 If you also want a smoke test job on Jenkins, use a real QA config:
 
@@ -270,8 +269,8 @@ The repository now also includes ready-to-use Jenkins pipeline files:
 
 Recommended Jenkins pipeline script paths:
 
-- PR validation job: `tds_reporter/jenkins/Jenkinsfile.pr`
-- Release packaging job: `tds_reporter/jenkins/Jenkinsfile.release`
+- PR validation job: `jenkins/Jenkinsfile.pr`
+- Release packaging job: `jenkins/Jenkinsfile.release`
 
 Pipeline intent:
 
@@ -339,10 +338,10 @@ This lets you debug:
 
 In dry-run mode the mail server is not contacted, so the PEM certificate and key files do not need to exist on your Windows machine.
 
-If the supplier provides a Windows runtime package, place it under `../tds/win32/`:
+If the supplier provides a Windows runtime package, place it under `tds/win32/`:
 
-- `../tds/win32/tds_api.lib`
-- `../tds/win32/tds_api.dll`
+- `tds/win32/tds_api.lib`
+- `tds/win32/tds_api.dll`
 
 The CMake project will auto-detect that directory for local Windows live builds. You can also pass the paths explicitly with `-DTDS_VENDOR_LIBRARY=...` and `-DTDS_VENDOR_RUNTIME=...`.
 

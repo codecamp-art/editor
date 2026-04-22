@@ -6,6 +6,7 @@ out/
 # Generated reports and mail previews
 output/
 tds_reporter/output/
+tds/
 
 # Local runtime config overrides
 config/prod.properties

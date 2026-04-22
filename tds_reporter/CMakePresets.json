@@ -33,7 +33,7 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "TDS_VENDOR_LIBRARY": "/opt/tds/lib/tds_api.so"
+        "TDS_VENDOR_LIBRARY": "${sourceDir}/tds/linux_x86_64/libtds_api.so"
       }
     }
   ],

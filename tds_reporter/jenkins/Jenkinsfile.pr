@@ -8,14 +8,14 @@ pipeline {
   }
 
   parameters {
-    string(name: 'TDS_VENDOR_LIBRARY', defaultValue: '/opt/tds/lib/tds_api.so', description: 'Absolute path to the vendor .so on the Jenkins node')
+    string(name: 'TDS_VENDOR_LIBRARY', defaultValue: '', description: 'Optional absolute path to the vendor .so. Leave empty to auto-detect ./tds/linux_x86_64/libtds_api.so')
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
     booleanParam(name: 'RUN_STUB_SMOKE', defaultValue: true, description: 'Run a deterministic stub dry-run after unit tests')
   }
 
   environment {
-    PROJECT_DIR = "${env.WORKSPACE}/tds_reporter"
-    BUILD_DIR = "${env.WORKSPACE}/tds_reporter/build_pr"
+    PROJECT_DIR = "${env.WORKSPACE}"
+    BUILD_DIR = "${env.WORKSPACE}/build_pr"
   }
 
   stages {
@@ -70,7 +70,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'tds_reporter/output/*, tds_reporter/build_pr/Testing/**', allowEmptyArchive: true
+      archiveArtifacts artifacts: 'output/*, build_pr/Testing/**', allowEmptyArchive: true
     }
   }
 }

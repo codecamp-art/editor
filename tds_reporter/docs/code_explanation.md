@@ -40,7 +40,7 @@
 当前 CMake 的判断规则是：
 
 - Linux/RHEL8：必须显式传 `-DTDS_VENDOR_LIBRARY=/path/to/tds_api.so`
-- Windows：如果 `../tds/win32/` 下有 `.lib`，或者显式传了 `-DTDS_VENDOR_LIBRARY=...`，就启用 live 编译
+- Windows：如果 `./tds/win32/` 下有 `.lib`，或者显式传了 `-DTDS_VENDOR_LIBRARY=...`，就启用 live 编译
 
 也就是说，当前已经不是“Windows 永远 stub-only”，而是：
 
@@ -214,7 +214,7 @@ Linux 下必须传：
 
 Windows 下有两种方式启用 live：
 
-1. 把供应商文件放到 `../tds/win32/`
+1. 把供应商文件放到 `tds/win32/`
 2. 显式传：
    - `-DTDS_VENDOR_LIBRARY=/path/to/tds_api.lib`
    - `-DTDS_VENDOR_RUNTIME=/path/to/tds_api.dll`

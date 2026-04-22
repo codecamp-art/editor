@@ -8,7 +8,13 @@ pipeline {
   }
 
   parameters {
-    string(name: 'TDS_VENDOR_LIBRARY', defaultValue: '/opt/tds/lib/tds_api.so', description: 'Absolute path to the vendor .so on the Jenkins node')
+    string(name: 'ARTIFACTORY_PACKAGE_URL', defaultValue: '', description: 'Optional HTTPS URL of the supplier install package. When set, the pipeline downloads it, extracts the SDK, and builds against a workspace-local tds directory.')
+    string(name: 'ARTIFACTORY_CERT_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Artifactory client certificate')
+    string(name: 'ARTIFACTORY_KEY_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Artifactory client private key')
+    string(name: 'ARTIFACTORY_CA_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Artifactory CA bundle')
+    string(name: 'ARTIFACTORY_CERT_PASSWORD_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret text credentials id for the Artifactory client certificate password')
+    string(name: 'ARTIFACTORY_CERT_TYPE', defaultValue: 'PEM', description: 'Client certificate type passed to curl, for example PEM or P12')
+    string(name: 'TDS_VENDOR_LIBRARY', defaultValue: '', description: 'Fallback absolute path to the vendor .so when ARTIFACTORY_PACKAGE_URL is empty. Leave empty to auto-detect ./tds/linux_x86_64/libtds_api.so')
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
     booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a live dry-run against DRTP after staging')
     string(name: 'SMOKE_ENV', defaultValue: 'qa', description: 'Environment name for the optional live smoke run')
@@ -16,21 +22,137 @@ pipeline {
   }
 
   environment {
-    PROJECT_DIR = "${env.WORKSPACE}/tds_reporter"
-    BUILD_DIR = "${env.WORKSPACE}/tds_reporter/build_release"
-    STAGE_DIR = "${env.WORKSPACE}/tds_reporter/build_release/stage"
+    PROJECT_DIR = "${env.WORKSPACE}"
+    BUILD_DIR = "${env.WORKSPACE}/build_release"
+    STAGE_DIR = "${env.WORKSPACE}/build_release/stage"
     PACKAGE_NAME = "tds_reporter-rhel8-${env.BUILD_NUMBER}.tar.gz"
+    VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
+    VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
+    VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
   }
 
   stages {
+    stage('Prepare Vendor SDK') {
+      steps {
+        script {
+          if (params.ARTIFACTORY_PACKAGE_URL?.trim()) {
+            if (!params.ARTIFACTORY_CERT_FILE_CREDENTIALS_ID?.trim()) {
+              error('ARTIFACTORY_CERT_FILE_CREDENTIALS_ID is required when ARTIFACTORY_PACKAGE_URL is set')
+            }
+
+            def credentialBindings = [
+              file(credentialsId: params.ARTIFACTORY_CERT_FILE_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_CERT_FILE')
+            ]
+
+            if (params.ARTIFACTORY_KEY_FILE_CREDENTIALS_ID?.trim()) {
+              credentialBindings << file(credentialsId: params.ARTIFACTORY_KEY_FILE_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_KEY_FILE')
+            }
+            if (params.ARTIFACTORY_CA_FILE_CREDENTIALS_ID?.trim()) {
+              credentialBindings << file(credentialsId: params.ARTIFACTORY_CA_FILE_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_CA_FILE')
+            }
+            if (params.ARTIFACTORY_CERT_PASSWORD_CREDENTIALS_ID?.trim()) {
+              credentialBindings << string(credentialsId: params.ARTIFACTORY_CERT_PASSWORD_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_CERT_PASSWORD')
+            }
+
+            withCredentials(credentialBindings) {
+              sh '''
+                set -euxo pipefail
+
+                rm -rf "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR"
+                mkdir -p "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR/include" "$VENDOR_TDS_DIR/linux_x86_64"
+
+                VENDOR_ARCHIVE="$VENDOR_DOWNLOAD_DIR/vendor_package"
+                curl_args=(--fail --silent --show-error --location --cert-type "$ARTIFACTORY_CERT_TYPE")
+
+                if [ -n "${ARTIFACTORY_CERT_PASSWORD:-}" ]; then
+                  curl_args+=(--cert "${ARTIFACTORY_CERT_FILE}:${ARTIFACTORY_CERT_PASSWORD}")
+                else
+                  curl_args+=(--cert "${ARTIFACTORY_CERT_FILE}")
+                fi
+
+                if [ -n "${ARTIFACTORY_KEY_FILE:-}" ]; then
+                  curl_args+=(--key "${ARTIFACTORY_KEY_FILE}")
+                fi
+
+                if [ -n "${ARTIFACTORY_CA_FILE:-}" ]; then
+                  curl_args+=(--cacert "${ARTIFACTORY_CA_FILE}")
+                fi
+
+                curl "${curl_args[@]}" -o "$VENDOR_ARCHIVE" "$ARTIFACTORY_PACKAGE_URL"
+
+                if unzip -tq "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
+                  unzip -q "$VENDOR_ARCHIVE" -d "$VENDOR_EXTRACT_DIR"
+                elif tar -tzf "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
+                  tar -C "$VENDOR_EXTRACT_DIR" -xzf "$VENDOR_ARCHIVE"
+                elif tar -tf "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
+                  tar -C "$VENDOR_EXTRACT_DIR" -xf "$VENDOR_ARCHIVE"
+                else
+                  echo "Unsupported vendor package format: $ARTIFACTORY_PACKAGE_URL" >&2
+                  exit 1
+                fi
+
+                HEADER_DIR="$(dirname "$(find "$VENDOR_EXTRACT_DIR" -type f -name 'tds_api.h' | head -n 1)")"
+                LIB_FILE="$(find "$VENDOR_EXTRACT_DIR" -type f \\( -name 'libtds_api.so' -o -name 'tds_api.so' \\) | head -n 1)"
+
+                if [ -z "$HEADER_DIR" ] || [ ! -d "$HEADER_DIR" ]; then
+                  echo "Failed to find tds_api.h in extracted vendor package" >&2
+                  exit 1
+                fi
+                if [ -z "$LIB_FILE" ] || [ ! -f "$LIB_FILE" ]; then
+                  echo "Failed to find libtds_api.so in extracted vendor package" >&2
+                  exit 1
+                fi
+
+                LIB_DIR="$(dirname "$LIB_FILE")"
+                find "$HEADER_DIR" -maxdepth 1 -type f -name '*.h' -exec cp -f {} "$VENDOR_TDS_DIR/include/" \\;
+                find "$LIB_DIR" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) -exec cp -f {} "$VENDOR_TDS_DIR/linux_x86_64/" \\;
+
+                CPACK_FILE="$(find "$VENDOR_EXTRACT_DIR" -type f -name 'cpack.dat' | head -n 1 || true)"
+                if [ -n "$CPACK_FILE" ] && [ ! -f "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat" ]; then
+                  cp -f "$CPACK_FILE" "$VENDOR_TDS_DIR/linux_x86_64/"
+                fi
+
+                if [ ! -f "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat" ]; then
+                  echo "cpack.dat was not found in the vendor package" >&2
+                  exit 1
+                fi
+
+                find "$VENDOR_TDS_DIR" -maxdepth 2 -type f | sort
+              '''
+            }
+          } else {
+            sh '''
+              set -euxo pipefail
+              LOCAL_VENDOR_LIBRARY="$(find "$VENDOR_TDS_DIR/linux_x86_64" -maxdepth 1 -type f \\( -name 'libtds_api.so' -o -name 'tds_api.so' \\) | head -n 1 || true)"
+              if [ -z "$LOCAL_VENDOR_LIBRARY" ] && { [ -z "$TDS_VENDOR_LIBRARY" ] || [ ! -f "$TDS_VENDOR_LIBRARY" ]; }; then
+                echo "Neither a local ./tds/linux_x86_64 vendor library nor TDS_VENDOR_LIBRARY is available" >&2
+                exit 1
+              fi
+            '''
+          }
+        }
+      }
+    }
+
     stage('Configure') {
       steps {
         sh '''
           set -euxo pipefail
           cd "$PROJECT_DIR"
+          EFFECTIVE_VENDOR_LIBRARY="$TDS_VENDOR_LIBRARY"
+
+          if [ -d "$VENDOR_TDS_DIR/linux_x86_64" ]; then
+            EFFECTIVE_VENDOR_LIBRARY="$(find "$VENDOR_TDS_DIR/linux_x86_64" -maxdepth 1 -type f \\( -name 'libtds_api.so' -o -name 'tds_api.so' \\) | head -n 1)"
+          fi
+
+          if [ -z "$EFFECTIVE_VENDOR_LIBRARY" ] || [ ! -f "$EFFECTIVE_VENDOR_LIBRARY" ]; then
+            echo "effective vendor library does not exist: $EFFECTIVE_VENDOR_LIBRARY" >&2
+            exit 1
+          fi
+
           cmake -S . -B "$BUILD_DIR" \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DTDS_VENDOR_LIBRARY="$TDS_VENDOR_LIBRARY" \
+            -DTDS_VENDOR_LIBRARY="$EFFECTIVE_VENDOR_LIBRARY" \
             -DTDS_REPORTER_STAGE_DIR="$STAGE_DIR"
         '''
       }
@@ -59,6 +181,9 @@ pipeline {
         sh '''
           set -euxo pipefail
           cmake --build "$BUILD_DIR" --target tds_reporter_stage
+          test -f "$STAGE_DIR/bin/tds_reporter"
+          find "$STAGE_DIR/lib" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) | sort
+          test -f "$STAGE_DIR/lib/cpack.dat"
           tar -C "$STAGE_DIR" -czf "$BUILD_DIR/$PACKAGE_NAME" .
         '''
       }
@@ -83,7 +208,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'tds_reporter/build_release/stage/**, tds_reporter/build_release/*.tar.gz, tds_reporter/output/*', allowEmptyArchive: false
+      archiveArtifacts artifacts: 'build_release/stage/**, build_release/*.tar.gz, output/*', allowEmptyArchive: false
     }
   }
 }

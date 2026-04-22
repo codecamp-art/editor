@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(TDS_VENDOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/tds")
+set(TDS_VENDOR_INCLUDE_DIR "${TDS_VENDOR_ROOT}/include" CACHE PATH "Path to vendor header directory")
 set(TDS_VENDOR_LIBRARY "" CACHE FILEPATH "Path to vendor link library: .so on Linux, .lib on Windows")
 set(TDS_VENDOR_RUNTIME "" CACHE FILEPATH "Path to vendor runtime library: .so on Linux, .dll on Windows")
 set(TDS_REPORTER_STAGE_DIR "${CMAKE_BINARY_DIR}/stage" CACHE PATH "Directory used by the tds_reporter_stage target")
@@ -23,7 +25,7 @@ target_include_directories(
     tds_reporter_lib
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/../tds/include
+        ${TDS_VENDOR_INCLUDE_DIR}
 )
 
 set(TDS_REPORTER_FILESYSTEM_TEST_SOURCE
@@ -63,6 +65,7 @@ endif()
 set(TDS_VENDOR_LIBRARY_DIR "")
 set(TDS_VENDOR_LIBRARY_ABS "")
 set(TDS_VENDOR_RUNTIME_ABS "")
+set(TDS_VENDOR_INSTALL_FILES "")
 set(TDS_REPORTER_HAS_VENDOR_API OFF)
 
 if(WIN32)
@@ -73,13 +76,11 @@ if(WIN32)
 
     if(NOT TDS_VENDOR_LIBRARY)
         if(TDS_WINDOWS_TARGET_BITS EQUAL 32)
-            file(GLOB TDS_WIN32_LIB_CANDIDATES "${CMAKE_CURRENT_SOURCE_DIR}/../tds/win32/*.lib")
-            list(LENGTH TDS_WIN32_LIB_CANDIDATES TDS_WIN32_LIB_COUNT)
-            if(TDS_WIN32_LIB_COUNT EQUAL 1)
-                set(TDS_VENDOR_LIBRARY "${TDS_WIN32_LIB_CANDIDATES}" CACHE FILEPATH "Auto-detected vendor import library" FORCE)
+            if(EXISTS "${TDS_VENDOR_ROOT}/win32/tds_api.lib")
+                set(TDS_VENDOR_LIBRARY "${TDS_VENDOR_ROOT}/win32/tds_api.lib" CACHE FILEPATH "Auto-detected vendor import library" FORCE)
             endif()
         else()
-            message(STATUS "Skipping auto-detect from ../tds/win32 for x64 build to avoid x86/x64 linker mismatch. Set TDS_VENDOR_LIBRARY and TDS_VENDOR_RUNTIME explicitly for x64 live mode, or use the windows-live-x86 preset with the supplier win32 package.")
+            message(STATUS "Skipping auto-detect from ./tds/win32 for x64 build to avoid x86/x64 linker mismatch. Set TDS_VENDOR_LIBRARY and TDS_VENDOR_RUNTIME explicitly for x64 live mode, or use the windows-live-x86 preset with the supplier win32 package.")
         endif()
     endif()
 
@@ -98,10 +99,8 @@ if(WIN32)
                 endif()
             endif()
         elseif(TDS_WINDOWS_TARGET_BITS EQUAL 32)
-            file(GLOB TDS_WIN32_DLL_CANDIDATES "${CMAKE_CURRENT_SOURCE_DIR}/../tds/win32/*.dll")
-            list(LENGTH TDS_WIN32_DLL_CANDIDATES TDS_WIN32_DLL_COUNT)
-            if(TDS_WIN32_DLL_COUNT EQUAL 1)
-                set(TDS_VENDOR_RUNTIME "${TDS_WIN32_DLL_CANDIDATES}" CACHE FILEPATH "Auto-detected vendor runtime library" FORCE)
+            if(EXISTS "${TDS_VENDOR_ROOT}/win32/tds_api.dll")
+                set(TDS_VENDOR_RUNTIME "${TDS_VENDOR_ROOT}/win32/tds_api.dll" CACHE FILEPATH "Auto-detected vendor runtime library" FORCE)
             endif()
         endif()
     endif()
@@ -109,7 +108,13 @@ endif()
 
 if(UNIX)
     if(NOT TDS_VENDOR_LIBRARY)
-        message(FATAL_ERROR "Linux build requires -DTDS_VENDOR_LIBRARY=/path/to/tds_api.so")
+        if(EXISTS "${TDS_VENDOR_ROOT}/linux_x86_64/libtds_api.so")
+            set(TDS_VENDOR_LIBRARY "${TDS_VENDOR_ROOT}/linux_x86_64/libtds_api.so" CACHE FILEPATH "Auto-detected vendor shared library" FORCE)
+        elseif(EXISTS "${TDS_VENDOR_ROOT}/linux_x86_64/tds_api.so")
+            set(TDS_VENDOR_LIBRARY "${TDS_VENDOR_ROOT}/linux_x86_64/tds_api.so" CACHE FILEPATH "Auto-detected vendor shared library" FORCE)
+        else()
+            message(FATAL_ERROR "Linux build requires -DTDS_VENDOR_LIBRARY=/path/to/tds_api.so or a local ./tds/linux_x86_64/libtds_api.so")
+        endif()
     endif()
     if(NOT EXISTS "${TDS_VENDOR_LIBRARY}")
         message(FATAL_ERROR "TDS_VENDOR_LIBRARY does not exist: ${TDS_VENDOR_LIBRARY}")
@@ -142,10 +147,14 @@ elseif(WIN32)
         endif()
         message(STATUS "Windows build will enable live TDS calls using ${TDS_VENDOR_LIBRARY_ABS}")
     else()
-        message(STATUS "Windows build is stub-only. Copy supplier win32/*.lib and *.dll into ../tds/win32 or pass TDS_VENDOR_LIBRARY/TDS_VENDOR_RUNTIME to enable local live debugging.")
+        message(STATUS "Windows build is stub-only. Copy supplier win32/*.lib and *.dll into ./tds/win32 or pass TDS_VENDOR_LIBRARY/TDS_VENDOR_RUNTIME to enable local live debugging.")
     endif()
 else()
     message(FATAL_ERROR "Unsupported platform. This project only supports Windows local development and Linux/RHEL8 builds.")
+endif()
+
+if(TDS_REPORTER_HAS_VENDOR_API AND NOT EXISTS "${TDS_VENDOR_INCLUDE_DIR}/tds_api.h")
+    message(FATAL_ERROR "TDS_VENDOR_INCLUDE_DIR must contain tds_api.h: ${TDS_VENDOR_INCLUDE_DIR}")
 endif()
 
 if(TDS_REPORTER_HAS_VENDOR_API)
@@ -169,22 +178,41 @@ if(TDS_VENDOR_LIBRARY_DIR)
     )
 endif()
 
-if(WIN32 AND TDS_VENDOR_RUNTIME_ABS)
-    add_custom_command(
-        TARGET tds_reporter
-        POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${TDS_VENDOR_RUNTIME_ABS}"
-            "$<TARGET_FILE_DIR:tds_reporter>"
+if(UNIX AND TDS_VENDOR_LIBRARY_DIR)
+    file(
+        GLOB TDS_VENDOR_INSTALL_FILES
+        "${TDS_VENDOR_LIBRARY_DIR}/*.so"
+        "${TDS_VENDOR_LIBRARY_DIR}/*.so.*"
+        "${TDS_VENDOR_LIBRARY_DIR}/*.dat"
     )
+    list(REMOVE_DUPLICATES TDS_VENDOR_INSTALL_FILES)
+elseif(WIN32 AND TDS_VENDOR_LIBRARY_DIR)
+    file(
+        GLOB TDS_VENDOR_INSTALL_FILES
+        "${TDS_VENDOR_LIBRARY_DIR}/*.dll"
+        "${TDS_VENDOR_LIBRARY_DIR}/*.dat"
+    )
+    list(REMOVE_DUPLICATES TDS_VENDOR_INSTALL_FILES)
+endif()
 
-    add_custom_command(
-        TARGET tds_reporter_tests
-        POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${TDS_VENDOR_RUNTIME_ABS}"
-            "$<TARGET_FILE_DIR:tds_reporter_tests>"
-    )
+if(WIN32 AND TDS_VENDOR_INSTALL_FILES)
+    foreach(TDS_VENDOR_FILE IN LISTS TDS_VENDOR_INSTALL_FILES)
+        add_custom_command(
+            TARGET tds_reporter
+            POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${TDS_VENDOR_FILE}"
+                "$<TARGET_FILE_DIR:tds_reporter>"
+        )
+
+        add_custom_command(
+            TARGET tds_reporter_tests
+            POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${TDS_VENDOR_FILE}"
+                "$<TARGET_FILE_DIR:tds_reporter_tests>"
+        )
+    endforeach()
 endif()
 
 install(
@@ -192,16 +220,16 @@ install(
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
-if(UNIX)
+if(UNIX AND TDS_VENDOR_INSTALL_FILES)
     install(
-        FILES "${TDS_VENDOR_RUNTIME_ABS}"
+        FILES ${TDS_VENDOR_INSTALL_FILES}
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )
 endif()
 
-if(WIN32 AND TDS_VENDOR_RUNTIME_ABS)
+if(WIN32 AND TDS_VENDOR_INSTALL_FILES)
     install(
-        FILES "${TDS_VENDOR_RUNTIME_ABS}"
+        FILES ${TDS_VENDOR_INSTALL_FILES}
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
     )
 endif()

@@ -774,7 +774,7 @@ CliOptions ParseCli(int argc, char** argv)
 
 std::string DefaultConfigPath(const std::string& env_name)
 {
-    return "tds_reporter/config/" + env_name + ".properties";
+    return "config/" + env_name + ".properties";
 }
 
 AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
