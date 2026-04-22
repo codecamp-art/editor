@@ -53,7 +53,7 @@ struct SmtpConfig
 struct AppConfig
 {
     std::string env_name = "dev";
-    std::string email_subject = "TDS Customer Fund Snapshot";
+    std::string email_subject = "TDS Client Funding and Risk Ratio Report";
     std::string attachment_name = "tds_customer_funds";
     std::string output_dir = "./output";
     std::vector<std::string> default_to;

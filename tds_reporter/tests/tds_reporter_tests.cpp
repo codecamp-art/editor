@@ -38,7 +38,7 @@ tds_reporter::AppConfig BuildTestConfig(const std::filesystem::path& output_dir)
 {
     tds_reporter::AppConfig config;
     config.env_name = "test";
-    config.email_subject = "Daily Snapshot";
+    config.email_subject = "Test Client Funding and Risk Ratio Report";
     config.attachment_name = "fund_snapshot";
     config.output_dir = output_dir.string();
     config.default_to = {"ops@example.com"};
@@ -163,11 +163,21 @@ void TestMimeAndDryRun()
         tds_reporter::BuildMailRequest(records, config, cli, 20260418, csv_path);
     const std::string mime = tds_reporter::BuildMimeMessage(request);
 
-    AssertContains(mime, "Subject: [test] Daily Snapshot - 20260418", "mime subject");
+    AssertContains(
+        mime,
+        "Subject: Test Client Funding and Risk Ratio Report - Market Close 20260418",
+        "mime subject");
     AssertContains(mime, "Content-Disposition: attachment;", "mime attachment");
     AssertContains(mime, "Alpha Capital", "mime html body");
     AssertContains(mime, "Beta Futures", "mime html body should contain every customer");
-    AssertContains(mime, "All customer rows are listed below", "mime body summary");
+    AssertContains(
+        mime,
+        u8"\u5BA2\u6237\u8D44\u91D1\u53CA\u98CE\u9669\u5EA6 Funding &amp; Risk ratio",
+        "mime body section title");
+    AssertContains(mime, u8"Total \u5408\u8BA1:", "mime body total row");
+    AssertContains(mime, "1,000.50", "mime amount formatting");
+    AssertContains(mime, "12.00%", "mime risk formatting");
+    AssertContains(mime, "No Action Required", "mime threshold note");
 
     const tds_reporter::SendMailResult result = tds_reporter::SendMailWithCurl(request, config, true);
     AssertTrue(!result.sent, "dry run should not mark mail as sent");

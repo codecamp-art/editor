@@ -404,69 +404,239 @@ std::vector<std::string> EffectiveRecipients(
     return cli_recipients.empty() ? config_recipients : cli_recipients;
 }
 
-std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const AppConfig& config, int trade_date)
+struct MailReportRow
+{
+    std::string cust_no;
+    std::string cust_name;
+    double total_equity = 0.0;
+    double mtm_pnl = 0.0;
+    double available_funds = 0.0;
+    double risk_ratio1 = 0.0;
+    double risk_ratio2 = 0.0;
+};
+
+std::string InsertThousandsSeparators(std::string text)
+{
+    const std::size_t decimal_pos = text.find('.');
+    const std::size_t insert_end = decimal_pos == std::string::npos ? text.size() : decimal_pos;
+    const std::size_t begin = !text.empty() && text.front() == '-' ? 1U : 0U;
+
+    for (std::size_t pos = insert_end; pos > begin + 3; pos -= 3)
+    {
+        text.insert(pos - 3, ",");
+    }
+
+    return text;
+}
+
+std::string FormatAmount(double value)
+{
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(2) << value;
+    return InsertThousandsSeparators(output.str());
+}
+
+std::string FormatPercentage(double value)
+{
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(2) << (value * 100.0);
+    return InsertThousandsSeparators(output.str()) + "%";
+}
+
+std::string BuildReportTitle(const AppConfig& config, int trade_date)
+{
+    return config.email_subject + " - Market Close " + std::to_string(trade_date);
+}
+
+std::vector<MailReportRow> BuildMailReportRows(const std::vector<CustomerFundRecord>& records)
 {
     const std::vector<CustomerFundRecord> sorted = SortRecords(records);
-    std::set<std::string> customer_numbers;
-    double total_dyn_rights = 0.0;
-    double total_hold_profit = 0.0;
-    double total_avail_fund = 0.0;
+    std::vector<MailReportRow> rows;
 
     for (const CustomerFundRecord& record : sorted)
     {
-        customer_numbers.insert(record.cust_no);
-        total_dyn_rights += record.dyn_rights;
-        total_hold_profit += record.hold_profit;
-        total_avail_fund += record.avail_fund;
+        auto existing = std::find_if(
+            rows.begin(),
+            rows.end(),
+            [&](const MailReportRow& row) { return row.cust_no == record.cust_no; });
+
+        if (existing == rows.end())
+        {
+            MailReportRow row;
+            row.cust_no = record.cust_no;
+            row.cust_name = record.cust_name;
+            row.total_equity = record.dyn_rights;
+            row.mtm_pnl = record.hold_profit;
+            row.available_funds = record.avail_fund;
+            row.risk_ratio1 = record.risk_degree1;
+            row.risk_ratio2 = record.risk_degree2;
+            rows.push_back(row);
+            continue;
+        }
+
+        existing->total_equity += record.dyn_rights;
+        existing->mtm_pnl += record.hold_profit;
+        existing->available_funds += record.avail_fund;
+        existing->risk_ratio1 = std::max(existing->risk_ratio1, record.risk_degree1);
+        existing->risk_ratio2 = std::max(existing->risk_ratio2, record.risk_degree2);
+        if (existing->cust_name.empty() && !record.cust_name.empty())
+        {
+            existing->cust_name = record.cust_name;
+        }
     }
 
-    std::ostringstream output;
-    output << "<html><body style=\"font-family:Segoe UI,Arial,sans-serif;\">";
-    output << "<h2>TDS customer fund snapshot</h2>";
-    output << "<p>Environment: <b>" << EscapeHtml(config.env_name) << "</b><br/>";
-    output << "Trade date: <b>" << trade_date << "</b><br/>";
-    output << "Generated at: <b>" << EscapeHtml(CurrentTimestamp()) << "</b></p>";
-    output << "<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">";
-    output << "<tr><th>Metric</th><th>Value</th></tr>";
-    output << "<tr><td>Snapshot rows</td><td>" << sorted.size() << "</td></tr>";
-    output << "<tr><td>Unique customers</td><td>" << customer_numbers.size() << "</td></tr>";
-    output << "<tr><td>Total dynamic rights</td><td>" << FormatDouble(total_dyn_rights) << "</td></tr>";
-    output << "<tr><td>Total floating PnL</td><td>" << FormatDouble(total_hold_profit) << "</td></tr>";
-    output << "<tr><td>Total available fund</td><td>" << FormatDouble(total_avail_fund) << "</td></tr>";
-    output << "</table>";
+    return rows;
+}
 
-    if (sorted.empty())
+std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const AppConfig& config, int trade_date)
+{
+    const std::vector<MailReportRow> rows = BuildMailReportRows(records);
+    double total_dyn_rights = 0.0;
+    double total_hold_profit = 0.0;
+    double total_avail_fund = 0.0;
+    int issue_count = 0;
+
+    for (const MailReportRow& row : rows)
     {
-        output << "<p>No customer fund rows were returned by the TDS snapshot.</p>";
+        total_dyn_rights += row.total_equity;
+        total_hold_profit += row.mtm_pnl;
+        total_avail_fund += row.available_funds;
+        if (row.risk_ratio1 > 0.70 || row.risk_ratio2 > 1.00)
+        {
+            ++issue_count;
+        }
+    }
+
+    const std::string report_title = BuildReportTitle(config, trade_date);
+
+    std::ostringstream output;
+    output << "<html><body style=\"margin:0;padding:24px 36px;font-family:Calibri,Arial,sans-serif;"
+              "font-size:16px;line-height:1.4;color:#111;\">";
+    output << "<div style=\"max-width:1280px;\">";
+    output << "<p style=\"margin:0 0 28px 0;font-size:18px;font-weight:700;\">"
+           << EscapeHtml(report_title) << "</p>";
+
+    if (issue_count == 0)
+    {
+        output << "<p style=\"margin:0 0 28px 0;font-size:18px;\">"
+               << "As of 15:00 of T Day, no client funding and risk ratio issues identified from Risk Management."
+               << "</p>";
     }
     else
     {
-        output << "<p>Attachment contains the full CSV details. All customer rows are listed below:</p>";
-        output << "<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">";
-        output << "<tr><th>Cust No</th><th>Name</th><th>Fund Account</th><th>Currency</th>"
-               << "<th>Dyn Rights</th><th>Hold Profit</th><th>Avail Fund</th>"
-               << "<th>Risk 1</th><th>Risk 2</th></tr>";
-
-        for (std::size_t index = 0; index < sorted.size(); ++index)
-        {
-            const CustomerFundRecord& record = sorted[index];
-            output << "<tr>"
-                   << "<td>" << EscapeHtml(record.cust_no) << "</td>"
-                   << "<td>" << EscapeHtml(record.cust_name) << "</td>"
-                   << "<td>" << EscapeHtml(record.fund_account_no) << "</td>"
-                   << "<td>" << EscapeHtml(record.currency_code) << "</td>"
-                   << "<td>" << FormatDouble(record.dyn_rights) << "</td>"
-                   << "<td>" << FormatDouble(record.hold_profit) << "</td>"
-                   << "<td>" << FormatDouble(record.avail_fund) << "</td>"
-                   << "<td>" << FormatDouble(record.risk_degree1) << "</td>"
-                   << "<td>" << FormatDouble(record.risk_degree2) << "</td>"
-                   << "</tr>";
-        }
-
-        output << "</table>";
+        output << "<p style=\"margin:0 0 28px 0;font-size:18px;\">"
+               << "As of 15:00 of T Day, "
+               << issue_count
+               << " client funding and risk ratio issue(s) identified from Risk Management."
+               << "</p>";
     }
 
-    output << "<p>This email was generated automatically by tds_reporter.</p>";
+    output << "<p style=\"margin:0 0 10px 0;font-size:18px;font-weight:700;\">"
+           << u8"\u5BA2\u6237\u8D44\u91D1\u53CA\u98CE\u9669\u5EA6 Funding &amp; Risk ratio"
+           << "</p>";
+    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;"
+              "border:1px solid #29445d;table-layout:fixed;\">";
+    output << "<tr style=\"background:#0f4f8a;color:#fff;font-weight:700;text-align:center;\">"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:12%;\">"
+           << u8"\u5BA2\u6237\u53F7"
+           << "</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:16%;\">"
+           << u8"\u5BA2\u6237\u540D\u79F0"
+           << "</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:14%;\">"
+           << u8"\u5BA2\u6237\u6743\u76CA"
+           << "</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:14%;\">"
+           << u8"\u6D6E\u52A8\u76C8\u4E8F"
+           << "</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:18%;\">"
+           << u8"\u53EF\u7528\u8D44\u91D1"
+           << "</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:13%;\">"
+           << u8"*\u98CE\u9669\u5EA6 1"
+           << "</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;width:13%;\">"
+           << u8"*\u98CE\u9669\u5EA6 2"
+           << "</th>"
+           << "</tr>";
+    output << "<tr style=\"background:#0f4f8a;color:#fff;font-weight:700;text-align:center;\">"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Account</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Client</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Total Equity</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">MTM PnL</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">Available Funds</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">*Risk Ratio 1</th>"
+           << "<th style=\"border:1px solid #29445d;padding:10px 8px;\">*Risk Ratio 2</th>"
+           << "</tr>";
+    output << "<tr style=\"background:#ffffff;\">"
+           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;font-weight:700;\">"
+           << u8"Total \u5408\u8BA1:"
+           << "</td>"
+           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;\">&nbsp;</td>"
+           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+           << FormatAmount(total_dyn_rights) << "</td>"
+           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+           << FormatAmount(total_hold_profit) << "</td>"
+           << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+           << FormatAmount(total_avail_fund) << "</td>"
+           << "<td style=\"border:1px solid #29445d;padding:8px 10px;background:#dfe9d9;\">&nbsp;</td>"
+           << "<td style=\"border:1px solid #29445d;padding:8px 10px;background:#dfe9d9;\">&nbsp;</td>"
+           << "</tr>";
+
+    for (const MailReportRow& row : rows)
+    {
+        output << "<tr style=\"background:#ffffff;\">"
+               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;\">"
+               << EscapeHtml(row.cust_no) << "</td>"
+               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;\">"
+               << EscapeHtml(row.cust_name) << "</td>"
+               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+               << FormatAmount(row.total_equity) << "</td>"
+               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+               << FormatAmount(row.mtm_pnl) << "</td>"
+               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;\">"
+               << FormatAmount(row.available_funds) << "</td>"
+               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;background:#dfe9d9;\">"
+               << FormatPercentage(row.risk_ratio1) << "</td>"
+               << "<td style=\"border:1px solid #29445d;padding:8px 10px;font-size:15px;text-align:right;background:#dfe9d9;\">"
+               << FormatPercentage(row.risk_ratio2) << "</td>"
+               << "</tr>";
+    }
+
+    output << "</table>";
+    output << "<div style=\"margin-top:42px;max-width:460px;\">";
+    output << "<p style=\"margin:0 0 8px 0;font-size:16px;font-weight:700;\">"
+           << "*Note: Risk ratio escalation threshold"
+           << "</p>";
+    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;min-width:460px;\">";
+    output << "<tr>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#dcead2;font-weight:700;\">No Action Required</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#dcead2;font-weight:700;\">&lt;70%</td>"
+           << "</tr>";
+    output << "<tr>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#f1d54d;font-weight:700;\">Alert</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#f1d54d;font-weight:700;\">&gt;70%</td>"
+           << "</tr>";
+    output << "<tr>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#d8a06c;font-weight:700;\">Official Margin Call</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#d8a06c;font-weight:700;\">&gt;80%</td>"
+           << "</tr>";
+    output << "<tr>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#c41212;color:#111;font-weight:700;\">Final Official Margin</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 1</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#c41212;color:#111;font-weight:700;\">&gt;100%</td>"
+           << "</tr>";
+    output << "<tr>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#3b0202;color:#fff;font-weight:700;\">Forced Liquidation</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#ffffff;\">Risk ratio 2</td>"
+           << "<td style=\"padding:6px 12px;border:1px solid #666;background:#3b0202;color:#fff;font-weight:700;\">&gt;100%</td>"
+           << "</tr>";
+    output << "</table>";
+    output << "</div>";
+    output << "</div>";
     output << "</body></html>";
     return output.str();
 }
@@ -721,8 +891,7 @@ MailRequest BuildMailRequest(
         throw std::runtime_error("no email recipients configured; use config email.default_to or --to");
     }
 
-    request.subject =
-        "[" + ToLower(config.env_name) + "] " + config.email_subject + " - " + std::to_string(trade_date);
+    request.subject = BuildReportTitle(config, trade_date);
     request.html_body = BuildHtmlBody(records, config, trade_date);
     request.attachment_path = attachment_path;
     request.attachment_name = std::filesystem::path(attachment_path).filename().string();
