@@ -62,12 +62,6 @@ struct VaultConfig
     std::string address;
     std::string namespace_name;
     std::string auth_path;
-    std::string kerberos_username;
-    std::string kerberos_service;
-    std::string kerberos_realm;
-    std::string kerberos_keytab_path;
-    std::string kerberos_krb5conf_path;
-    bool kerberos_disable_fast_negotiation = false;
 };
 
 struct AppConfig

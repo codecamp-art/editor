@@ -92,8 +92,18 @@ std::filesystem::path CreateFakeVaultExecutable(const std::filesystem::path& tem
         script_path,
         "@echo off\r\n"
         "set args=%*\r\n"
-        "echo %args% | findstr /C:\"login\" /C:\"-method=kerberos\" >nul\r\n"
+        "echo %args% | findstr /C:\"login\" >nul\r\n"
         "if %errorlevel%==0 (\r\n"
+        "  echo %args% | findstr /C:\"-method=kerberos\" >nul\r\n"
+        "  if not %errorlevel%==0 (\r\n"
+        "    echo missing kerberos method: %args% 1>&2\r\n"
+        "    exit /b 1\r\n"
+        "  )\r\n"
+        "  echo %args% | findstr /C:\"username=\" /C:\"service=\" /C:\"realm=\" /C:\"keytab_path=\" /C:\"krb5conf_path=\" /C:\"disable_fast_negotiation=\" >nul\r\n"
+        "  if %errorlevel%==0 (\r\n"
+        "    echo unexpected legacy kerberos args: %args% 1>&2\r\n"
+        "    exit /b 1\r\n"
+        "  )\r\n"
         "  echo fake-vault-token\r\n"
         "  exit /b 0\r\n"
         ")\r\n"
@@ -111,7 +121,12 @@ std::filesystem::path CreateFakeVaultExecutable(const std::filesystem::path& tem
         script_path,
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "if printf '%s\\n' \"$*\" | grep -q 'login' && printf '%s\\n' \"$*\" | grep -q -- '-method=kerberos'; then\n"
+        "if printf '%s\\n' \"$*\" | grep -q 'login'; then\n"
+        "  printf '%s\\n' \"$*\" | grep -q -- '-method=kerberos'\n"
+        "  if printf '%s\\n' \"$*\" | grep -Eq 'username=|service=|realm=|keytab_path=|krb5conf_path=|disable_fast_negotiation='; then\n"
+        "    printf 'unexpected legacy kerberos args: %s\\n' \"$*\" >&2\n"
+        "    exit 1\n"
+        "  fi\n"
         "  printf 'fake-vault-token\\n'\n"
         "  exit 0\n"
         "fi\n"
@@ -223,6 +238,51 @@ void TestLoadConfigUsesFileEnvWhenCliEnvMissing()
     AssertTrue(config.env_name == "prod", "config env should be used when --env is omitted");
 }
 
+void TestLoadConfigMergesSharedTemplateAndEnvOverlay()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_overlay_test";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path template_path = temp_dir / "report.properties.template";
+    const std::filesystem::path config_path = temp_dir / "qa.properties";
+
+    WriteFile(
+        template_path,
+        "tds.drtp_port=6003\n"
+        "tds.user=10000\n"
+        "tds.password=shared-secret\n"
+        "smtp.host=mail.shared\n"
+        "smtp.port=2587\n"
+        "smtp.from=sender@example.com\n"
+        "email.default_cc=shared-cc@example.com\n"
+        "report.output_dir=../shared-output\n"
+        "log.dir=../shared-logs\n");
+    WriteFile(
+        config_path,
+        "env.name=qa\n"
+        "tds.drtp_host=10.10.20.30\n"
+        "email.default_to=qa-ops@example.com\n");
+
+    report::CliOptions cli;
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
+
+    AssertTrue(config.env_name == "qa", "overlay env should be applied");
+    AssertTrue(config.tds.drtp_host == "10.10.20.30", "overlay tds host should be applied");
+    AssertTrue(config.tds.drtp_port == 6003, "shared template tds port should be applied");
+    AssertTrue(config.tds.user == "10000", "shared template tds user should be applied");
+    AssertTrue(config.tds.password == "shared-secret", "shared template password should be applied");
+    AssertTrue(config.smtp.host == "mail.shared", "shared template smtp host should be applied");
+    AssertTrue(config.smtp.port == 2587, "shared template smtp port should be applied");
+    AssertTrue(config.default_to == std::vector<std::string>{"qa-ops@example.com"}, "overlay recipients should be applied");
+    AssertTrue(config.default_cc == std::vector<std::string>{"shared-cc@example.com"}, "shared cc should be applied");
+    AssertTrue(
+        std::filesystem::path(config.output_dir).filename() == "shared-output",
+        "shared output dir should be resolved relative to the overlay config");
+    AssertTrue(
+        std::filesystem::path(config.log.directory).filename() == "shared-logs",
+        "shared log dir should be resolved relative to the overlay config");
+}
+
 void TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_config_env_test";
@@ -285,8 +345,6 @@ void TestLoadConfigWithVaultBackedTdsPassword()
         << "tds.password=vault://secret/tds/qa#password\n"
         << "vault.executable=" << vault_executable.string() << "\n"
         << "vault.address=https://vault.example.com\n"
-        << "vault.kerberos_username=svc_report\n"
-        << "vault.kerberos_service=HTTP/vault.example.com\n"
         << "smtp.host=mail.local\n"
         << "smtp.port=2587\n"
         << "smtp.from=sender@example.com\n";
@@ -464,6 +522,7 @@ int main()
         TestParseCli();
         TestLoadConfig();
         TestLoadConfigUsesFileEnvWhenCliEnvMissing();
+        TestLoadConfigMergesSharedTemplateAndEnvOverlay();
         TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig();
         TestDefaultConfigPathUsesSingleConfigWhenEnvMissing();
         TestDefaultConfigPathDoesNotFallBackToDevWhenEnvMissing();

@@ -26,12 +26,6 @@ pipeline {
     string(name: 'VAULT_ADDR', defaultValue: '', description: 'Vault address, for example https://vault.example.com:8200')
     string(name: 'VAULT_NAMESPACE', defaultValue: '', description: 'Optional Vault namespace')
     string(name: 'VAULT_AUTH_PATH', defaultValue: '', description: 'Optional non-default Vault auth mount path')
-    string(name: 'VAULT_KERBEROS_USERNAME', defaultValue: '', description: 'Vault kerberos username')
-    string(name: 'VAULT_KERBEROS_SERVICE', defaultValue: '', description: 'Vault kerberos service principal, for example HTTP/vault.example.com')
-    string(name: 'VAULT_KERBEROS_REALM', defaultValue: '', description: 'Vault kerberos realm')
-    string(name: 'VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for a Vault kerberos keytab override')
-    string(name: 'VAULT_KRB5CONF_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for a krb5.conf override')
-    booleanParam(name: 'VAULT_DISABLE_FAST_NEGOTIATION', defaultValue: false, description: 'Pass disable_fast_negotiation=true to vault kerberos login')
     string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the supplier zip password')
     string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the supplier zip password')
   }
@@ -59,76 +53,43 @@ pipeline {
           if (!params.VAULT_ADDR?.trim()) {
             error('VAULT_ADDR is required when Jenkins needs Vault access')
           }
-          if (!params.VAULT_KERBEROS_USERNAME?.trim()) {
-            error('VAULT_KERBEROS_USERNAME is required when Jenkins needs Vault access')
-          }
-
-          def credentialBindings = []
-          if (params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID?.trim()) {
-            credentialBindings << file(credentialsId: params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID.trim(), variable: 'VAULT_KEYTAB_FILE')
-          }
-          if (params.VAULT_KRB5CONF_CREDENTIALS_ID?.trim()) {
-            credentialBindings << file(credentialsId: params.VAULT_KRB5CONF_CREDENTIALS_ID.trim(), variable: 'VAULT_KRB5CONF_FILE')
-          }
 
           def vaultEnv = [
             "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
             "VAULT_ADDR=${params.VAULT_ADDR.trim()}",
             "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
-            "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}",
-            "VAULT_KERBEROS_USERNAME=${params.VAULT_KERBEROS_USERNAME.trim()}",
-            "VAULT_KERBEROS_SERVICE=${params.VAULT_KERBEROS_SERVICE?.trim() ?: ''}",
-            "VAULT_KERBEROS_REALM=${params.VAULT_KERBEROS_REALM?.trim() ?: ''}",
-            "VAULT_DISABLE_FAST_NEGOTIATION=${params.VAULT_DISABLE_FAST_NEGOTIATION ? 'true' : 'false'}"
+            "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}"
           ]
 
-          withCredentials(credentialBindings) {
-            withEnv(vaultEnv) {
-              env.VAULT_RUNTIME_TOKEN = sh(
-                returnStdout: true,
-                script: '''#!/usr/bin/env bash
-                  set -euo pipefail
+          withEnv(vaultEnv) {
+            env.VAULT_RUNTIME_TOKEN = sh(
+              returnStdout: true,
+              script: '''#!/usr/bin/env bash
+                set -euo pipefail
 
-                  load_profile() {
-                    set +u
-                    for profile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile" "$HOME/.bashrc"; do
-                      if [ -f "$profile" ]; then
-                        . "$profile"
-                      fi
-                    done
-                    set -u
-                  }
+                load_profile() {
+                  set +u
+                  for profile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile" "$HOME/.bashrc"; do
+                    if [ -f "$profile" ]; then
+                      . "$profile"
+                    fi
+                  done
+                  set -u
+                }
 
-                  load_profile
-                  test -n "${KRB5CCNAME:-}"
-                  klist >/dev/null
+                load_profile
+                test -n "${KRB5CCNAME:-}"
+                klist >/dev/null
 
-                  login_cmd=("$VAULT_BIN" login -token-only -no-store)
-                  if [ -n "${VAULT_AUTH_PATH:-}" ]; then
-                    login_cmd+=("-path=$VAULT_AUTH_PATH")
-                  fi
+                login_cmd=("$VAULT_BIN" login -token-only -no-store)
+                if [ -n "${VAULT_AUTH_PATH:-}" ]; then
+                  login_cmd+=("-path=$VAULT_AUTH_PATH")
+                fi
+                login_cmd+=("-method=kerberos")
 
-                  login_cmd+=("-method=kerberos" "username=$VAULT_KERBEROS_USERNAME")
-                  if [ -n "${VAULT_KERBEROS_SERVICE:-}" ]; then
-                    login_cmd+=("service=$VAULT_KERBEROS_SERVICE")
-                  fi
-                  if [ -n "${VAULT_KERBEROS_REALM:-}" ]; then
-                    login_cmd+=("realm=$VAULT_KERBEROS_REALM")
-                  fi
-                  if [ -n "${VAULT_KEYTAB_FILE:-}" ]; then
-                    login_cmd+=("keytab_path=$VAULT_KEYTAB_FILE")
-                  fi
-                  if [ -n "${VAULT_KRB5CONF_FILE:-}" ]; then
-                    login_cmd+=("krb5conf_path=$VAULT_KRB5CONF_FILE")
-                  fi
-                  if [ "$VAULT_DISABLE_FAST_NEGOTIATION" = "true" ]; then
-                    login_cmd+=("disable_fast_negotiation=true")
-                  fi
-
-                  "${login_cmd[@]}"
-                '''
-              ).trim()
-            }
+                "${login_cmd[@]}"
+              '''
+            ).trim()
           }
 
           if (!env.VAULT_RUNTIME_TOKEN?.trim()) {
@@ -353,11 +314,7 @@ pipeline {
           "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
           "VAULT_ADDR=${params.VAULT_ADDR?.trim() ?: ''}",
           "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
-          "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}",
-          "VAULT_KERBEROS_USERNAME=${params.VAULT_KERBEROS_USERNAME?.trim() ?: ''}",
-          "VAULT_KERBEROS_SERVICE=${params.VAULT_KERBEROS_SERVICE?.trim() ?: ''}",
-          "VAULT_KERBEROS_REALM=${params.VAULT_KERBEROS_REALM?.trim() ?: ''}",
-          "VAULT_DISABLE_FAST_NEGOTIATION=${params.VAULT_DISABLE_FAST_NEGOTIATION ? 'true' : 'false'}"
+          "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}"
         ]) {
           sh '''
             set -euxo pipefail

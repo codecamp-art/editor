@@ -2,22 +2,32 @@
 
 `report` is a standalone C++17 program that reads the TDS snapshot, writes a CSV report, and sends mail through `curl`.
 
+## Config Model
+
+The package is environment-neutral.
+
+- `config/report.properties.template` holds the shared defaults
+- `config/dev.properties`, `config/qa.properties`, and `config/prod.properties` only hold environment-specific overrides
+- the SMTP section is maintained once in `report.properties.template`, not duplicated per environment
+- the Vault section is also reduced to shared settings only: `vault.executable`, `vault.address`, `vault.namespace`, and `vault.auth_path`
+
+At install time or via `run-report`, the selected environment overlay is merged onto `report.properties.template` and written to `config/report.properties`.
+
+After that, users start `bin/report` directly and do not need `--env` or `--config`.
+
 ## Packaging Model
 
-Windows local build is only for debugging and does not need installer packaging.
-
-RHEL8 local and Jenkins release now use a real self-extracting `.run` installer.
+- Windows local build is only for debugging and does not need installer packaging
+- RHEL8 local and Jenkins release both produce the same `.run` installer
 
 Linux release flow:
 
 1. Build the staged runtime
 2. Wrap it into one `.run` installer
-3. Execute the installer with an environment parameter
+3. Execute the installer with `--env`
 4. The installer extracts the package, renders `config/report.properties`, and leaves a ready-to-run standalone directory behind
 
 ## Linux `.run` Installer
-
-The Linux installer is a self-extracting shell archive.
 
 Usage:
 
@@ -28,8 +38,9 @@ Usage:
 Behavior:
 
 1. Extract into `--prefix`
-2. Render `config/report.properties` from `dev`, `qa`, or `prod`
-3. Leave `bin/report`, `run-report.sh`, and all runtime files in that directory
+2. Merge `config/report.properties.template` with `config/qa.properties`
+3. Write the result to `config/report.properties`
+4. Leave `bin/report`, `run-report.sh`, and all runtime files in that directory
 
 Options:
 
@@ -74,6 +85,8 @@ Stub debug build:
 & $ctest --preset windows-stub-x64-debug
 .\build\windows-stub-x64\Debug\report.exe --env dev --stub-file .\tests\data\stub_snapshot.csv --dry-run --to debug@example.com
 ```
+
+`report.exe --env dev` works in-place because the program now loads `config/report.properties.template` first and then overlays `config/dev.properties`.
 
 If you want to inspect the staged directory locally:
 
@@ -124,7 +137,7 @@ Assumptions:
 - `KRB5CCNAME` is already exported by that user's shell profile
 - `report` and `vault` just inherit the current environment
 
-No extra code or runtime flag is needed if `klist` already works after switching to that user.
+The application does not read or require `kerberos_realm`, `keytab_path`, `krb5conf_path`, `service`, or `disable_fast_negotiation` from properties anymore. If `klist` already works after switching to that user, no extra runtime flag is needed.
 
 ## RHEL8 Local
 
@@ -161,11 +174,8 @@ Important parameters:
 - optional `ARTIFACTORY_CA_VAULT_PATH`
 - optional `ARTIFACTORY_CERT_PASSWORD_VAULT_PATH`
 - `VAULT_ADDR`
-- `VAULT_KERBEROS_USERNAME`
-- optional `VAULT_KERBEROS_SERVICE`
-- optional `VAULT_KERBEROS_REALM`
-- optional `VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID`
-- optional `VAULT_KRB5CONF_CREDENTIALS_ID`
+- optional `VAULT_NAMESPACE`
+- optional `VAULT_AUTH_PATH`
 - optional `VENDOR_PACKAGE_PASSWORD_VAULT_PATH`
 - optional `REPORT_RUNTIME_ENV`
 

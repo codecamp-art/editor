@@ -85,7 +85,7 @@ std::string ExpandEnvReference(const std::string& value)
     return env_value;
 }
 
-std::unordered_map<std::string, std::string> ReadProperties(const std::string& path)
+std::unordered_map<std::string, std::string> ReadPropertiesFile(const std::string& path)
 {
     std::ifstream input(path);
     if (!input.is_open())
@@ -112,6 +112,27 @@ std::unordered_map<std::string, std::string> ReadProperties(const std::string& p
 
         const std::string key = Trim(trimmed.substr(0, pos));
         const std::string value = ExpandEnvReference(Trim(trimmed.substr(pos + 1)));
+        properties[key] = value;
+    }
+
+    return properties;
+}
+
+std::unordered_map<std::string, std::string> ReadProperties(const std::string& path)
+{
+    const std::filesystem::path resolved_path = std::filesystem::absolute(path);
+    const std::filesystem::path config_dir = resolved_path.parent_path();
+    const std::filesystem::path template_path = config_dir / "report.properties.template";
+
+    std::unordered_map<std::string, std::string> properties;
+    if (resolved_path.filename() != "report.properties.template" && std::filesystem::exists(template_path))
+    {
+        properties = ReadPropertiesFile(template_path.string());
+    }
+
+    const auto overlay_properties = ReadPropertiesFile(resolved_path.string());
+    for (const auto& [key, value] : overlay_properties)
+    {
         properties[key] = value;
     }
 
@@ -514,24 +535,6 @@ VaultConfig BuildEffectiveVaultConfig(const VaultConfig& configured)
     effective.address = EffectiveVaultValue(configured.address, "VAULT_ADDR");
     effective.namespace_name = EffectiveVaultValue(configured.namespace_name, "VAULT_NAMESPACE");
     effective.auth_path = EffectiveVaultValue(configured.auth_path, "VAULT_AUTH_PATH");
-    effective.kerberos_username = EffectiveVaultValue(configured.kerberos_username, "VAULT_KERBEROS_USERNAME");
-    effective.kerberos_service = EffectiveVaultValue(configured.kerberos_service, "VAULT_KERBEROS_SERVICE");
-    effective.kerberos_realm = EffectiveVaultValue(configured.kerberos_realm, "VAULT_KERBEROS_REALM");
-    effective.kerberos_keytab_path = EffectiveVaultValue(configured.kerberos_keytab_path, "VAULT_KERBEROS_KEYTAB");
-    effective.kerberos_krb5conf_path = EffectiveVaultValue(configured.kerberos_krb5conf_path, "VAULT_KRB5CONF");
-
-    if (configured.kerberos_disable_fast_negotiation)
-    {
-        effective.kerberos_disable_fast_negotiation = true;
-    }
-    else
-    {
-        const std::string disable_fast =
-            EffectiveVaultValue("", "VAULT_DISABLE_FAST_NEGOTIATION", "false");
-        effective.kerberos_disable_fast_negotiation =
-            ParseBoolValue(disable_fast, "vault.disable_fast_negotiation");
-    }
-
     return effective;
 }
 
@@ -670,30 +673,6 @@ std::string LoginToVault(const VaultConfig& configured_vault)
     }
 
     command += " -method=kerberos";
-    if (!vault.kerberos_username.empty())
-    {
-        command += " username=" + QuoteForShell(vault.kerberos_username);
-    }
-    if (!vault.kerberos_service.empty())
-    {
-        command += " service=" + QuoteForShell(vault.kerberos_service);
-    }
-    if (!vault.kerberos_realm.empty())
-    {
-        command += " realm=" + QuoteForShell(vault.kerberos_realm);
-    }
-    if (!vault.kerberos_keytab_path.empty())
-    {
-        command += " keytab_path=" + QuoteForShell(vault.kerberos_keytab_path);
-    }
-    if (!vault.kerberos_krb5conf_path.empty())
-    {
-        command += " krb5conf_path=" + QuoteForShell(vault.kerberos_krb5conf_path);
-    }
-    if (vault.kerberos_disable_fast_negotiation)
-    {
-        command += " disable_fast_negotiation=true";
-    }
 
     const CommandResult result = RunCommandCapture(command);
     if (result.exit_code != 0 || result.output.empty())
@@ -1177,19 +1156,6 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.vault.address = GetValue(properties, "vault.address");
     config.vault.namespace_name = GetValue(properties, "vault.namespace");
     config.vault.auth_path = GetValue(properties, "vault.auth_path");
-    config.vault.kerberos_username = GetValue(properties, "vault.kerberos_username");
-    config.vault.kerberos_service = GetValue(properties, "vault.kerberos_service");
-    config.vault.kerberos_realm = GetValue(properties, "vault.kerberos_realm");
-    config.vault.kerberos_keytab_path =
-        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.kerberos_keytab_path"));
-    config.vault.kerberos_krb5conf_path =
-        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.kerberos_krb5conf_path"));
-    config.vault.kerberos_disable_fast_negotiation = ParseBoolValue(
-        GetValue(
-            properties,
-            "vault.disable_fast_negotiation",
-            config.vault.kerberos_disable_fast_negotiation ? "true" : "false"),
-        "vault.disable_fast_negotiation");
 
     config.tds.drtp_host = GetRequiredValue(properties, "tds.drtp_host");
     config.tds.drtp_port = ParseIntValue(

@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/.." && pwd)"
+base_template_path="${root_dir}/config/report.properties.template"
 
 resolve_template_path() {
     local selector="$1"
@@ -28,17 +29,37 @@ if [[ -z "${template_selector}" ]]; then
     exit 1
 fi
 
-template_path="$(resolve_template_path "${template_selector}")"
 output_path="${2:-${root_dir}/config/report.properties}"
-
-if [[ ! -f "${template_path}" ]]; then
-    printf 'Template file does not exist: %s\n' "${template_path}" >&2
-    exit 1
-fi
-
 mkdir -p "$(dirname "${output_path}")"
 
-perl -pe 's/\$\{([^}:]+)(?::([^}]*))?\}/defined $ENV{$1} && length $ENV{$1} ? $ENV{$1} : (defined $2 ? $2 : "")/ge' \
-    "${template_path}" > "${output_path}"
+if [[ "${template_selector}" == "dev" || "${template_selector}" == "qa" || "${template_selector}" == "prod" ]]; then
+    overlay_path="$(resolve_template_path "${template_selector}")"
+    if [[ ! -f "${base_template_path}" ]]; then
+        printf 'Base template does not exist: %s\n' "${base_template_path}" >&2
+        exit 1
+    fi
+    if [[ ! -f "${overlay_path}" ]]; then
+        printf 'Environment overlay does not exist: %s\n' "${overlay_path}" >&2
+        exit 1
+    fi
 
-printf 'Rendered %s from %s\n' "${output_path}" "${template_path}"
+    {
+        cat "${base_template_path}"
+        printf '\n'
+        cat "${overlay_path}"
+    } | perl -pe 's/\$\{([^}:]+)(?::([^}]*))?\}/defined $ENV{$1} && length $ENV{$1} ? $ENV{$1} : (defined $2 ? $2 : "")/ge' \
+        > "${output_path}"
+
+    printf 'Rendered %s from %s + %s\n' "${output_path}" "${base_template_path}" "${overlay_path}"
+else
+    template_path="$(resolve_template_path "${template_selector}")"
+    if [[ ! -f "${template_path}" ]]; then
+        printf 'Template file does not exist: %s\n' "${template_path}" >&2
+        exit 1
+    fi
+
+    perl -pe 's/\$\{([^}:]+)(?::([^}]*))?\}/defined $ENV{$1} && length $ENV{$1} ? $ENV{$1} : (defined $2 ? $2 : "")/ge' \
+        "${template_path}" > "${output_path}"
+
+    printf 'Rendered %s from %s\n' "${output_path}" "${template_path}"
+fi
