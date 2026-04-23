@@ -12,7 +12,7 @@ set(TDS_VENDOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/tds")
 set(TDS_VENDOR_INCLUDE_DIR "${TDS_VENDOR_ROOT}/include" CACHE PATH "Path to vendor header directory")
 set(TDS_VENDOR_LIBRARY "" CACHE FILEPATH "Path to vendor link library: .so on Linux, .lib on Windows")
 set(TDS_VENDOR_RUNTIME "" CACHE FILEPATH "Path to vendor runtime library: .so on Linux, .dll on Windows")
-set(TDS_REPORTER_STAGE_DIR "${CMAKE_BINARY_DIR}/stage" CACHE PATH "Directory used by the tds_reporter_stage target")
+set(TDS_REPORTER_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH "Directory used by the tds_reporter_stage target")
 
 add_library(
     tds_reporter_lib
@@ -239,7 +239,7 @@ install(
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/config/dev.properties"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/qa.properties"
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/tds_reporter.properties.template"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties.template"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/prod.properties.template"
     DESTINATION config
 )
@@ -251,9 +251,9 @@ install(
     DESTINATION scripts
 )
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config/tds_reporter.properties")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties")
     install(
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/tds_reporter.properties"
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties"
         DESTINATION config
     )
 endif()

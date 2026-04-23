@@ -63,17 +63,17 @@ The default config file path is selected by `--env`:
 
 `prod.properties.template` is included as a template. Copy it to `prod.properties` and fill the real values.
 
-If you want to maintain only one config file, copy `config/tds_reporter.properties.template` to `config/tds_reporter.properties`. The program will prefer that file over `config/dev.properties`, `config/qa.properties`, and `config/prod.properties`. You can either replace the placeholders during install, or leave the `${ENV_VAR:default}` syntax in place and provide values through environment variables at runtime.
+If you want to maintain only one config file, copy `config/report.properties.template` to `config/report.properties`. The program will prefer that file over `config/dev.properties`, `config/qa.properties`, and `config/prod.properties`. You can either replace the placeholders during install, or leave the `${ENV_VAR:default}` syntax in place and provide values through environment variables at runtime.
 
-Two small helper scripts are included if you want to render the template into a concrete `config/tds_reporter.properties` during install or deployment:
+Two small helper scripts are included if you want to render the template into a concrete `config/report.properties` during install or deployment:
 
 - Linux/macOS shell: `./scripts/render-config.sh`
 - Windows PowerShell: `powershell -ExecutionPolicy Bypass -File .\scripts\render-config.ps1`
 
 Both scripts also accept optional `template` and `output` paths:
 
-- `./scripts/render-config.sh config/tds_reporter.properties.template config/tds_reporter.properties`
-- `powershell -ExecutionPolicy Bypass -File .\scripts\render-config.ps1 -TemplatePath .\config\tds_reporter.properties.template -OutputPath .\config\tds_reporter.properties`
+- `./scripts/render-config.sh config/report.properties.template config/report.properties`
+- `powershell -ExecutionPolicy Bypass -File .\scripts\render-config.ps1 -TemplatePath .\config\report.properties.template -OutputPath .\config\report.properties`
 
 The rendering semantics match the program itself: `${ENV_VAR:default}` resolves to the environment variable value when it exists and is non-empty; otherwise it falls back to `default`.
 
@@ -101,7 +101,7 @@ The SMTP transport settings are aligned with the company JavaMailSender example:
 
 The three environment config files keep different TDS endpoints, but use the same mail transport block. The default host is intentionally left as `mta-hub.REPLACE_ME.com.cn` because the screenshot only showed the prefix and suffix. Replace it in the config file or set `SMTP_HOST`.
 
-When `tds.password` starts with `vault://`, the program reads the secret through the local `vault` CLI. The simplest production setup is to provide `VAULT_ADDR` and `VAULT_TOKEN` through the environment. If you prefer the program to log in on demand, set `vault.auth_method=cert` or `vault.auth_method=kerberos` and fill the matching `vault.*` settings from `config/tds_reporter.properties` or environment variables.
+When `tds.password` starts with `vault://`, the program reads the secret through the local `vault` CLI. The simplest production setup is to provide `VAULT_ADDR` and `VAULT_TOKEN` through the environment. If you prefer the program to log in on demand, set `vault.auth_method=cert` or `vault.auth_method=kerberos` and fill the matching `vault.*` settings from `config/report.properties` or environment variables. For Kerberos, existing ticket-cache login is supported (for example TGT refreshed by RHEL8 cron with `KRB5CCNAME` already exported); keytab and krb5.conf settings are optional and only needed when your runtime requires explicit overrides.
 
 ## Build On RHEL8
 
@@ -196,11 +196,11 @@ Windows x86 package using supplier `tds/win32` files:
 ```bat
 cd /d D:\path\to\tds_reporter
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars32.bat"
-cmake -S . -B build_win32_release -G "Visual Studio 17 2022" -A Win32 -DTDS_VENDOR_LIBRARY="%CD%\tds\win32\tds_api.lib" -DTDS_VENDOR_RUNTIME="%CD%\tds\win32\tds_api.dll" -DTDS_REPORTER_STAGE_DIR="%CD%\build_win32_release\stage"
+cmake -S . -B build_win32_release -G "Visual Studio 17 2022" -A Win32 -DTDS_VENDOR_LIBRARY="%CD%\tds\win32\tds_api.lib" -DTDS_VENDOR_RUNTIME="%CD%\tds\win32\tds_api.dll" -DTDS_REPORTER_STAGE_DIR="%CD%\build_win32_release\client_funding_risk_report"
 cmake --build build_win32_release --config Release --parallel
 ctest --test-dir build_win32_release -C Release --output-on-failure
 cmake --build build_win32_release --target tds_reporter_stage --config Release
-powershell -NoProfile -Command "Compress-Archive -Path 'build_win32_release\stage\*' -DestinationPath 'build_win32_release\tds_reporter-windows-x86.zip' -Force"
+powershell -NoProfile -Command "Compress-Archive -Path 'build_win32_release\client_funding_risk_report\*' -DestinationPath 'build_win32_release\tds_reporter-windows-x86.zip' -Force"
 ```
 
 RHEL8 package using supplier `tds/linux_x86_64` files:
@@ -210,17 +210,17 @@ cd /path/to/tds_reporter
 cmake -S . -B build_release -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DTDS_VENDOR_LIBRARY="$PWD/tds/linux_x86_64/libtds_api.so" \
-  -DTDS_REPORTER_STAGE_DIR="$PWD/build_release/stage"
+  -DTDS_REPORTER_STAGE_DIR="$PWD/build_release/client_funding_risk_report"
 cmake --build build_release --parallel
 ctest --test-dir build_release --output-on-failure
 cmake --build build_release --target tds_reporter_stage
-tar -C build_release/stage -czf build_release/tds_reporter-rhel8-local.tar.gz .
+tar -C build_release/client_funding_risk_report -czf build_release/client_funding_risk_report-rhel8-local.tar.gz .
 ```
 
 The staged layout on RHEL8 is:
 
 ```text
-stage/
+client_funding_risk_report/
   bin/
     tds_reporter
   lib/
@@ -229,7 +229,7 @@ stage/
   config/
     dev.properties
     qa.properties
-    tds_reporter.properties.template
+    report.properties.template
     prod.properties.template
   scripts/
     render-config.sh
@@ -243,7 +243,7 @@ The installed binary uses `INSTALL_RPATH=$ORIGIN/../lib`, so after staging it wi
 If you also do a local Windows live build, the staged layout becomes:
 
 ```text
-stage/
+client_funding_risk_report/
   bin/
     tds_reporter.exe
     tds_api.dll
@@ -251,7 +251,7 @@ stage/
   config/
     dev.properties
     qa.properties
-    tds_reporter.properties.template
+    report.properties.template
     prod.properties.template
   scripts/
     render-config.sh
@@ -282,7 +282,7 @@ If the build runs on a RHEL8 Jenkins node, the simplest approach is:
 
 If the supplier package is a password-protected zip, configure the release job with:
 
-- `VAULT_ADDR`, `VAULT_AUTH_METHOD`, and the matching Jenkins credentials for either cert auth or kerberos auth
+- `VAULT_ADDR`, `VAULT_AUTH_METHOD`, and the matching Jenkins credentials for cert auth, or kerberos parameters (username required; keytab/krb5.conf optional when using ticket cache)
 - `VENDOR_PACKAGE_PASSWORD_VAULT_PATH`
 - optional `VENDOR_PACKAGE_PASSWORD_VAULT_FIELD` when the secret field is not `password`
 
@@ -314,17 +314,17 @@ pipeline {
 
 Recommended artifact to archive from Jenkins:
 
-- `build/stage/bin/tds_reporter`
-- `build/stage/lib/*.so*`
-- `build/stage/lib/cpack.dat`
-- `build/stage/config/*`
+- `build/client_funding_risk_report/bin/tds_reporter`
+- `build/client_funding_risk_report/lib/*.so*`
+- `build/client_funding_risk_report/lib/cpack.dat`
+- `build/client_funding_risk_report/config/*`
 
 If you also want a smoke test job on Jenkins, use a real QA config:
 
 ```bash
-./build/stage/bin/tds_reporter \
+./build/client_funding_risk_report/bin/tds_reporter \
   --env qa \
-  --config ./build/stage/config/qa.properties \
+  --config ./build/client_funding_risk_report/config/qa.properties \
   --dry-run \
   --to qa-ops@example.com
 ```
@@ -351,9 +351,9 @@ Pipeline intent:
 Example using the QA config and overriding recipients from Airflow:
 
 ```bash
-./build/stage/bin/tds_reporter \
+./build/client_funding_risk_report/bin/tds_reporter \
   --env qa \
-  --config ./build/stage/config/qa.properties \
+  --config ./build/client_funding_risk_report/config/qa.properties \
   --to qa-ops@example.com,risk@example.com \
   --cc qa-support@example.com
 ```
@@ -361,7 +361,7 @@ Example using the QA config and overriding recipients from Airflow:
 Example sending only selected customers:
 
 ```bash
-./build/stage/bin/tds_reporter \
+./build/client_funding_risk_report/bin/tds_reporter \
   --env prod \
   --config /opt/tds-reporter/config/prod.properties \
   --cust-list 1001,1002,1003
@@ -370,9 +370,9 @@ Example sending only selected customers:
 Example dry run:
 
 ```bash
-./build/stage/bin/tds_reporter \
+./build/client_funding_risk_report/bin/tds_reporter \
   --env dev \
-  --config ./build/stage/config/dev.properties \
+  --config ./build/client_funding_risk_report/config/dev.properties \
   --dry-run
 ```
 
