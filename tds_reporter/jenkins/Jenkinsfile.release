@@ -41,8 +41,8 @@ pipeline {
   environment {
     PROJECT_DIR = "${env.WORKSPACE}"
     BUILD_DIR = "${env.WORKSPACE}/build_release"
-    STAGE_DIR = "${env.WORKSPACE}/build_release/stage"
-    PACKAGE_NAME = "tds_reporter-rhel8-${env.BUILD_NUMBER}.tar.gz"
+    STAGE_DIR = "${env.WORKSPACE}/build_release/client_funding_risk_report"
+    PACKAGE_NAME = "client_funding_risk_report-rhel8-${env.BUILD_NUMBER}.tar.gz"
     VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
     VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
     VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
@@ -86,16 +86,16 @@ pipeline {
               credentialBindings << file(credentialsId: params.VAULT_CA_FILE_CREDENTIALS_ID.trim(), variable: 'VAULT_CA_FILE')
             }
           } else if (authMethod == 'kerberos') {
-            if (!params.VAULT_KERBEROS_USERNAME?.trim() ||
-                !params.VAULT_KERBEROS_SERVICE?.trim() ||
-                !params.VAULT_KERBEROS_REALM?.trim() ||
-                !params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID?.trim() ||
-                !params.VAULT_KRB5CONF_CREDENTIALS_ID?.trim()) {
-              error('Vault kerberos auth requires username, service, realm, VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID, and VAULT_KRB5CONF_CREDENTIALS_ID')
+            if (!params.VAULT_KERBEROS_USERNAME?.trim()) {
+              error('Vault kerberos auth requires VAULT_KERBEROS_USERNAME')
             }
 
-            credentialBindings << file(credentialsId: params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID.trim(), variable: 'VAULT_KEYTAB_FILE')
-            credentialBindings << file(credentialsId: params.VAULT_KRB5CONF_CREDENTIALS_ID.trim(), variable: 'VAULT_KRB5CONF_FILE')
+            if (params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID?.trim()) {
+              credentialBindings << file(credentialsId: params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID.trim(), variable: 'VAULT_KEYTAB_FILE')
+            }
+            if (params.VAULT_KRB5CONF_CREDENTIALS_ID?.trim()) {
+              credentialBindings << file(credentialsId: params.VAULT_KRB5CONF_CREDENTIALS_ID.trim(), variable: 'VAULT_KRB5CONF_FILE')
+            }
           } else {
             error("Unsupported VAULT_AUTH_METHOD: ${params.VAULT_AUTH_METHOD}")
           }
@@ -124,11 +124,21 @@ pipeline {
                   else
                     login_cmd+=("-method=kerberos")
                     login_cmd+=("username=$VAULT_KERBEROS_USERNAME")
-                    login_cmd+=("service=$VAULT_KERBEROS_SERVICE")
-                    login_cmd+=("realm=$VAULT_KERBEROS_REALM")
-                    login_cmd+=("keytab_path=$VAULT_KEYTAB_FILE")
-                    login_cmd+=("krb5conf_path=$VAULT_KRB5CONF_FILE")
-                    login_cmd+=("disable_fast_negotiation=$VAULT_DISABLE_FAST_NEGOTIATION")
+                    if [ -n "${VAULT_KERBEROS_SERVICE:-}" ]; then
+                      login_cmd+=("service=$VAULT_KERBEROS_SERVICE")
+                    fi
+                    if [ -n "${VAULT_KERBEROS_REALM:-}" ]; then
+                      login_cmd+=("realm=$VAULT_KERBEROS_REALM")
+                    fi
+                    if [ -n "${VAULT_KEYTAB_FILE:-}" ]; then
+                      login_cmd+=("keytab_path=$VAULT_KEYTAB_FILE")
+                    fi
+                    if [ -n "${VAULT_KRB5CONF_FILE:-}" ]; then
+                      login_cmd+=("krb5conf_path=$VAULT_KRB5CONF_FILE")
+                    fi
+                    if [ "$VAULT_DISABLE_FAST_NEGOTIATION" = "true" ]; then
+                      login_cmd+=("disable_fast_negotiation=true")
+                    fi
                   fi
 
                   "${login_cmd[@]}"
@@ -344,8 +354,8 @@ pipeline {
           sh '''
             set -euxo pipefail
             CONFIG_PATH="$STAGE_DIR/config/${SMOKE_ENV}.properties"
-            if [ -f "$STAGE_DIR/config/tds_reporter.properties" ]; then
-              CONFIG_PATH="$STAGE_DIR/config/tds_reporter.properties"
+            if [ -f "$STAGE_DIR/config/report.properties" ]; then
+              CONFIG_PATH="$STAGE_DIR/config/report.properties"
             fi
             "$STAGE_DIR/bin/tds_reporter" \
               --env "$SMOKE_ENV" \
@@ -360,7 +370,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'build_release/stage/**, build_release/*.tar.gz, output/*', allowEmptyArchive: false
+      archiveArtifacts artifacts: 'build_release/client_funding_risk_report/**, build_release/*.tar.gz, output/*', allowEmptyArchive: false
     }
   }
 }

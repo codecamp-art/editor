@@ -1,6 +1,6 @@
 param(
-    [string]$TemplatePath = (Join-Path $PSScriptRoot "..\config\tds_reporter.properties.template"),
-    [string]$OutputPath = (Join-Path $PSScriptRoot "..\config\tds_reporter.properties")
+    [string]$TemplatePath = (Join-Path $PSScriptRoot "..\config\report.properties.template"),
+    [string]$OutputPath = (Join-Path $PSScriptRoot "..\config\report.properties")
 )
 
 $resolvedTemplatePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TemplatePath)

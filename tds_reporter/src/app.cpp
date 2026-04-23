@@ -648,24 +648,31 @@ std::string LoginToVault(const VaultConfig& configured_vault)
     }
     else if (vault.auth_method == "kerberos")
     {
-        if (vault.kerberos_username.empty() ||
-            vault.kerberos_service.empty() ||
-            vault.kerberos_realm.empty() ||
-            vault.kerberos_keytab_path.empty() ||
-            vault.kerberos_krb5conf_path.empty())
-        {
-            throw std::runtime_error(
-                "vault kerberos auth requires username, service, realm, keytab path, and krb5.conf path");
-        }
-
         command += " -method=kerberos";
-        command += " username=" + QuoteForShell(vault.kerberos_username);
-        command += " service=" + QuoteForShell(vault.kerberos_service);
-        command += " realm=" + QuoteForShell(vault.kerberos_realm);
-        command += " keytab_path=" + QuoteForShell(vault.kerberos_keytab_path);
-        command += " krb5conf_path=" + QuoteForShell(vault.kerberos_krb5conf_path);
-        command += " disable_fast_negotiation=" +
-                   QuoteForShell(vault.kerberos_disable_fast_negotiation ? "true" : "false");
+        if (!vault.kerberos_username.empty())
+        {
+            command += " username=" + QuoteForShell(vault.kerberos_username);
+        }
+        if (!vault.kerberos_service.empty())
+        {
+            command += " service=" + QuoteForShell(vault.kerberos_service);
+        }
+        if (!vault.kerberos_realm.empty())
+        {
+            command += " realm=" + QuoteForShell(vault.kerberos_realm);
+        }
+        if (!vault.kerberos_keytab_path.empty())
+        {
+            command += " keytab_path=" + QuoteForShell(vault.kerberos_keytab_path);
+        }
+        if (!vault.kerberos_krb5conf_path.empty())
+        {
+            command += " krb5conf_path=" + QuoteForShell(vault.kerberos_krb5conf_path);
+        }
+        if (vault.kerberos_disable_fast_negotiation)
+        {
+            command += " disable_fast_negotiation=true";
+        }
     }
     else
     {
@@ -1107,7 +1114,7 @@ CliOptions ParseCli(int argc, char** argv)
 
 std::string DefaultConfigPath(const std::string& env_name)
 {
-    const std::filesystem::path single_config("config/tds_reporter.properties");
+    const std::filesystem::path single_config("config/report.properties");
     if (std::filesystem::exists(single_config))
     {
         return single_config.string();

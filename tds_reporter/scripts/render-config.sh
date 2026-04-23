@@ -4,8 +4,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/.." && pwd)"
 
-template_path="${1:-${root_dir}/config/tds_reporter.properties.template}"
-output_path="${2:-${root_dir}/config/tds_reporter.properties}"
+template_path="${1:-${root_dir}/config/report.properties.template}"
+output_path="${2:-${root_dir}/config/report.properties}"
 
 mkdir -p "$(dirname "${output_path}")"
 
