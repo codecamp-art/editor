@@ -32,7 +32,7 @@
 
 文件开头有：
 
-- `#ifdef TDS_REPORTER_HAS_VENDOR_API`
+- `#ifdef REPORT_HAS_VENDOR_API`
 - `#include "tds_api.h"`
 
 这表示只有在 CMake 已经确认“当前平台有可用的供应商库”时，才会编译 live 代码。
@@ -120,7 +120,7 @@
 这个工厂函数决定程序最终用哪个客户端：
 
 1. 如果传了 `--stub-file`，一定创建 `StubTdsClient`
-2. 否则如果当前构建带了 `TDS_REPORTER_HAS_VENDOR_API`，创建 `VendorTdsClient`
+2. 否则如果当前构建带了 `REPORT_HAS_VENDOR_API`，创建 `VendorTdsClient`
 3. 否则抛错，提示当前平台没有可用的 live 供应商库
 
 这个设计的好处是：
@@ -221,25 +221,25 @@ Windows 下有两种方式启用 live：
 
 CMake 现在会自动做这些事：
 
-- 找到 `.lib` 后启用 `TDS_REPORTER_HAS_VENDOR_API`
-- 如果给了 `.dll`，在构建后把它复制到 `tds_reporter.exe` 和 `tds_reporter_tests.exe` 旁边
+- 找到 `.lib` 后启用 `REPORT_HAS_VENDOR_API`
+- 如果给了 `.dll`，在构建后把它复制到 `report.exe` 和 `report_tests.exe` 旁边
 - `cmake --install` 时也把 `.dll` 安装到 `bin/`
 
 如果只给了 `.lib` 没给 `.dll`，CMake 会给出警告，因为这种情况下虽然能链接，但本地运行仍然会缺运行时库。
 
 ### 3. 阶段产物目录
 
-`tds_reporter_stage` 会生成一个可部署目录。
+`report_stage` 会生成一个可部署目录。
 
 RHEL8 阶段目录大致是：
 
-- `bin/tds_reporter`
+- `bin/report`
 - `lib/tds_api.so`
 - `config/*.properties`
 
 Windows 本地 live 阶段目录大致是：
 
-- `bin/tds_reporter.exe`
+- `bin/report.exe`
 - `bin/tds_api.dll`
 - `config/*.properties`
 
@@ -248,7 +248,7 @@ Windows 本地 live 阶段目录大致是：
 - Windows 阶段目录主要是方便本地联调
 - 真正要交付和运行的正式版本仍然是 RHEL8 阶段目录
 
-## `tests/tds_reporter_tests.cpp`
+## `tests/report_tests.cpp`
 
 当前单元测试仍以 stub 流程为主。
 

@@ -18,7 +18,7 @@
 #include <sys/wait.h>
 #endif
 
-namespace tds_reporter {
+namespace report {
 namespace {
 
 std::string Trim(const std::string& value)
@@ -453,13 +453,7 @@ VaultConfig BuildEffectiveVaultConfig(const VaultConfig& configured)
     effective.executable = EffectiveVaultValue(configured.executable, "VAULT_BIN", "vault");
     effective.address = EffectiveVaultValue(configured.address, "VAULT_ADDR");
     effective.namespace_name = EffectiveVaultValue(configured.namespace_name, "VAULT_NAMESPACE");
-    effective.auth_method = ToLower(EffectiveVaultValue(configured.auth_method, "VAULT_AUTH_METHOD", "token"));
     effective.auth_path = EffectiveVaultValue(configured.auth_path, "VAULT_AUTH_PATH");
-    effective.token = EffectiveVaultValue(configured.token, "VAULT_TOKEN");
-    effective.cert_role = EffectiveVaultValue(configured.cert_role, "VAULT_CERT_ROLE");
-    effective.ca_cert_path = EffectiveVaultValue(configured.ca_cert_path, "VAULT_CA_CERT");
-    effective.client_cert_path = EffectiveVaultValue(configured.client_cert_path, "VAULT_CLIENT_CERT");
-    effective.client_key_path = EffectiveVaultValue(configured.client_key_path, "VAULT_CLIENT_KEY");
     effective.kerberos_username = EffectiveVaultValue(configured.kerberos_username, "VAULT_KERBEROS_USERNAME");
     effective.kerberos_service = EffectiveVaultValue(configured.kerberos_service, "VAULT_KERBEROS_SERVICE");
     effective.kerberos_realm = EffectiveVaultValue(configured.kerberos_realm, "VAULT_KERBEROS_REALM");
@@ -607,17 +601,6 @@ std::vector<std::unique_ptr<ScopedEnvOverride>> ApplyVaultEnvironment(
 std::string LoginToVault(const VaultConfig& configured_vault)
 {
     const VaultConfig vault = BuildEffectiveVaultConfig(configured_vault);
-    if (!vault.token.empty())
-    {
-        return vault.token;
-    }
-
-    if (vault.auth_method.empty() || vault.auth_method == "token")
-    {
-        throw std::runtime_error(
-            "vault token is required for vault-backed secrets when vault.auth_method=token");
-    }
-
     auto env_overrides = ApplyVaultEnvironment(vault);
     std::string command = QuoteForShell(vault.executable) + " login -token-only -no-store";
 
@@ -626,57 +609,30 @@ std::string LoginToVault(const VaultConfig& configured_vault)
         command += " -path=" + QuoteForShell(vault.auth_path);
     }
 
-    if (vault.auth_method == "cert")
+    command += " -method=kerberos";
+    if (!vault.kerberos_username.empty())
     {
-        if (vault.client_cert_path.empty() || vault.client_key_path.empty())
-        {
-            throw std::runtime_error(
-                "vault.client_cert_path and vault.client_key_path are required for vault.auth_method=cert");
-        }
-
-        command += " -method=cert";
-        if (!vault.ca_cert_path.empty())
-        {
-            command += " -ca-cert=" + QuoteForShell(vault.ca_cert_path);
-        }
-        command += " -client-cert=" + QuoteForShell(vault.client_cert_path);
-        command += " -client-key=" + QuoteForShell(vault.client_key_path);
-        if (!vault.cert_role.empty())
-        {
-            command += " name=" + QuoteForShell(vault.cert_role);
-        }
+        command += " username=" + QuoteForShell(vault.kerberos_username);
     }
-    else if (vault.auth_method == "kerberos")
+    if (!vault.kerberos_service.empty())
     {
-        command += " -method=kerberos";
-        if (!vault.kerberos_username.empty())
-        {
-            command += " username=" + QuoteForShell(vault.kerberos_username);
-        }
-        if (!vault.kerberos_service.empty())
-        {
-            command += " service=" + QuoteForShell(vault.kerberos_service);
-        }
-        if (!vault.kerberos_realm.empty())
-        {
-            command += " realm=" + QuoteForShell(vault.kerberos_realm);
-        }
-        if (!vault.kerberos_keytab_path.empty())
-        {
-            command += " keytab_path=" + QuoteForShell(vault.kerberos_keytab_path);
-        }
-        if (!vault.kerberos_krb5conf_path.empty())
-        {
-            command += " krb5conf_path=" + QuoteForShell(vault.kerberos_krb5conf_path);
-        }
-        if (vault.kerberos_disable_fast_negotiation)
-        {
-            command += " disable_fast_negotiation=true";
-        }
+        command += " service=" + QuoteForShell(vault.kerberos_service);
     }
-    else
+    if (!vault.kerberos_realm.empty())
     {
-        throw std::runtime_error("unsupported vault.auth_method: " + vault.auth_method);
+        command += " realm=" + QuoteForShell(vault.kerberos_realm);
+    }
+    if (!vault.kerberos_keytab_path.empty())
+    {
+        command += " keytab_path=" + QuoteForShell(vault.kerberos_keytab_path);
+    }
+    if (!vault.kerberos_krb5conf_path.empty())
+    {
+        command += " krb5conf_path=" + QuoteForShell(vault.kerberos_krb5conf_path);
+    }
+    if (vault.kerberos_disable_fast_negotiation)
+    {
+        command += " disable_fast_negotiation=true";
     }
 
     const CommandResult result = RunCommandCapture(command);
@@ -1142,16 +1098,7 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.vault.executable = GetValue(properties, "vault.executable", config.vault.executable);
     config.vault.address = GetValue(properties, "vault.address");
     config.vault.namespace_name = GetValue(properties, "vault.namespace");
-    config.vault.auth_method = ToLower(GetValue(properties, "vault.auth_method", config.vault.auth_method));
     config.vault.auth_path = GetValue(properties, "vault.auth_path");
-    config.vault.token = GetValue(properties, "vault.token");
-    config.vault.cert_role = GetValue(properties, "vault.cert_role");
-    config.vault.ca_cert_path =
-        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.ca_cert_path"));
-    config.vault.client_cert_path =
-        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.client_cert_path"));
-    config.vault.client_key_path =
-        ResolveConfigRelativePath(config_dir, GetValue(properties, "vault.client_key_path"));
     config.vault.kerberos_username = GetValue(properties, "vault.kerberos_username");
     config.vault.kerberos_service = GetValue(properties, "vault.kerberos_service");
     config.vault.kerberos_realm = GetValue(properties, "vault.kerberos_realm");
@@ -1282,7 +1229,7 @@ MailRequest BuildMailRequest(
 
 std::string BuildMimeMessage(const MailRequest& request)
 {
-    const std::string boundary = "----TDS_REPORTER_BOUNDARY_" + CurrentTimestamp();
+    const std::string boundary = "----REPORT_BOUNDARY_" + CurrentTimestamp();
     const std::string attachment_bytes = ReadBinaryFile(request.attachment_path);
     const std::string encoded_attachment = WrapBase64(Base64Encode(attachment_bytes));
 
@@ -1392,9 +1339,9 @@ SendMailResult SendMailWithCurl(const MailRequest& request, const AppConfig& con
 
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
     const std::filesystem::path message_path =
-        temp_dir / ("tds_reporter_message_" + CurrentTimestamp() + ".eml");
+        temp_dir / ("report_message_" + CurrentTimestamp() + ".eml");
     const std::filesystem::path curl_config_path =
-        temp_dir / ("tds_reporter_curl_" + CurrentTimestamp() + ".cfg");
+        temp_dir / ("report_curl_" + CurrentTimestamp() + ".cfg");
 
     try
     {
@@ -1446,4 +1393,4 @@ SendMailResult SendMailWithCurl(const MailRequest& request, const AppConfig& con
     }
 }
 
-} // namespace tds_reporter
+} // namespace report

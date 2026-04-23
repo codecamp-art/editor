@@ -11,7 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace tds_reporter {
+namespace report {
 namespace {
 
 std::mutex g_logger_mutex;
@@ -19,7 +19,7 @@ std::ofstream g_log_stream;
 std::string g_log_directory;
 std::string g_log_level = "info";
 std::string g_log_env = "dev";
-std::string g_log_service = "tds_reporter";
+std::string g_log_service = "report";
 std::string g_log_date;
 std::string g_log_path;
 bool g_logger_initialized = false;
@@ -167,7 +167,7 @@ void EnsureLogStreamLocked()
     }
 
     const std::filesystem::path log_path =
-        std::filesystem::absolute(std::filesystem::path(g_log_directory) / ("tds_reporter-" + log_date + ".log"));
+        std::filesystem::absolute(std::filesystem::path(g_log_directory) / ("report-" + log_date + ".log"));
 
     if (g_log_stream.is_open())
     {
@@ -223,7 +223,7 @@ void InitializeLogger(const AppConfig& config)
     g_log_directory = config.log.directory;
     g_log_level = NormalizeLevel(config.log.level);
     g_log_env = config.env_name;
-    g_log_service = "tds_reporter";
+    g_log_service = "report";
     g_log_date.clear();
     g_log_path.clear();
     g_logger_initialized = true;
@@ -275,4 +275,4 @@ void LogError(const std::string& event, const std::string& message, const LogFie
     WriteLog("error", event, message, fields);
 }
 
-} // namespace tds_reporter
+} // namespace report

@@ -35,9 +35,9 @@ void SetEnv(const std::string& key, const std::string& value)
 #endif
 }
 
-tds_reporter::AppConfig BuildTestConfig(const std::filesystem::path& output_dir)
+report::AppConfig BuildTestConfig(const std::filesystem::path& output_dir)
 {
-    tds_reporter::AppConfig config;
+    report::AppConfig config;
     config.env_name = "test";
     config.email_subject = "Test Client Funding and Risk Ratio Report";
     config.attachment_name = "fund_snapshot";
@@ -74,7 +74,7 @@ std::filesystem::path CreateFakeVaultExecutable(const std::filesystem::path& tem
         script_path,
         "@echo off\r\n"
         "set args=%*\r\n"
-        "echo %args% | findstr /C:\"login\" >nul\r\n"
+        "echo %args% | findstr /C:\"login\" /C:\"-method=kerberos\" >nul\r\n"
         "if %errorlevel%==0 (\r\n"
         "  echo fake-vault-token\r\n"
         "  exit /b 0\r\n"
@@ -93,7 +93,7 @@ std::filesystem::path CreateFakeVaultExecutable(const std::filesystem::path& tem
         script_path,
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "if printf '%s\\n' \"$*\" | grep -q 'login'; then\n"
+        "if printf '%s\\n' \"$*\" | grep -q 'login' && printf '%s\\n' \"$*\" | grep -q -- '-method=kerberos'; then\n"
         "  printf 'fake-vault-token\\n'\n"
         "  exit 0\n"
         "fi\n"
@@ -116,7 +116,7 @@ std::filesystem::path CreateFakeVaultExecutable(const std::filesystem::path& tem
 void TestParseCli()
 {
     const char* argv[] = {
-        "tds_reporter",
+        "report",
         "--env=qa",
         "--to",
         "qa1@example.com,qa2@example.com",
@@ -128,8 +128,8 @@ void TestParseCli()
         "20260419"
     };
 
-    const tds_reporter::CliOptions options =
-        tds_reporter::ParseCli(static_cast<int>(std::size(argv)), const_cast<char**>(argv));
+    const report::CliOptions options =
+        report::ParseCli(static_cast<int>(std::size(argv)), const_cast<char**>(argv));
 
     AssertTrue(options.env == "qa", "expected env=qa");
     AssertTrue(options.to.size() == 2, "expected two To recipients");
@@ -141,7 +141,7 @@ void TestParseCli()
 
 void TestLoadConfig()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "tds_reporter_config_test";
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_test";
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "test.properties";
 
@@ -163,10 +163,10 @@ void TestLoadConfig()
         << "log.level=warn\n";
     output.close();
 
-    tds_reporter::CliOptions cli;
+    report::CliOptions cli;
     cli.env = "prod";
     cli.output_dir = "custom-output";
-    const tds_reporter::AppConfig config = tds_reporter::LoadConfig(config_path.string(), cli);
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
     AssertTrue(config.env_name == "prod", "cli env should override file env");
     AssertTrue(config.output_dir == "custom-output", "cli output dir should override file output dir");
@@ -183,7 +183,7 @@ void TestLoadConfig()
 
 void TestLoadConfigWithVaultBackedTdsPassword()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "tds_reporter_vault_test";
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_vault_test";
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "vault.properties";
     const std::filesystem::path vault_executable = CreateFakeVaultExecutable(temp_dir);
@@ -196,41 +196,40 @@ void TestLoadConfigWithVaultBackedTdsPassword()
         << "tds.user=10000\n"
         << "tds.password=vault://secret/tds/qa#password\n"
         << "vault.executable=" << vault_executable.string() << "\n"
-        << "vault.auth_method=cert\n"
         << "vault.address=https://vault.example.com\n"
-        << "vault.client_cert_path=/tmp/vault-client.pem\n"
-        << "vault.client_key_path=/tmp/vault-client.key\n"
+        << "vault.kerberos_username=svc_report\n"
+        << "vault.kerberos_service=HTTP/vault.example.com\n"
         << "smtp.host=mail.local\n"
         << "smtp.port=2587\n"
         << "smtp.from=sender@example.com\n";
     output.close();
 
-    tds_reporter::CliOptions cli;
-    const tds_reporter::AppConfig config = tds_reporter::LoadConfig(config_path.string(), cli);
+    report::CliOptions cli;
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
     AssertTrue(config.tds.password == "vault-secret-value", "vault-backed tds password should be resolved");
 }
 
 void TestStubClientAndCsv()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "tds_reporter_output_test";
+    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_output_test";
     std::filesystem::create_directories(output_dir);
 
-    tds_reporter::CliOptions cli;
+    report::CliOptions cli;
     cli.stub_file = (std::filesystem::path("tests") / "data" / "stub_snapshot.csv").string();
 
-    const tds_reporter::AppConfig config = BuildTestConfig(output_dir);
-    std::unique_ptr<tds_reporter::ITdsClient> client = tds_reporter::CreateClient(config, cli);
+    const report::AppConfig config = BuildTestConfig(output_dir);
+    std::unique_ptr<report::ITdsClient> client = report::CreateClient(config, cli);
 
     const int trade_date = client->FetchTradeDate();
-    const std::vector<tds_reporter::CustomerFundRecord> records =
+    const std::vector<report::CustomerFundRecord> records =
         client->FetchCustomerFunds(trade_date, {"1001"});
 
     AssertTrue(trade_date == 20260418, "stub trade date should come from csv");
     AssertTrue(records.size() == 1, "filter should keep exactly one row");
     AssertTrue(records.front().cust_name == "Alpha Capital", "unexpected customer name");
 
-    const std::string csv_path = tds_reporter::WriteCsvReport(records, config, trade_date);
+    const std::string csv_path = report::WriteCsvReport(records, config, trade_date);
     const std::string csv_content = ReadFile(csv_path);
     AssertContains(csv_content, "cust_no", "csv header");
     AssertContains(csv_content, "1001", "csv row");
@@ -239,21 +238,21 @@ void TestStubClientAndCsv()
 
 void TestMimeAndDryRun()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "tds_reporter_mail_test";
+    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_mail_test";
     std::filesystem::create_directories(output_dir);
-    const tds_reporter::AppConfig config = BuildTestConfig(output_dir);
+    const report::AppConfig config = BuildTestConfig(output_dir);
 
-    const std::vector<tds_reporter::CustomerFundRecord> records {
+    const std::vector<report::CustomerFundRecord> records {
         {20260418, "1001", "Alpha Capital", "FA1001", "CNY", 1000.5, 12.5, 800.0, 0.12, 0.15},
         {20260418, "1002", "Beta Futures", "FA1002", "CNY", 2000.5, -8.5, 1200.0, 0.08, 0.11}
     };
-    const std::string csv_path = tds_reporter::WriteCsvReport(records, config, 20260418);
+    const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
 
-    tds_reporter::CliOptions cli;
+    report::CliOptions cli;
     cli.to = {"dest@example.com"};
-    const tds_reporter::MailRequest request =
-        tds_reporter::BuildMailRequest(records, config, cli, 20260418, csv_path);
-    const std::string mime = tds_reporter::BuildMimeMessage(request);
+    const report::MailRequest request =
+        report::BuildMailRequest(records, config, cli, 20260418, csv_path);
+    const std::string mime = report::BuildMimeMessage(request);
 
     AssertContains(
         mime,
@@ -271,16 +270,16 @@ void TestMimeAndDryRun()
     AssertContains(mime, "12.00%", "mime risk formatting");
     AssertContains(mime, "No Action Required", "mime threshold note");
 
-    const tds_reporter::SendMailResult result = tds_reporter::SendMailWithCurl(request, config, true);
+    const report::SendMailResult result = report::SendMailWithCurl(request, config, true);
     AssertTrue(!result.sent, "dry run should not mark mail as sent");
     AssertTrue(std::filesystem::exists(result.preview_path), "dry run preview should exist");
 }
 
 void TestCurlConfigWithClientCertificate()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "tds_reporter_curl_test";
+    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_curl_test";
     std::filesystem::create_directories(output_dir);
-    tds_reporter::AppConfig config = BuildTestConfig(output_dir);
+    report::AppConfig config = BuildTestConfig(output_dir);
     config.smtp.host = "mta-hub.example.com.cn";
     config.smtp.port = 2587;
     config.smtp.security = "starttls";
@@ -290,17 +289,17 @@ void TestCurlConfigWithClientCertificate()
     config.smtp.client_cert_type = "PEM";
     config.smtp.client_key_type = "PEM";
 
-    const std::vector<tds_reporter::CustomerFundRecord> records {
+    const std::vector<report::CustomerFundRecord> records {
         {20260418, "1001", "Alpha Capital", "FA1001", "CNY", 1000.5, 12.5, 800.0, 0.12, 0.15}
     };
-    const std::string csv_path = tds_reporter::WriteCsvReport(records, config, 20260418);
+    const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
 
-    tds_reporter::CliOptions cli;
+    report::CliOptions cli;
     cli.to = {"dest@example.com"};
-    const tds_reporter::MailRequest request =
-        tds_reporter::BuildMailRequest(records, config, cli, 20260418, csv_path);
+    const report::MailRequest request =
+        report::BuildMailRequest(records, config, cli, 20260418, csv_path);
     const std::string curl_config =
-        tds_reporter::BuildCurlConfig(request, config, "D:/mail/message.eml");
+        report::BuildCurlConfig(request, config, "D:/mail/message.eml");
 
     AssertContains(curl_config, "url = \"smtp://mta-hub.example.com.cn:2587\"", "curl smtp url");
     AssertContains(curl_config, "cert = \"/app/.cert/server.pem\"", "curl client cert");
@@ -313,15 +312,15 @@ void TestCurlConfigWithClientCertificate()
 void TestVendorTextDecodingAndErrorFormatting()
 {
     const std::string gbk_error = "\xB4\xB4\xBD\xA8\x54\x44\x53\xBE\xE4\xB1\xFA\xCA\xA7\xB0\xDC";
-    const std::string decoded = tds_reporter::DecodeVendorText(gbk_error);
+    const std::string decoded = report::DecodeVendorText(gbk_error);
     const std::string formatted =
-        tds_reporter::FormatTdsApiError("TdsApi_reqLogin", 430000103, gbk_error);
+        report::FormatTdsApiError("TdsApi_reqLogin", 430000103, gbk_error);
 
     AssertTrue(
         decoded == u8"\u521B\u5EFATDS\u53E5\u67C4\u5931\u8D25",
         "GBK vendor text should decode to UTF-8");
     AssertContains(
-        tds_reporter::DescribeTdsErrorCode(430000103),
+        report::DescribeTdsErrorCode(430000103),
         "failed to create TDS handle",
         "known TDS error code description");
     AssertContains(formatted, "430000103", "formatted error code");
@@ -331,32 +330,32 @@ void TestVendorTextDecodingAndErrorFormatting()
 void TestNoMoreDataDetection()
 {
     AssertTrue(
-        tds_reporter::IsTdsNoMoreDataResult(1009, ""),
+        report::IsTdsNoMoreDataResult(1009, ""),
         "error code 1009 should be treated as end-of-data");
     AssertTrue(
-        tds_reporter::IsTdsNoMoreDataResult(1, u8"\u6ca1\u6709\u66f4\u591a\u6570\u636e"),
+        report::IsTdsNoMoreDataResult(1, u8"\u6ca1\u6709\u66f4\u591a\u6570\u636e"),
         "decoded vendor message should be treated as end-of-data");
     AssertTrue(
-        !tds_reporter::IsTdsNoMoreDataResult(430000111, "snapshot failed"),
+        !report::IsTdsNoMoreDataResult(430000111, "snapshot failed"),
         "real snapshot errors must not be ignored");
 }
 
 void TestLoggerWritesJsonLine()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "tds_reporter_logger_test";
+    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_logger_test";
     std::filesystem::create_directories(output_dir);
 
-    tds_reporter::AppConfig config = BuildTestConfig(output_dir);
-    tds_reporter::InitializeLogger(config);
-    tds_reporter::LogInfo(
+    report::AppConfig config = BuildTestConfig(output_dir);
+    report::InitializeLogger(config);
+    report::LogInfo(
         "logger_test",
         "Logger writes json lines",
         {
             {"trade_date", "20260418"},
             {"mode", "test"}
         });
-    const std::string log_path = tds_reporter::CurrentLogFilePath();
-    tds_reporter::ShutdownLogger();
+    const std::string log_path = report::CurrentLogFilePath();
+    report::ShutdownLogger();
 
     AssertTrue(!log_path.empty(), "logger should expose the current log file path");
     AssertTrue(std::filesystem::exists(log_path), "log file should be created");
@@ -383,12 +382,12 @@ int main()
         TestVendorTextDecodingAndErrorFormatting();
         TestNoMoreDataDetection();
         TestLoggerWritesJsonLine();
-        std::cout << "All tds_reporter tests passed\n";
+        std::cout << "All report tests passed\n";
         return 0;
     }
     catch (const std::exception& ex)
     {
-        std::cerr << "tds_reporter_tests failed: " << ex.what() << '\n';
+        std::cerr << "report_tests failed: " << ex.what() << '\n';
         return 1;
     }
 }

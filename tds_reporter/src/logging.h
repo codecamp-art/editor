@@ -1,5 +1,5 @@
-#ifndef TDS_REPORTER_LOGGING_H
-#define TDS_REPORTER_LOGGING_H
+#ifndef REPORT_LOGGING_H
+#define REPORT_LOGGING_H
 
 #include "app.h"
 
@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace tds_reporter {
+namespace report {
 
 using LogField = std::pair<std::string, std::string>;
 using LogFields = std::vector<LogField>;
@@ -21,6 +21,6 @@ void LogInfo(const std::string& event, const std::string& message, const LogFiel
 void LogWarn(const std::string& event, const std::string& message, const LogFields& fields = {});
 void LogError(const std::string& event, const std::string& message, const LogFields& fields = {});
 
-} // namespace tds_reporter
+} // namespace report
 
 #endif

@@ -1,11 +1,11 @@
-#ifndef TDS_REPORTER_APP_H
-#define TDS_REPORTER_APP_H
+#ifndef REPORT_APP_H
+#define REPORT_APP_H
 
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace tds_reporter {
+namespace report {
 
 struct CustomerFundRecord
 {
@@ -61,13 +61,7 @@ struct VaultConfig
     std::string executable;
     std::string address;
     std::string namespace_name;
-    std::string auth_method;
     std::string auth_path;
-    std::string token;
-    std::string cert_role;
-    std::string ca_cert_path;
-    std::string client_cert_path;
-    std::string client_key_path;
     std::string kerberos_username;
     std::string kerberos_service;
     std::string kerberos_realm;
@@ -148,6 +142,6 @@ std::string BuildMimeMessage(const MailRequest& request);
 std::string BuildCurlConfig(const MailRequest& request, const AppConfig& config, const std::string& message_path);
 SendMailResult SendMailWithCurl(const MailRequest& request, const AppConfig& config, bool dry_run);
 
-} // namespace tds_reporter
+} // namespace report
 
 #endif

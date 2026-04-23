@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(tds_reporter LANGUAGES CXX)
+project(report LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -12,10 +12,10 @@ set(TDS_VENDOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/tds")
 set(TDS_VENDOR_INCLUDE_DIR "${TDS_VENDOR_ROOT}/include" CACHE PATH "Path to vendor header directory")
 set(TDS_VENDOR_LIBRARY "" CACHE FILEPATH "Path to vendor link library: .so on Linux, .lib on Windows")
 set(TDS_VENDOR_RUNTIME "" CACHE FILEPATH "Path to vendor runtime library: .so on Linux, .dll on Windows")
-set(TDS_REPORTER_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH "Directory used by the tds_reporter_stage target")
+set(REPORT_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH "Directory used by the report_stage target")
 
 add_library(
-    tds_reporter_lib
+    report_lib
     src/app.cpp
     src/logging.cpp
     src/text_utils.cpp
@@ -23,13 +23,13 @@ add_library(
 )
 
 target_include_directories(
-    tds_reporter_lib
+    report_lib
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${TDS_VENDOR_INCLUDE_DIR}
 )
 
-set(TDS_REPORTER_FILESYSTEM_TEST_SOURCE
+set(REPORT_FILESYSTEM_TEST_SOURCE
 "#include <filesystem>
 int main() {
     const std::filesystem::path path{\".\"};
@@ -38,22 +38,22 @@ int main() {
 ")
 
 check_cxx_source_compiles(
-    "${TDS_REPORTER_FILESYSTEM_TEST_SOURCE}"
-    TDS_REPORTER_FILESYSTEM_LINKS_WITHOUT_EXTRA_LIB
+    "${REPORT_FILESYSTEM_TEST_SOURCE}"
+    REPORT_FILESYSTEM_LINKS_WITHOUT_EXTRA_LIB
 )
 
-if(NOT TDS_REPORTER_FILESYSTEM_LINKS_WITHOUT_EXTRA_LIB)
-    set(TDS_REPORTER_FILESYSTEM_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
+if(NOT REPORT_FILESYSTEM_LINKS_WITHOUT_EXTRA_LIB)
+    set(REPORT_FILESYSTEM_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
     list(APPEND CMAKE_REQUIRED_LIBRARIES stdc++fs)
     check_cxx_source_compiles(
-        "${TDS_REPORTER_FILESYSTEM_TEST_SOURCE}"
-        TDS_REPORTER_FILESYSTEM_LINKS_WITH_STDCXXFS
+        "${REPORT_FILESYSTEM_TEST_SOURCE}"
+        REPORT_FILESYSTEM_LINKS_WITH_STDCXXFS
     )
-    set(CMAKE_REQUIRED_LIBRARIES "${TDS_REPORTER_FILESYSTEM_REQUIRED_LIBRARIES}")
+    set(CMAKE_REQUIRED_LIBRARIES "${REPORT_FILESYSTEM_REQUIRED_LIBRARIES}")
 
-    if(TDS_REPORTER_FILESYSTEM_LINKS_WITH_STDCXXFS)
+    if(REPORT_FILESYSTEM_LINKS_WITH_STDCXXFS)
         message(STATUS "Linking stdc++fs for std::filesystem compatibility on this toolchain")
-        target_link_libraries(tds_reporter_lib PUBLIC stdc++fs)
+        target_link_libraries(report_lib PUBLIC stdc++fs)
     else()
         message(
             FATAL_ERROR
@@ -67,7 +67,7 @@ set(TDS_VENDOR_LIBRARY_DIR "")
 set(TDS_VENDOR_LIBRARY_ABS "")
 set(TDS_VENDOR_RUNTIME_ABS "")
 set(TDS_VENDOR_INSTALL_FILES "")
-set(TDS_REPORTER_HAS_VENDOR_API OFF)
+set(REPORT_HAS_VENDOR_API OFF)
 
 if(WIN32)
     set(TDS_WINDOWS_TARGET_BITS 32)
@@ -124,10 +124,10 @@ if(UNIX)
     get_filename_component(TDS_VENDOR_LIBRARY_ABS "${TDS_VENDOR_LIBRARY}" ABSOLUTE)
     get_filename_component(TDS_VENDOR_LIBRARY_DIR "${TDS_VENDOR_LIBRARY_ABS}" DIRECTORY)
     set(TDS_VENDOR_RUNTIME_ABS "${TDS_VENDOR_LIBRARY_ABS}")
-    target_link_libraries(tds_reporter_lib PRIVATE "${TDS_VENDOR_LIBRARY_ABS}")
-    set(TDS_REPORTER_HAS_VENDOR_API ON)
+    target_link_libraries(report_lib PRIVATE "${TDS_VENDOR_LIBRARY_ABS}")
+    set(REPORT_HAS_VENDOR_API ON)
 elseif(WIN32)
-    target_compile_definitions(tds_reporter_lib PRIVATE _WINDOWS)
+    target_compile_definitions(report_lib PRIVATE _WINDOWS)
 
     if(TDS_VENDOR_LIBRARY)
         if(NOT EXISTS "${TDS_VENDOR_LIBRARY}")
@@ -135,8 +135,8 @@ elseif(WIN32)
         endif()
         get_filename_component(TDS_VENDOR_LIBRARY_ABS "${TDS_VENDOR_LIBRARY}" ABSOLUTE)
         get_filename_component(TDS_VENDOR_LIBRARY_DIR "${TDS_VENDOR_LIBRARY_ABS}" DIRECTORY)
-        target_link_libraries(tds_reporter_lib PRIVATE "${TDS_VENDOR_LIBRARY_ABS}")
-        set(TDS_REPORTER_HAS_VENDOR_API ON)
+        target_link_libraries(report_lib PRIVATE "${TDS_VENDOR_LIBRARY_ABS}")
+        set(REPORT_HAS_VENDOR_API ON)
 
         if(TDS_VENDOR_RUNTIME)
             if(NOT EXISTS "${TDS_VENDOR_RUNTIME}")
@@ -154,25 +154,25 @@ else()
     message(FATAL_ERROR "Unsupported platform. This project only supports Windows local development and Linux/RHEL8 builds.")
 endif()
 
-if(TDS_REPORTER_HAS_VENDOR_API AND NOT EXISTS "${TDS_VENDOR_INCLUDE_DIR}/tds_api.h")
+if(REPORT_HAS_VENDOR_API AND NOT EXISTS "${TDS_VENDOR_INCLUDE_DIR}/tds_api.h")
     message(FATAL_ERROR "TDS_VENDOR_INCLUDE_DIR must contain tds_api.h: ${TDS_VENDOR_INCLUDE_DIR}")
 endif()
 
-if(TDS_REPORTER_HAS_VENDOR_API)
-    target_compile_definitions(tds_reporter_lib PRIVATE TDS_REPORTER_HAS_VENDOR_API=1)
+if(REPORT_HAS_VENDOR_API)
+    target_compile_definitions(report_lib PRIVATE REPORT_HAS_VENDOR_API=1)
 endif()
 
-add_executable(tds_reporter src/main.cpp)
-target_link_libraries(tds_reporter PRIVATE tds_reporter_lib)
+add_executable(report src/main.cpp)
+target_link_libraries(report PRIVATE report_lib)
 
 enable_testing()
 
-add_executable(tds_reporter_tests tests/tds_reporter_tests.cpp)
-target_link_libraries(tds_reporter_tests PRIVATE tds_reporter_lib)
+add_executable(report_tests tests/report_tests.cpp)
+target_link_libraries(report_tests PRIVATE report_lib)
 
 if(TDS_VENDOR_LIBRARY_DIR)
     set_target_properties(
-        tds_reporter
+        report
         PROPERTIES
             BUILD_RPATH "${TDS_VENDOR_LIBRARY_DIR}"
             INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
@@ -199,25 +199,25 @@ endif()
 if(WIN32 AND TDS_VENDOR_INSTALL_FILES)
     foreach(TDS_VENDOR_FILE IN LISTS TDS_VENDOR_INSTALL_FILES)
         add_custom_command(
-            TARGET tds_reporter
+            TARGET report
             POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${TDS_VENDOR_FILE}"
-                "$<TARGET_FILE_DIR:tds_reporter>"
+                "$<TARGET_FILE_DIR:report>"
         )
 
         add_custom_command(
-            TARGET tds_reporter_tests
+            TARGET report_tests
             POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${TDS_VENDOR_FILE}"
-                "$<TARGET_FILE_DIR:tds_reporter_tests>"
+                "$<TARGET_FILE_DIR:report_tests>"
         )
     endforeach()
 endif()
 
 install(
-    TARGETS tds_reporter
+    TARGETS report
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
@@ -266,14 +266,14 @@ install(
 )
 
 add_custom_target(
-    tds_reporter_stage
-    COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${TDS_REPORTER_STAGE_DIR}" --config "$<CONFIG>"
-    DEPENDS tds_reporter
-    COMMENT "Stage tds_reporter under ${TDS_REPORTER_STAGE_DIR}"
+    report_stage
+    COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${REPORT_STAGE_DIR}" --config "$<CONFIG>"
+    DEPENDS report
+    COMMENT "Stage report under ${REPORT_STAGE_DIR}"
 )
 
 add_test(
-    NAME tds_reporter_tests
-    COMMAND tds_reporter_tests
+    NAME report_tests
+    COMMAND report_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )

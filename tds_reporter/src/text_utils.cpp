@@ -12,7 +12,7 @@
 #include <iconv.h>
 #endif
 
-namespace tds_reporter {
+namespace report {
 namespace {
 
 constexpr int kTdsApiGetVersionFail = 430000101;
@@ -372,4 +372,4 @@ std::string FormatTdsApiError(
     return output.str();
 }
 
-} // namespace tds_reporter
+} // namespace report

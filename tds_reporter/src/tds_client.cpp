@@ -10,11 +10,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#ifdef TDS_REPORTER_HAS_VENDOR_API
+#ifdef REPORT_HAS_VENDOR_API
 #include "tds_api.h"
 #endif
 
-namespace tds_reporter {
+namespace report {
 namespace {
 
 std::string Trim(const std::string& value)
@@ -80,7 +80,7 @@ std::vector<std::string> ParseCsvLine(const std::string& line)
     return values;
 }
 
-#ifdef TDS_REPORTER_HAS_VENDOR_API
+#ifdef REPORT_HAS_VENDOR_API
 std::string ExtractFixedString(const char* raw, std::size_t max_length)
 {
     std::size_t length = 0;
@@ -447,7 +447,7 @@ std::unique_ptr<ITdsClient> CreateClient(const AppConfig& config, const CliOptio
         return std::make_unique<StubTdsClient>(cli.stub_file);
     }
 
-#ifdef TDS_REPORTER_HAS_VENDOR_API
+#ifdef REPORT_HAS_VENDOR_API
     LogInfo(
         "client_create",
         "Using live vendor TDS client",
@@ -464,4 +464,4 @@ std::unique_ptr<ITdsClient> CreateClient(const AppConfig& config, const CliOptio
 #endif
 }
 
-} // namespace tds_reporter
+} // namespace report

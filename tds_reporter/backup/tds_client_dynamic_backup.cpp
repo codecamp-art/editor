@@ -19,7 +19,7 @@
 #include <dlfcn.h>
 #endif
 
-namespace tds_reporter {
+namespace report {
 namespace {
 
 using TdsHandle = void*;
@@ -487,4 +487,4 @@ std::unique_ptr<ITdsClient> CreateClient(const AppConfig& config, const CliOptio
     return std::make_unique<VendorTdsClient>(config);
 }
 
-} // namespace tds_reporter
+} // namespace report

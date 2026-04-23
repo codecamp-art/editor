@@ -10,7 +10,7 @@ void PrintUsage()
 {
     std::cout
         << "Usage:\n"
-        << "  tds_reporter --env dev [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
+        << "  report --env dev [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
         << "               [--cust-list 1001,1002] [--output-dir path] [--trade-date YYYYMMDD]\n"
         << "               [--dry-run] [--stub-file path]\n\n"
         << "Notes:\n"
@@ -18,7 +18,7 @@ void PrintUsage()
         << "  --dry-run writes an .eml preview instead of calling curl SMTP.\n";
 }
 
-std::size_t CountUniqueCustomers(const std::vector<tds_reporter::CustomerFundRecord>& records)
+std::size_t CountUniqueCustomers(const std::vector<report::CustomerFundRecord>& records)
 {
     std::set<std::string> cust_numbers;
     for (const auto& record : records)
@@ -34,7 +34,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        const tds_reporter::CliOptions cli = tds_reporter::ParseCli(argc, argv);
+        const report::CliOptions cli = report::ParseCli(argc, argv);
         if (cli.help)
         {
             PrintUsage();
@@ -42,30 +42,30 @@ int main(int argc, char** argv)
         }
 
         const std::string config_path =
-            cli.config_path.empty() ? tds_reporter::DefaultConfigPath(cli.env) : cli.config_path;
-        const tds_reporter::AppConfig config = tds_reporter::LoadConfig(config_path, cli);
-        tds_reporter::InitializeLogger(config);
-        tds_reporter::LogInfo(
+            cli.config_path.empty() ? report::DefaultConfigPath(cli.env) : cli.config_path;
+        const report::AppConfig config = report::LoadConfig(config_path, cli);
+        report::InitializeLogger(config);
+        report::LogInfo(
             "startup",
-            "tds_reporter run started",
+            "report run started",
             {
                 {"config_path", config_path},
                 {"dry_run", cli.dry_run ? "true" : "false"},
                 {"stub_mode", cli.stub_file.empty() ? "false" : "true"},
-                {"log_file", tds_reporter::CurrentLogFilePath()}
+                {"log_file", report::CurrentLogFilePath()}
             });
 
-        std::unique_ptr<tds_reporter::ITdsClient> client = tds_reporter::CreateClient(config, cli);
+        std::unique_ptr<report::ITdsClient> client = report::CreateClient(config, cli);
 
         const int trade_date = cli.trade_date_override > 0 ? cli.trade_date_override : client->FetchTradeDate();
-        tds_reporter::LogInfo(
+        report::LogInfo(
             "trade_date_ready",
             "Trade date resolved",
             {{"trade_date", std::to_string(trade_date)}});
 
-        const std::vector<tds_reporter::CustomerFundRecord> records =
+        const std::vector<report::CustomerFundRecord> records =
             client->FetchCustomerFunds(trade_date, cli.cust_filters);
-        tds_reporter::LogInfo(
+        report::LogInfo(
             "snapshot_ready",
             "Customer fund snapshot loaded",
             {
@@ -74,11 +74,11 @@ int main(int argc, char** argv)
                 {"unique_customers", std::to_string(CountUniqueCustomers(records))}
             });
 
-        const std::string report_path = tds_reporter::WriteCsvReport(records, config, trade_date);
-        const tds_reporter::MailRequest mail_request =
-            tds_reporter::BuildMailRequest(records, config, cli, trade_date, report_path);
-        const tds_reporter::SendMailResult mail_result =
-            tds_reporter::SendMailWithCurl(mail_request, config, cli.dry_run);
+        const std::string report_path = report::WriteCsvReport(records, config, trade_date);
+        const report::MailRequest mail_request =
+            report::BuildMailRequest(records, config, cli, trade_date, report_path);
+        const report::SendMailResult mail_result =
+            report::SendMailWithCurl(mail_request, config, cli.dry_run);
 
         std::cout << "Environment: " << config.env_name << '\n';
         std::cout << "Trade date: " << trade_date << '\n';
@@ -88,13 +88,13 @@ int main(int argc, char** argv)
         if (mail_result.sent)
         {
             std::cout << "Email status: sent\n";
-            tds_reporter::LogInfo("mail_sent", "SMTP message sent", {{"csv_report", report_path}});
+            report::LogInfo("mail_sent", "SMTP message sent", {{"csv_report", report_path}});
         }
         else
         {
             std::cout << "Email status: dry-run preview generated\n";
             std::cout << "Preview file: " << mail_result.preview_path << '\n';
-            tds_reporter::LogInfo(
+            report::LogInfo(
                 "mail_dry_run",
                 "Dry-run mail preview generated",
                 {
@@ -103,18 +103,18 @@ int main(int argc, char** argv)
                 });
         }
 
-        tds_reporter::LogInfo("shutdown", "tds_reporter run completed successfully");
-        tds_reporter::ShutdownLogger();
+        report::LogInfo("shutdown", "report run completed successfully");
+        report::ShutdownLogger();
         return 0;
     }
     catch (const std::exception& ex)
     {
-        if (tds_reporter::IsLoggerInitialized())
+        if (report::IsLoggerInitialized())
         {
-            tds_reporter::LogError("run_failed", ex.what());
-            tds_reporter::ShutdownLogger();
+            report::LogError("run_failed", ex.what());
+            report::ShutdownLogger();
         }
-        std::cerr << "tds_reporter failed: " << ex.what() << '\n';
+        std::cerr << "report failed: " << ex.what() << '\n';
         return 1;
     }
 }

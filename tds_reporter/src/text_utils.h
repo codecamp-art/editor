@@ -1,9 +1,9 @@
-#ifndef TDS_REPORTER_TEXT_UTILS_H
-#define TDS_REPORTER_TEXT_UTILS_H
+#ifndef REPORT_TEXT_UTILS_H
+#define REPORT_TEXT_UTILS_H
 
 #include <string>
 
-namespace tds_reporter {
+namespace report {
 
 std::string DecodeVendorText(const std::string& value);
 std::string DescribeTdsErrorCode(int error_code);
@@ -13,6 +13,6 @@ std::string FormatTdsApiError(
     int error_code,
     const std::string& error_message);
 
-} // namespace tds_reporter
+} // namespace report
 
 #endif

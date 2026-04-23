@@ -22,17 +22,12 @@ pipeline {
     string(name: 'VAULT_BIN', defaultValue: 'vault', description: 'Vault CLI executable used to authenticate and read secrets')
     string(name: 'VAULT_ADDR', defaultValue: '', description: 'Vault address, for example https://vault.example.com:8200')
     string(name: 'VAULT_NAMESPACE', defaultValue: '', description: 'Optional Vault namespace')
-    string(name: 'VAULT_AUTH_METHOD', defaultValue: '', description: 'Optional Vault auth method used by Jenkins: cert or kerberos')
     string(name: 'VAULT_AUTH_PATH', defaultValue: '', description: 'Optional non-default Vault auth mount path')
-    string(name: 'VAULT_CERT_ROLE', defaultValue: '', description: 'Optional Vault cert auth role name')
-    string(name: 'VAULT_CERT_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Vault client certificate')
-    string(name: 'VAULT_KEY_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Vault client private key')
-    string(name: 'VAULT_CA_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Vault CA bundle')
     string(name: 'VAULT_KERBEROS_USERNAME', defaultValue: '', description: 'Vault kerberos username')
     string(name: 'VAULT_KERBEROS_SERVICE', defaultValue: '', description: 'Vault kerberos service principal, for example HTTP/vault.example.com')
     string(name: 'VAULT_KERBEROS_REALM', defaultValue: '', description: 'Vault kerberos realm')
-    string(name: 'VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Vault kerberos keytab')
-    string(name: 'VAULT_KRB5CONF_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for krb5.conf')
+    string(name: 'VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Vault kerberos keytab')
+    string(name: 'VAULT_KRB5CONF_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for krb5.conf')
     booleanParam(name: 'VAULT_DISABLE_FAST_NEGOTIATION', defaultValue: false, description: 'Pass disable_fast_negotiation=true to vault kerberos login')
     string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the supplier zip password')
     string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the supplier zip password')
@@ -52,52 +47,33 @@ pipeline {
   stages {
     stage('Prepare Vault Access') {
       when {
-        expression { return params.VAULT_AUTH_METHOD?.trim() }
+        expression { return params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim() }
       }
       steps {
         script {
           if (!params.VAULT_ADDR?.trim()) {
-            error('VAULT_ADDR is required when VAULT_AUTH_METHOD is set')
+            error('VAULT_ADDR is required when VENDOR_PACKAGE_PASSWORD_VAULT_PATH is set')
+          }
+          if (!params.VAULT_KERBEROS_USERNAME?.trim()) {
+            error('Vault kerberos auth requires VAULT_KERBEROS_USERNAME')
           }
 
-          def authMethod = params.VAULT_AUTH_METHOD.trim().toLowerCase()
           def credentialBindings = []
           def vaultEnv = [
             "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
             "VAULT_ADDR=${params.VAULT_ADDR.trim()}",
             "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
             "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}",
-            "VAULT_AUTH_METHOD=${authMethod}",
-            "VAULT_CERT_ROLE=${params.VAULT_CERT_ROLE?.trim() ?: ''}",
             "VAULT_KERBEROS_USERNAME=${params.VAULT_KERBEROS_USERNAME?.trim() ?: ''}",
             "VAULT_KERBEROS_SERVICE=${params.VAULT_KERBEROS_SERVICE?.trim() ?: ''}",
             "VAULT_KERBEROS_REALM=${params.VAULT_KERBEROS_REALM?.trim() ?: ''}",
             "VAULT_DISABLE_FAST_NEGOTIATION=${params.VAULT_DISABLE_FAST_NEGOTIATION ? 'true' : 'false'}"
           ]
-
-          if (authMethod == 'cert') {
-            if (!params.VAULT_CERT_FILE_CREDENTIALS_ID?.trim() || !params.VAULT_KEY_FILE_CREDENTIALS_ID?.trim()) {
-              error('VAULT_CERT_FILE_CREDENTIALS_ID and VAULT_KEY_FILE_CREDENTIALS_ID are required for VAULT_AUTH_METHOD=cert')
-            }
-
-            credentialBindings << file(credentialsId: params.VAULT_CERT_FILE_CREDENTIALS_ID.trim(), variable: 'VAULT_CERT_FILE')
-            credentialBindings << file(credentialsId: params.VAULT_KEY_FILE_CREDENTIALS_ID.trim(), variable: 'VAULT_KEY_FILE')
-            if (params.VAULT_CA_FILE_CREDENTIALS_ID?.trim()) {
-              credentialBindings << file(credentialsId: params.VAULT_CA_FILE_CREDENTIALS_ID.trim(), variable: 'VAULT_CA_FILE')
-            }
-          } else if (authMethod == 'kerberos') {
-            if (!params.VAULT_KERBEROS_USERNAME?.trim()) {
-              error('Vault kerberos auth requires VAULT_KERBEROS_USERNAME')
-            }
-
-            if (params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID?.trim()) {
-              credentialBindings << file(credentialsId: params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID.trim(), variable: 'VAULT_KEYTAB_FILE')
-            }
-            if (params.VAULT_KRB5CONF_CREDENTIALS_ID?.trim()) {
-              credentialBindings << file(credentialsId: params.VAULT_KRB5CONF_CREDENTIALS_ID.trim(), variable: 'VAULT_KRB5CONF_FILE')
-            }
-          } else {
-            error("Unsupported VAULT_AUTH_METHOD: ${params.VAULT_AUTH_METHOD}")
+          if (params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID?.trim()) {
+            credentialBindings << file(credentialsId: params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID.trim(), variable: 'VAULT_KEYTAB_FILE')
+          }
+          if (params.VAULT_KRB5CONF_CREDENTIALS_ID?.trim()) {
+            credentialBindings << file(credentialsId: params.VAULT_KRB5CONF_CREDENTIALS_ID.trim(), variable: 'VAULT_KRB5CONF_FILE')
           }
 
           withCredentials(credentialBindings) {
@@ -112,33 +88,22 @@ pipeline {
                     login_cmd+=("-path=$VAULT_AUTH_PATH")
                   fi
 
-                  if [ "$VAULT_AUTH_METHOD" = "cert" ]; then
-                    login_cmd+=("-method=cert")
-                    if [ -n "${VAULT_CA_FILE:-}" ]; then
-                      login_cmd+=("-ca-cert=$VAULT_CA_FILE")
-                    fi
-                    login_cmd+=("-client-cert=$VAULT_CERT_FILE" "-client-key=$VAULT_KEY_FILE")
-                    if [ -n "${VAULT_CERT_ROLE:-}" ]; then
-                      login_cmd+=("name=$VAULT_CERT_ROLE")
-                    fi
-                  else
-                    login_cmd+=("-method=kerberos")
-                    login_cmd+=("username=$VAULT_KERBEROS_USERNAME")
-                    if [ -n "${VAULT_KERBEROS_SERVICE:-}" ]; then
-                      login_cmd+=("service=$VAULT_KERBEROS_SERVICE")
-                    fi
-                    if [ -n "${VAULT_KERBEROS_REALM:-}" ]; then
-                      login_cmd+=("realm=$VAULT_KERBEROS_REALM")
-                    fi
-                    if [ -n "${VAULT_KEYTAB_FILE:-}" ]; then
-                      login_cmd+=("keytab_path=$VAULT_KEYTAB_FILE")
-                    fi
-                    if [ -n "${VAULT_KRB5CONF_FILE:-}" ]; then
-                      login_cmd+=("krb5conf_path=$VAULT_KRB5CONF_FILE")
-                    fi
-                    if [ "$VAULT_DISABLE_FAST_NEGOTIATION" = "true" ]; then
-                      login_cmd+=("disable_fast_negotiation=true")
-                    fi
+                  login_cmd+=("-method=kerberos")
+                  login_cmd+=("username=$VAULT_KERBEROS_USERNAME")
+                  if [ -n "${VAULT_KERBEROS_SERVICE:-}" ]; then
+                    login_cmd+=("service=$VAULT_KERBEROS_SERVICE")
+                  fi
+                  if [ -n "${VAULT_KERBEROS_REALM:-}" ]; then
+                    login_cmd+=("realm=$VAULT_KERBEROS_REALM")
+                  fi
+                  if [ -n "${VAULT_KEYTAB_FILE:-}" ]; then
+                    login_cmd+=("keytab_path=$VAULT_KEYTAB_FILE")
+                  fi
+                  if [ -n "${VAULT_KRB5CONF_FILE:-}" ]; then
+                    login_cmd+=("krb5conf_path=$VAULT_KRB5CONF_FILE")
+                  fi
+                  if [ "$VAULT_DISABLE_FAST_NEGOTIATION" = "true" ]; then
+                    login_cmd+=("disable_fast_negotiation=true")
                   fi
 
                   "${login_cmd[@]}"
@@ -161,7 +126,7 @@ pipeline {
 
           if (params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim()) {
             if (!env.VAULT_RUNTIME_TOKEN?.trim()) {
-              error('VENDOR_PACKAGE_PASSWORD_VAULT_PATH requires a Vault token. Configure VAULT_AUTH_METHOD and related Vault parameters.')
+              error('VENDOR_PACKAGE_PASSWORD_VAULT_PATH requires a Kerberos-authenticated Vault session.')
             }
 
             withEnv([
@@ -304,7 +269,7 @@ pipeline {
           cmake -S . -B "$BUILD_DIR" \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DTDS_VENDOR_LIBRARY="$EFFECTIVE_VENDOR_LIBRARY" \
-            -DTDS_REPORTER_STAGE_DIR="$STAGE_DIR"
+            -DREPORT_STAGE_DIR="$STAGE_DIR"
         '''
       }
     }
@@ -331,8 +296,8 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
-          cmake --build "$BUILD_DIR" --target tds_reporter_stage
-          test -f "$STAGE_DIR/bin/tds_reporter"
+          cmake --build "$BUILD_DIR" --target report_stage
+          test -f "$STAGE_DIR/bin/report"
           find "$STAGE_DIR/lib" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) | sort
           test -f "$STAGE_DIR/lib/cpack.dat"
           tar -C "$STAGE_DIR" -czf "$BUILD_DIR/$PACKAGE_NAME" .
@@ -349,7 +314,11 @@ pipeline {
           "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
           "VAULT_ADDR=${params.VAULT_ADDR?.trim() ?: ''}",
           "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
-          "VAULT_TOKEN=${env.VAULT_RUNTIME_TOKEN ?: ''}"
+          "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}",
+          "VAULT_KERBEROS_USERNAME=${params.VAULT_KERBEROS_USERNAME?.trim() ?: ''}",
+          "VAULT_KERBEROS_SERVICE=${params.VAULT_KERBEROS_SERVICE?.trim() ?: ''}",
+          "VAULT_KERBEROS_REALM=${params.VAULT_KERBEROS_REALM?.trim() ?: ''}",
+          "VAULT_DISABLE_FAST_NEGOTIATION=${params.VAULT_DISABLE_FAST_NEGOTIATION ? 'true' : 'false'}"
         ]) {
           sh '''
             set -euxo pipefail
@@ -357,7 +326,7 @@ pipeline {
             if [ -f "$STAGE_DIR/config/report.properties" ]; then
               CONFIG_PATH="$STAGE_DIR/config/report.properties"
             fi
-            "$STAGE_DIR/bin/tds_reporter" \
+            "$STAGE_DIR/bin/report" \
               --env "$SMOKE_ENV" \
               --config "$CONFIG_PATH" \
               --dry-run \

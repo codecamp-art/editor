@@ -61,7 +61,7 @@ pipeline {
           if [ -f "$PROJECT_DIR/config/report.properties" ]; then
             CONFIG_PATH="$PROJECT_DIR/config/report.properties"
           fi
-          "$BUILD_DIR/tds_reporter" \
+          "$BUILD_DIR/report" \
             --env dev \
             --config "$CONFIG_PATH" \
             --stub-file "$PROJECT_DIR/tests/data/stub_snapshot.csv" \
