@@ -2,6 +2,86 @@
 
 `report` is a standalone C++17 program that reads the TDS snapshot, writes a CSV report, and sends mail through `curl`.
 
+## Packaging Model
+
+Windows local build is only for debugging and does not need installer packaging.
+
+RHEL8 local and Jenkins release now use a real self-extracting `.run` installer.
+
+Linux release flow:
+
+1. Build the staged runtime
+2. Wrap it into one `.run` installer
+3. Execute the installer with an environment parameter
+4. The installer extracts the package, renders `config/report.properties`, and leaves a ready-to-run standalone directory behind
+
+## Linux `.run` Installer
+
+The Linux installer is a self-extracting shell archive.
+
+Usage:
+
+```bash
+./client_funding_risk_report-installer.run --env qa --prefix /home/user/apps/report
+```
+
+Behavior:
+
+1. Extract into `--prefix`
+2. Render `config/report.properties` from `dev`, `qa`, or `prod`
+3. Leave `bin/report`, `run-report.sh`, and all runtime files in that directory
+
+Options:
+
+- `--env <dev|qa|prod>` required
+- `--prefix <path>` optional, default is `./client_funding_risk_report`
+
+Reinstall behavior:
+
+- if `--prefix` already contains a previous `report` installation, the installer replaces it automatically
+- if `--prefix` points to an unrelated non-empty directory, the installer refuses to overwrite it
+
+After install:
+
+```bash
+/home/user/apps/report/bin/report
+```
+
+To switch environment later without reinstalling:
+
+```bash
+/home/user/apps/report/run-report.sh prod --dry-run --to ops@example.com
+```
+
+## Windows Local
+
+Windows local build is for debugging only.
+
+The current Windows PowerShell environment on this machine does not have `cmake` on `PATH`.
+
+Use the Visual Studio bundled executables directly:
+
+```powershell
+$cmake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+$ctest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe'
+```
+
+Stub debug build:
+
+```powershell
+& $cmake --preset windows-stub-x64
+& $cmake --build --preset windows-stub-x64-debug
+& $ctest --preset windows-stub-x64-debug
+.\build\windows-stub-x64\Debug\report.exe --env dev --stub-file .\tests\data\stub_snapshot.csv --dry-run --to debug@example.com
+```
+
+If you want to inspect the staged directory locally:
+
+```powershell
+& $cmake --build --preset windows-stub-x64-debug --target report_stage
+.\build\windows-stub-x64\client_funding_risk_report\run-report.ps1 qa --stub-file .\tests\data\stub_snapshot.csv --dry-run --to debug@example.com
+```
+
 ## Local Vendor Files
 
 Local build inputs are prepared manually under `tds/`.
@@ -28,56 +108,6 @@ Rules:
 - Jenkins release normalizes downloaded supplier files into `workspace/tds/linux_x86_64`
 - Live builds require `cpack.dat` beside the vendor library
 
-## Config Discovery
-
-The executable looks for config relative to itself before falling back to the current working directory.
-
-Behavior:
-
-1. If `--env qa` is specified, the runtime prefers `config/qa.properties`.
-2. If `--env` is omitted, the runtime prefers `config/report.properties`.
-3. `--config` still overrides everything, but packaged runs normally do not need it.
-
-That means:
-
-- a staged dev or qa package can run with only `--env`
-- a staged production package can run with no arguments when it contains `config/report.properties`
-- users no longer need `--config` just to point at the packaged config directory
-- dev and qa packages no longer install `config/report.properties`, so explicit `--env` stays deterministic
-
-## Package Modes
-
-### Dev and QA package
-
-The staged `config/` directory includes:
-
-- `dev.properties`
-- `qa.properties`
-- `prod.properties.template`
-- `report.properties.template`
-
-Run example:
-
-```bash
-./client_funding_risk_report/bin/report --env qa --dry-run --to qa-ops@example.com
-```
-
-### Production package
-
-Production packaging uses CMake single-config mode:
-
-- only `config/report.properties` is installed
-- `dev.properties` and `qa.properties` are not installed
-- the program can start with no arguments
-
-If `config/report.properties` does not already exist, the Jenkins release job copies `config/prod.properties.template` to `config/report.properties` before configure and stage.
-
-Run example:
-
-```bash
-./client_funding_risk_report/bin/report
-```
-
 ## Vault and Kerberos
 
 Vault access is Kerberos-only.
@@ -96,47 +126,6 @@ Assumptions:
 
 No extra code or runtime flag is needed if `klist` already works after switching to that user.
 
-## Windows Local
-
-The current Windows PowerShell environment on this machine does not have `cmake` on `PATH`.
-
-Use the Visual Studio bundled executables directly:
-
-```powershell
-$cmake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-$ctest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe'
-```
-
-### Stub build
-
-```powershell
-& $cmake --preset windows-stub-x64
-& $cmake --build --preset windows-stub-x64-debug
-& $ctest --preset windows-stub-x64-debug
-& $cmake --build --preset windows-stub-x64-debug --target report_stage
-.\build\windows-stub-x64\Debug\report.exe --env dev --stub-file .\tests\data\stub_snapshot.csv --dry-run --to debug@example.com
-.\build\windows-stub-x64\client_funding_risk_report\bin\report.exe --env dev --stub-file .\tests\data\stub_snapshot.csv --dry-run --to debug@example.com
-```
-
-### Live build with manual `tds/win32`
-
-If the supplier files are really 32-bit, use the x86 preset:
-
-```powershell
-& $cmake --preset windows-live-x86
-& $cmake --build --preset windows-live-x86-debug
-& $ctest --preset windows-live-x86-debug
-.\build\windows-live-x86\Debug\report.exe --env dev --dry-run --to debug@example.com
-```
-
-If the supplier gives a real x64 import library and DLL, pass them explicitly:
-
-```powershell
-& $cmake --preset windows-live-x64 -DTDS_VENDOR_LIBRARY=D:/vendor/tds/win64/tds_api.lib -DTDS_VENDOR_RUNTIME=D:/vendor/tds/win64/tds_api.dll
-& $cmake --build --preset windows-live-x64-debug
-& $ctest --preset windows-live-x64-debug
-```
-
 ## RHEL8 Local
 
 After manually placing the vendor `.so` and `cpack.dat` in `tds/linux_x86_64`:
@@ -145,21 +134,9 @@ After manually placing the vendor `.so` and `cpack.dat` in `tds/linux_x86_64`:
 cmake --preset linux-rhel8-release
 cmake --build --preset linux-rhel8-release --parallel
 ctest --preset linux-rhel8-release
-cmake --build build/linux-rhel8-release --target report_stage
-./build/linux-rhel8-release/client_funding_risk_report/bin/report --env qa --dry-run --to qa-ops@example.com
-```
-
-## Production Packaging On RHEL8
-
-If you want a local production-style package with only `report.properties`:
-
-```bash
-cp config/prod.properties.template config/report.properties
-cmake -S . -B build_release -G Ninja -DCMAKE_BUILD_TYPE=Release -DTDS_VENDOR_LIBRARY="$PWD/tds/linux_x86_64/libtds_api.so" -DREPORT_STAGE_DIR="$PWD/build_release/client_funding_risk_report" -DREPORT_INSTALL_SINGLE_CONFIG=ON -DREPORT_SINGLE_CONFIG_SOURCE="$PWD/config/report.properties"
-cmake --build build_release --parallel
-ctest --test-dir build_release --output-on-failure
-cmake --build build_release --target report_stage
-./build_release/client_funding_risk_report/bin/report
+cmake --build build/linux-rhel8-release --target report_run_installer
+./build/linux-rhel8-release/client_funding_risk_report-installer.run --env qa --prefix "$PWD/install_qa"
+./install_qa/bin/report --dry-run --to qa-ops@example.com
 ```
 
 ## Jenkins Release
@@ -173,8 +150,8 @@ Release assumptions:
 - the pipeline sources the user profile and checks `klist` before Vault Kerberos login and before live smoke
 - Artifactory client cert, key, CA, and optional cert password come from Vault, not Jenkins local file credentials
 - supplier `so` and `cpack.dat` are normalized into `workspace/tds/linux_x86_64`
-- the staged production package installs only `config/report.properties`
-- the stage step asserts that `config/` contains no other properties file
+- Jenkins builds one `.run` installer per build
+- the live smoke installs that `.run` into a temporary directory with `REPORT_RUNTIME_ENV`
 
 Important parameters:
 
@@ -190,6 +167,7 @@ Important parameters:
 - optional `VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID`
 - optional `VAULT_KRB5CONF_CREDENTIALS_ID`
 - optional `VENDOR_PACKAGE_PASSWORD_VAULT_PATH`
+- optional `REPORT_RUNTIME_ENV`
 
 Core flow:
 
@@ -198,12 +176,13 @@ Core flow:
 3. Read the Artifactory cert materials from Vault
 4. Download the supplier package from Artifactory
 5. Normalize `tds_api.so` and `cpack.dat` into `workspace/tds/linux_x86_64`
-6. Copy `config/prod.properties.template` to `config/report.properties` if needed
-7. Configure with `REPORT_INSTALL_SINGLE_CONFIG=ON`
-8. Build, test, stage, verify that `config/` contains only `report.properties`, and optionally run `bin/report --dry-run`
+6. Build, test, and stage one common runtime
+7. Build `client_funding_risk_report-*.run`
+8. For smoke, install that `.run` with `--env "$REPORT_RUNTIME_ENV" --prefix "$SMOKE_INSTALL_DIR"`
+9. Run `"$SMOKE_INSTALL_DIR/bin/report" --dry-run`
 
 ## Jenkins PR
 
 Pipeline file: [jenkins/Jenkinsfile.pr](/D:/Codes/local/Test/tds_reporter/jenkins/Jenkinsfile.pr)
 
-The PR smoke step now relies on normal config discovery and no longer needs `--config`.
+The PR smoke now builds the `.run` installer, installs it into a temporary directory with `--env dev`, and runs the installed `bin/report`.

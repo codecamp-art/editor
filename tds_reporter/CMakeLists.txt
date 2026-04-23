@@ -13,12 +13,8 @@ set(TDS_VENDOR_INCLUDE_DIR "${TDS_VENDOR_ROOT}/include" CACHE PATH "Path to vend
 set(TDS_VENDOR_LIBRARY "" CACHE FILEPATH "Path to vendor link library: .so on Linux, .lib on Windows")
 set(TDS_VENDOR_RUNTIME "" CACHE FILEPATH "Path to vendor runtime library: .so on Linux, .dll on Windows")
 set(REPORT_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH "Directory used by the report_stage target")
-option(REPORT_INSTALL_SINGLE_CONFIG "Install only config/report.properties into the runtime package" OFF)
-set(
-    REPORT_SINGLE_CONFIG_SOURCE
-    "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties"
-    CACHE FILEPATH
-    "Source file installed as config/report.properties when REPORT_INSTALL_SINGLE_CONFIG is ON")
+set(REPORT_RUN_INSTALLER_PATH "${CMAKE_BINARY_DIR}/client_funding_risk_report-installer.run" CACHE FILEPATH "Output path for the Linux self-extracting .run installer")
+get_filename_component(REPORT_INSTALL_DIR_NAME "${REPORT_STAGE_DIR}" NAME)
 
 add_library(
     report_lib
@@ -248,35 +244,27 @@ if(WIN32 AND TDS_VENDOR_INSTALL_FILES)
     )
 endif()
 
-if(REPORT_INSTALL_SINGLE_CONFIG)
-    if(NOT EXISTS "${REPORT_SINGLE_CONFIG_SOURCE}")
-        message(
-            FATAL_ERROR
-            "REPORT_INSTALL_SINGLE_CONFIG=ON requires an existing source file installed as config/report.properties: "
-            "${REPORT_SINGLE_CONFIG_SOURCE}")
-    endif()
-
-    install(
-        FILES "${REPORT_SINGLE_CONFIG_SOURCE}"
-        DESTINATION config
-        RENAME report.properties
-    )
-else()
-    install(
-        FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/config/dev.properties"
-            "${CMAKE_CURRENT_SOURCE_DIR}/config/qa.properties"
-            "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties.template"
-            "${CMAKE_CURRENT_SOURCE_DIR}/config/prod.properties.template"
-        DESTINATION config
-    )
-endif()
+install(
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/dev.properties"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/qa.properties"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/prod.properties"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties.template"
+    DESTINATION config
+)
 
 install(
     PROGRAMS
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/render-config.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/render-config.ps1"
     DESTINATION scripts
+)
+
+install(
+    PROGRAMS
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run-report.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run-report.ps1"
+    DESTINATION .
 )
 
 install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/logs\")")
@@ -288,10 +276,23 @@ install(
 
 add_custom_target(
     report_stage
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${REPORT_STAGE_DIR}"
     COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${REPORT_STAGE_DIR}" --config "$<CONFIG>"
     DEPENDS report
     COMMENT "Stage report under ${REPORT_STAGE_DIR}"
 )
+
+if(UNIX)
+    add_custom_target(
+        report_run_installer
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-run-installer.sh"
+            "${REPORT_STAGE_DIR}"
+            "${REPORT_RUN_INSTALLER_PATH}"
+            "${REPORT_INSTALL_DIR_NAME}"
+        DEPENDS report_stage
+        COMMENT "Build self-extracting .run installer at ${REPORT_RUN_INSTALLER_PATH}"
+    )
+endif()
 
 add_test(
     NAME report_tests

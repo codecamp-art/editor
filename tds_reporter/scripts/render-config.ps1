@@ -1,7 +1,28 @@
 param(
-    [string]$TemplatePath = (Join-Path $PSScriptRoot "..\config\report.properties.template"),
+    [string]$EnvName = "",
+    [string]$TemplatePath = "",
     [string]$OutputPath = (Join-Path $PSScriptRoot "..\config\report.properties")
 )
+
+if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
+    if (-not [string]::IsNullOrWhiteSpace($EnvName) -and
+        ($EnvName.Contains('\') -or $EnvName.Contains('/') -or $EnvName.EndsWith('.properties'))) {
+        $TemplatePath = $EnvName
+        $EnvName = ""
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
+    if ([string]::IsNullOrWhiteSpace($EnvName)) {
+        $EnvName = [System.Environment]::GetEnvironmentVariable("APP_ENV")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($EnvName)) {
+        throw "Use -EnvName dev|qa|prod or -TemplatePath path"
+    }
+
+    $TemplatePath = (Join-Path $PSScriptRoot "..\config\$EnvName.properties")
+}
 
 $resolvedTemplatePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TemplatePath)
 $resolvedOutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)

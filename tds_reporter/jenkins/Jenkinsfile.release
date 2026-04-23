@@ -20,6 +20,7 @@ pipeline {
     string(name: 'ARTIFACTORY_CERT_TYPE', defaultValue: 'PEM', description: 'Client certificate type passed to curl, for example PEM or P12')
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
     booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a packaged dry-run after staging')
+    string(name: 'REPORT_RUNTIME_ENV', defaultValue: 'prod', description: 'Environment name rendered into config/report.properties before the optional live smoke')
     string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional live smoke run')
     string(name: 'VAULT_BIN', defaultValue: 'vault', description: 'Vault CLI executable used by Jenkins and the application')
     string(name: 'VAULT_ADDR', defaultValue: '', description: 'Vault address, for example https://vault.example.com:8200')
@@ -39,11 +40,12 @@ pipeline {
     PROJECT_DIR = "${env.WORKSPACE}"
     BUILD_DIR = "${env.WORKSPACE}/build_release"
     STAGE_DIR = "${env.WORKSPACE}/build_release/client_funding_risk_report"
-    PACKAGE_NAME = "client_funding_risk_report-rhel8-${env.BUILD_NUMBER}.tar.gz"
+    PACKAGE_NAME = "client_funding_risk_report-rhel8-${env.BUILD_NUMBER}.run"
     VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
     VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
     VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
     ARTIFACTORY_AUTH_DIR = "${env.WORKSPACE}/artifactory_auth"
+    SMOKE_INSTALL_DIR = "${env.WORKSPACE}/smoke_install"
     VAULT_RUNTIME_TOKEN = ""
   }
 
@@ -133,18 +135,6 @@ pipeline {
             error('Vault login did not return a token')
           }
         }
-      }
-    }
-
-    stage('Prepare Runtime Config') {
-      steps {
-        sh '''
-          set -euxo pipefail
-          cd "$PROJECT_DIR"
-          if [ ! -f config/report.properties ]; then
-            cp config/prod.properties.template config/report.properties
-          fi
-        '''
       }
     }
 
@@ -312,8 +302,7 @@ pipeline {
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DTDS_VENDOR_LIBRARY="$EFFECTIVE_VENDOR_LIBRARY" \
             -DREPORT_STAGE_DIR="$STAGE_DIR" \
-            -DREPORT_INSTALL_SINGLE_CONFIG=ON \
-            -DREPORT_SINGLE_CONFIG_SOURCE="$PROJECT_DIR/config/report.properties"
+            -DREPORT_RUN_INSTALLER_PATH="$BUILD_DIR/$PACKAGE_NAME"
         '''
       }
     }
@@ -340,15 +329,17 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
-          cmake --build "$BUILD_DIR" --target report_stage
+          cmake --build "$BUILD_DIR" --target report_run_installer
           test -f "$STAGE_DIR/bin/report"
-          test -f "$STAGE_DIR/config/report.properties"
-          test "$(find "$STAGE_DIR/config" -maxdepth 1 -type f | wc -l)" -eq 1
-          test ! -f "$STAGE_DIR/config/dev.properties"
-          test ! -f "$STAGE_DIR/config/qa.properties"
+          test -f "$STAGE_DIR/run-report.sh"
+          test -f "$STAGE_DIR/run-report.ps1"
+          test -f "$STAGE_DIR/config/dev.properties"
+          test -f "$STAGE_DIR/config/qa.properties"
+          test -f "$STAGE_DIR/config/prod.properties"
+          test ! -f "$STAGE_DIR/config/report.properties"
+          test -x "$BUILD_DIR/$PACKAGE_NAME"
           find "$STAGE_DIR/lib" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) | sort
           test -f "$STAGE_DIR/lib/cpack.dat"
-          tar -C "$STAGE_DIR" -czf "$BUILD_DIR/$PACKAGE_NAME" .
         '''
       }
     }
@@ -385,7 +376,9 @@ pipeline {
             test -n "${KRB5CCNAME:-}"
             klist >/dev/null
 
-            "$STAGE_DIR/bin/report" \
+            rm -rf "$SMOKE_INSTALL_DIR"
+            "$BUILD_DIR/$PACKAGE_NAME" --env "$REPORT_RUNTIME_ENV" --prefix "$SMOKE_INSTALL_DIR"
+            "$SMOKE_INSTALL_DIR/bin/report" \
               --dry-run \
               --to "$SMOKE_TO"
           '''
@@ -396,7 +389,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'build_release/client_funding_risk_report/**, build_release/*.tar.gz, output/*', allowEmptyArchive: false
+      archiveArtifacts artifacts: 'build_release/client_funding_risk_report/**, build_release/*.run, output/*', allowEmptyArchive: false
     }
   }
 }

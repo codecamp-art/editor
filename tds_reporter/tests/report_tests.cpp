@@ -254,6 +254,21 @@ void TestDefaultConfigPathUsesSingleConfigWhenEnvMissing()
         "single-config package should use report.properties when --env is omitted");
 }
 
+void TestDefaultConfigPathDoesNotFallBackToDevWhenEnvMissing()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_requires_single_config_test";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir / "config");
+    WriteFile(temp_dir / "config" / "dev.properties", "env.name=dev\n");
+
+    const ScopedCurrentPath scoped_path(temp_dir);
+    const std::string config_path = report::DefaultConfigPath("");
+
+    AssertTrue(
+        std::filesystem::path(config_path).filename() == "report.properties",
+        "when --env is omitted the runtime should require report.properties instead of falling back to dev.properties");
+}
+
 void TestLoadConfigWithVaultBackedTdsPassword()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_vault_test";
@@ -451,6 +466,7 @@ int main()
         TestLoadConfigUsesFileEnvWhenCliEnvMissing();
         TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig();
         TestDefaultConfigPathUsesSingleConfigWhenEnvMissing();
+        TestDefaultConfigPathDoesNotFallBackToDevWhenEnvMissing();
         TestLoadConfigWithVaultBackedTdsPassword();
         TestStubClientAndCsv();
         TestMimeAndDryRun();

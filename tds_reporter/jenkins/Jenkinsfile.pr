@@ -16,6 +16,9 @@ pipeline {
   environment {
     PROJECT_DIR = "${env.WORKSPACE}"
     BUILD_DIR = "${env.WORKSPACE}/build_pr"
+    STAGE_DIR = "${env.WORKSPACE}/build_pr/client_funding_risk_report"
+    INSTALLER_PATH = "${env.WORKSPACE}/build_pr/client_funding_risk_report-installer.run"
+    SMOKE_INSTALL_DIR = "${env.WORKSPACE}/build_pr/smoke_install"
   }
 
   stages {
@@ -26,7 +29,9 @@ pipeline {
           cd "$PROJECT_DIR"
           cmake -S . -B "$BUILD_DIR" \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DTDS_VENDOR_LIBRARY="$TDS_VENDOR_LIBRARY"
+            -DTDS_VENDOR_LIBRARY="$TDS_VENDOR_LIBRARY" \
+            -DREPORT_STAGE_DIR="$STAGE_DIR" \
+            -DREPORT_RUN_INSTALLER_PATH="$INSTALLER_PATH"
         '''
       }
     }
@@ -57,8 +62,10 @@ pipeline {
         sh '''
           set -euxo pipefail
           cd "$PROJECT_DIR"
-          "$BUILD_DIR/report" \
-            --env dev \
+          cmake --build "$BUILD_DIR" --target report_run_installer
+          rm -rf "$SMOKE_INSTALL_DIR"
+          "$INSTALLER_PATH" --env dev --prefix "$SMOKE_INSTALL_DIR"
+          "$SMOKE_INSTALL_DIR/bin/report" \
             --stub-file "$PROJECT_DIR/tests/data/stub_snapshot.csv" \
             --dry-run \
             --to pr-smoke@example.com

@@ -1130,12 +1130,11 @@ CliOptions ParseCli(int argc, char** argv)
 
 std::string DefaultConfigPath(const std::string& env_name)
 {
-    const std::string effective_env_name = env_name.empty() ? "dev" : env_name;
     if (!env_name.empty())
     {
         for (const std::filesystem::path& config_root : DefaultConfigRoots())
         {
-            const std::filesystem::path env_config = config_root / (effective_env_name + ".properties");
+            const std::filesystem::path env_config = config_root / (env_name + ".properties");
             if (std::filesystem::exists(env_config))
             {
                 return std::filesystem::absolute(env_config).string();
@@ -1152,19 +1151,9 @@ std::string DefaultConfigPath(const std::string& env_name)
         }
     }
 
-    if (env_name.empty())
-    {
-        for (const std::filesystem::path& config_root : DefaultConfigRoots())
-        {
-            const std::filesystem::path env_config = config_root / (effective_env_name + ".properties");
-            if (std::filesystem::exists(env_config))
-            {
-                return std::filesystem::absolute(env_config).string();
-            }
-        }
-    }
-
-    return (std::filesystem::path("config") / (effective_env_name + ".properties")).string();
+    return env_name.empty()
+        ? (std::filesystem::path("config") / "report.properties").string()
+        : (std::filesystem::path("config") / (env_name + ".properties")).string();
 }
 
 AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
