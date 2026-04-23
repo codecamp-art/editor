@@ -8,6 +8,17 @@ tds.log_level=2000
 tds.klg_enable=false
 tds.function_no=20100
 
+vault.executable=${VAULT_BIN:vault}
+vault.address=${VAULT_ADDR:}
+vault.namespace=${VAULT_NAMESPACE:}
+vault.auth_path=${VAULT_AUTH_PATH:}
+vault.kerberos_username=${VAULT_KERBEROS_USERNAME:}
+vault.kerberos_service=${VAULT_KERBEROS_SERVICE:}
+vault.kerberos_realm=${VAULT_KERBEROS_REALM:}
+vault.kerberos_keytab_path=${VAULT_KERBEROS_KEYTAB:}
+vault.kerberos_krb5conf_path=${VAULT_KRB5CONF:}
+vault.disable_fast_negotiation=${VAULT_DISABLE_FAST_NEGOTIATION:false}
+
 smtp.host=${SMTP_HOST:mta-hub.REPLACE_ME.com.cn}
 smtp.port=${SMTP_PORT:2587}
 smtp.username=${SMTP_USERNAME:}
@@ -25,7 +36,7 @@ smtp.connect_timeout_seconds=15
 email.default_to=${EMAIL_TO:ops@example.com,risk@example.com}
 email.default_cc=${EMAIL_CC:support@example.com}
 email.subject=${EMAIL_SUBJECT:TDS Client Funding and Risk Ratio Report}
-report.output_dir=${REPORT_OUTPUT_DIR:/opt/tds-reporter/output}
+report.output_dir=${REPORT_OUTPUT_DIR:../output}
 report.attachment_name=${REPORT_ATTACHMENT_NAME:tds_customer_funds}
-log.dir=${LOG_DIR:/opt/tds-reporter/logs}
+log.dir=${LOG_DIR:../logs}
 log.level=${LOG_LEVEL:info}

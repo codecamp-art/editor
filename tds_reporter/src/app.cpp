@@ -14,6 +14,14 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 #ifndef _WIN32
 #include <sys/wait.h>
 #endif
@@ -398,6 +406,58 @@ std::string ResolveConfigRelativePath(
     }
 
     return std::filesystem::absolute(config_dir / path_value).string();
+}
+
+std::filesystem::path CurrentExecutablePath()
+{
+#ifdef _WIN32
+    std::wstring buffer(512, L'\0');
+    for (;;)
+    {
+        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0)
+        {
+            return {};
+        }
+        if (length < buffer.size() - 1)
+        {
+            buffer.resize(length);
+            return std::filesystem::path(buffer);
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+#else
+    std::string buffer(512, '\0');
+    for (;;)
+    {
+        const ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+        if (length < 0)
+        {
+            return {};
+        }
+        if (static_cast<std::size_t>(length) < buffer.size() - 1)
+        {
+            buffer.resize(static_cast<std::size_t>(length));
+            return std::filesystem::path(buffer);
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+#endif
+}
+
+std::vector<std::filesystem::path> DefaultConfigRoots()
+{
+    std::vector<std::filesystem::path> roots;
+    const std::filesystem::path executable_path = CurrentExecutablePath();
+    if (!executable_path.empty())
+    {
+        const std::filesystem::path executable_dir = executable_path.parent_path();
+        roots.push_back((executable_dir / ".." / "config").lexically_normal());
+        roots.push_back((executable_dir / "config").lexically_normal());
+        roots.push_back((executable_dir.parent_path() / "config").lexically_normal());
+    }
+    roots.emplace_back("config");
+    return roots;
 }
 
 std::string GetEnvironmentValue(const std::string& key)
@@ -1070,12 +1130,41 @@ CliOptions ParseCli(int argc, char** argv)
 
 std::string DefaultConfigPath(const std::string& env_name)
 {
-    const std::filesystem::path single_config("config/report.properties");
-    if (std::filesystem::exists(single_config))
+    const std::string effective_env_name = env_name.empty() ? "dev" : env_name;
+    if (!env_name.empty())
     {
-        return single_config.string();
+        for (const std::filesystem::path& config_root : DefaultConfigRoots())
+        {
+            const std::filesystem::path env_config = config_root / (effective_env_name + ".properties");
+            if (std::filesystem::exists(env_config))
+            {
+                return std::filesystem::absolute(env_config).string();
+            }
+        }
     }
-    return "config/" + env_name + ".properties";
+
+    for (const std::filesystem::path& config_root : DefaultConfigRoots())
+    {
+        const std::filesystem::path single_config = config_root / "report.properties";
+        if (std::filesystem::exists(single_config))
+        {
+            return std::filesystem::absolute(single_config).string();
+        }
+    }
+
+    if (env_name.empty())
+    {
+        for (const std::filesystem::path& config_root : DefaultConfigRoots())
+        {
+            const std::filesystem::path env_config = config_root / (effective_env_name + ".properties");
+            if (std::filesystem::exists(env_config))
+            {
+                return std::filesystem::absolute(env_config).string();
+            }
+        }
+    }
+
+    return (std::filesystem::path("config") / (effective_env_name + ".properties")).string();
 }
 
 AppConfig LoadConfig(const std::string& path, const CliOptions& cli)

@@ -8,26 +8,28 @@ pipeline {
   }
 
   parameters {
-    string(name: 'ARTIFACTORY_PACKAGE_URL', defaultValue: '', description: 'Optional HTTPS URL of the supplier install package. When set, the pipeline downloads it, extracts the SDK, and builds against a workspace-local tds directory.')
-    string(name: 'ARTIFACTORY_CERT_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins secret file credentials id for the Artifactory client certificate')
-    string(name: 'ARTIFACTORY_KEY_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Artifactory client private key')
-    string(name: 'ARTIFACTORY_CA_FILE_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Artifactory CA bundle')
-    string(name: 'ARTIFACTORY_CERT_PASSWORD_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret text credentials id for the Artifactory client certificate password')
+    string(name: 'ARTIFACTORY_PACKAGE_URL', defaultValue: '', description: 'Optional HTTPS URL of the supplier install package. When set, Jenkins downloads it and rebuilds ./tds/linux_x86_64 from the package contents.')
+    string(name: 'ARTIFACTORY_CERT_VAULT_PATH', defaultValue: '', description: 'Vault KV path containing the Artifactory client certificate used by curl')
+    string(name: 'ARTIFACTORY_CERT_VAULT_FIELD', defaultValue: 'cert', description: 'Vault KV field name for the Artifactory client certificate')
+    string(name: 'ARTIFACTORY_KEY_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory client private key')
+    string(name: 'ARTIFACTORY_KEY_VAULT_FIELD', defaultValue: 'key', description: 'Vault KV field name for the Artifactory client private key')
+    string(name: 'ARTIFACTORY_CA_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory CA bundle')
+    string(name: 'ARTIFACTORY_CA_VAULT_FIELD', defaultValue: 'ca_cert', description: 'Vault KV field name for the Artifactory CA bundle')
+    string(name: 'ARTIFACTORY_CERT_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory certificate password')
+    string(name: 'ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the Artifactory certificate password')
     string(name: 'ARTIFACTORY_CERT_TYPE', defaultValue: 'PEM', description: 'Client certificate type passed to curl, for example PEM or P12')
-    string(name: 'TDS_VENDOR_LIBRARY', defaultValue: '', description: 'Fallback absolute path to the vendor .so when ARTIFACTORY_PACKAGE_URL is empty. Leave empty to auto-detect ./tds/linux_x86_64/libtds_api.so')
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
-    booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a live dry-run against DRTP after staging')
-    string(name: 'SMOKE_ENV', defaultValue: 'qa', description: 'Environment name for the optional live smoke run')
+    booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a packaged dry-run after staging')
     string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional live smoke run')
-    string(name: 'VAULT_BIN', defaultValue: 'vault', description: 'Vault CLI executable used to authenticate and read secrets')
+    string(name: 'VAULT_BIN', defaultValue: 'vault', description: 'Vault CLI executable used by Jenkins and the application')
     string(name: 'VAULT_ADDR', defaultValue: '', description: 'Vault address, for example https://vault.example.com:8200')
     string(name: 'VAULT_NAMESPACE', defaultValue: '', description: 'Optional Vault namespace')
     string(name: 'VAULT_AUTH_PATH', defaultValue: '', description: 'Optional non-default Vault auth mount path')
     string(name: 'VAULT_KERBEROS_USERNAME', defaultValue: '', description: 'Vault kerberos username')
     string(name: 'VAULT_KERBEROS_SERVICE', defaultValue: '', description: 'Vault kerberos service principal, for example HTTP/vault.example.com')
     string(name: 'VAULT_KERBEROS_REALM', defaultValue: '', description: 'Vault kerberos realm')
-    string(name: 'VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for the Vault kerberos keytab')
-    string(name: 'VAULT_KRB5CONF_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for krb5.conf')
+    string(name: 'VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for a Vault kerberos keytab override')
+    string(name: 'VAULT_KRB5CONF_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins secret file credentials id for a krb5.conf override')
     booleanParam(name: 'VAULT_DISABLE_FAST_NEGOTIATION', defaultValue: false, description: 'Pass disable_fast_negotiation=true to vault kerberos login')
     string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the supplier zip password')
     string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the supplier zip password')
@@ -41,40 +43,42 @@ pipeline {
     VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
     VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
     VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
+    ARTIFACTORY_AUTH_DIR = "${env.WORKSPACE}/artifactory_auth"
     VAULT_RUNTIME_TOKEN = ""
   }
 
   stages {
     stage('Prepare Vault Access') {
       when {
-        expression { return params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim() }
+        expression { return params.ARTIFACTORY_PACKAGE_URL?.trim() || params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim() }
       }
       steps {
         script {
           if (!params.VAULT_ADDR?.trim()) {
-            error('VAULT_ADDR is required when VENDOR_PACKAGE_PASSWORD_VAULT_PATH is set')
+            error('VAULT_ADDR is required when Jenkins needs Vault access')
           }
           if (!params.VAULT_KERBEROS_USERNAME?.trim()) {
-            error('Vault kerberos auth requires VAULT_KERBEROS_USERNAME')
+            error('VAULT_KERBEROS_USERNAME is required when Jenkins needs Vault access')
           }
 
           def credentialBindings = []
-          def vaultEnv = [
-            "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
-            "VAULT_ADDR=${params.VAULT_ADDR.trim()}",
-            "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
-            "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}",
-            "VAULT_KERBEROS_USERNAME=${params.VAULT_KERBEROS_USERNAME?.trim() ?: ''}",
-            "VAULT_KERBEROS_SERVICE=${params.VAULT_KERBEROS_SERVICE?.trim() ?: ''}",
-            "VAULT_KERBEROS_REALM=${params.VAULT_KERBEROS_REALM?.trim() ?: ''}",
-            "VAULT_DISABLE_FAST_NEGOTIATION=${params.VAULT_DISABLE_FAST_NEGOTIATION ? 'true' : 'false'}"
-          ]
           if (params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID?.trim()) {
             credentialBindings << file(credentialsId: params.VAULT_KERBEROS_KEYTAB_CREDENTIALS_ID.trim(), variable: 'VAULT_KEYTAB_FILE')
           }
           if (params.VAULT_KRB5CONF_CREDENTIALS_ID?.trim()) {
             credentialBindings << file(credentialsId: params.VAULT_KRB5CONF_CREDENTIALS_ID.trim(), variable: 'VAULT_KRB5CONF_FILE')
           }
+
+          def vaultEnv = [
+            "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
+            "VAULT_ADDR=${params.VAULT_ADDR.trim()}",
+            "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
+            "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}",
+            "VAULT_KERBEROS_USERNAME=${params.VAULT_KERBEROS_USERNAME.trim()}",
+            "VAULT_KERBEROS_SERVICE=${params.VAULT_KERBEROS_SERVICE?.trim() ?: ''}",
+            "VAULT_KERBEROS_REALM=${params.VAULT_KERBEROS_REALM?.trim() ?: ''}",
+            "VAULT_DISABLE_FAST_NEGOTIATION=${params.VAULT_DISABLE_FAST_NEGOTIATION ? 'true' : 'false'}"
+          ]
 
           withCredentials(credentialBindings) {
             withEnv(vaultEnv) {
@@ -83,13 +87,26 @@ pipeline {
                 script: '''#!/usr/bin/env bash
                   set -euo pipefail
 
+                  load_profile() {
+                    set +u
+                    for profile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile" "$HOME/.bashrc"; do
+                      if [ -f "$profile" ]; then
+                        . "$profile"
+                      fi
+                    done
+                    set -u
+                  }
+
+                  load_profile
+                  test -n "${KRB5CCNAME:-}"
+                  klist >/dev/null
+
                   login_cmd=("$VAULT_BIN" login -token-only -no-store)
                   if [ -n "${VAULT_AUTH_PATH:-}" ]; then
                     login_cmd+=("-path=$VAULT_AUTH_PATH")
                   fi
 
-                  login_cmd+=("-method=kerberos")
-                  login_cmd+=("username=$VAULT_KERBEROS_USERNAME")
+                  login_cmd+=("-method=kerberos" "username=$VAULT_KERBEROS_USERNAME")
                   if [ -n "${VAULT_KERBEROS_SERVICE:-}" ]; then
                     login_cmd+=("service=$VAULT_KERBEROS_SERVICE")
                   fi
@@ -119,16 +136,24 @@ pipeline {
       }
     }
 
+    stage('Prepare Runtime Config') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          cd "$PROJECT_DIR"
+          if [ ! -f config/report.properties ]; then
+            cp config/prod.properties.template config/report.properties
+          fi
+        '''
+      }
+    }
+
     stage('Prepare Vendor SDK') {
       steps {
         script {
           def vendorZipPassword = ''
 
           if (params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim()) {
-            if (!env.VAULT_RUNTIME_TOKEN?.trim()) {
-              error('VENDOR_PACKAGE_PASSWORD_VAULT_PATH requires a Kerberos-authenticated Vault session.')
-            }
-
             withEnv([
               "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
               "VAULT_ADDR=${params.VAULT_ADDR?.trim() ?: ''}",
@@ -148,50 +173,74 @@ pipeline {
           }
 
           if (params.ARTIFACTORY_PACKAGE_URL?.trim()) {
-            if (!params.ARTIFACTORY_CERT_FILE_CREDENTIALS_ID?.trim()) {
-              error('ARTIFACTORY_CERT_FILE_CREDENTIALS_ID is required when ARTIFACTORY_PACKAGE_URL is set')
+            if (!env.VAULT_RUNTIME_TOKEN?.trim()) {
+              error('ARTIFACTORY_PACKAGE_URL requires a Kerberos-authenticated Vault session so Jenkins can fetch the Artifactory certificate')
+            }
+            if (!params.ARTIFACTORY_CERT_VAULT_PATH?.trim()) {
+              error('ARTIFACTORY_CERT_VAULT_PATH is required when ARTIFACTORY_PACKAGE_URL is set')
             }
 
-            def credentialBindings = [
-              file(credentialsId: params.ARTIFACTORY_CERT_FILE_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_CERT_FILE')
-            ]
-
-            if (params.ARTIFACTORY_KEY_FILE_CREDENTIALS_ID?.trim()) {
-              credentialBindings << file(credentialsId: params.ARTIFACTORY_KEY_FILE_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_KEY_FILE')
-            }
-            if (params.ARTIFACTORY_CA_FILE_CREDENTIALS_ID?.trim()) {
-              credentialBindings << file(credentialsId: params.ARTIFACTORY_CA_FILE_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_CA_FILE')
-            }
-            if (params.ARTIFACTORY_CERT_PASSWORD_CREDENTIALS_ID?.trim()) {
-              credentialBindings << string(credentialsId: params.ARTIFACTORY_CERT_PASSWORD_CREDENTIALS_ID.trim(), variable: 'ARTIFACTORY_CERT_PASSWORD')
-            }
-
-            withCredentials(credentialBindings) {
-              withEnv(["VENDOR_PACKAGE_ZIP_PASSWORD=${vendorZipPassword}"]) {
-                sh '''
+            withEnv([
+              "VAULT_BIN=${params.VAULT_BIN?.trim() ?: 'vault'}",
+              "VAULT_ADDR=${params.VAULT_ADDR?.trim() ?: ''}",
+              "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
+              "VAULT_TOKEN=${env.VAULT_RUNTIME_TOKEN}",
+              "ARTIFACTORY_CERT_VAULT_PATH=${params.ARTIFACTORY_CERT_VAULT_PATH.trim()}",
+              "ARTIFACTORY_CERT_VAULT_FIELD=${params.ARTIFACTORY_CERT_VAULT_FIELD?.trim() ?: 'cert'}",
+              "ARTIFACTORY_KEY_VAULT_PATH=${params.ARTIFACTORY_KEY_VAULT_PATH?.trim() ?: ''}",
+              "ARTIFACTORY_KEY_VAULT_FIELD=${params.ARTIFACTORY_KEY_VAULT_FIELD?.trim() ?: 'key'}",
+              "ARTIFACTORY_CA_VAULT_PATH=${params.ARTIFACTORY_CA_VAULT_PATH?.trim() ?: ''}",
+              "ARTIFACTORY_CA_VAULT_FIELD=${params.ARTIFACTORY_CA_VAULT_FIELD?.trim() ?: 'ca_cert'}",
+              "ARTIFACTORY_CERT_PASSWORD_VAULT_PATH=${params.ARTIFACTORY_CERT_PASSWORD_VAULT_PATH?.trim() ?: ''}",
+              "ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD=${params.ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD?.trim() ?: 'password'}",
+              "ARTIFACTORY_CERT_TYPE=${params.ARTIFACTORY_CERT_TYPE?.trim() ?: 'PEM'}",
+              "VENDOR_PACKAGE_ZIP_PASSWORD=${vendorZipPassword}"
+            ]) {
+              sh '''#!/usr/bin/env bash
                 set -euo pipefail
 
-                rm -rf "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR"
-                mkdir -p "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR/include" "$VENDOR_TDS_DIR/linux_x86_64"
+                rm -rf "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR" "$ARTIFACTORY_AUTH_DIR"
+                mkdir -p "$VENDOR_DOWNLOAD_DIR" "$VENDOR_EXTRACT_DIR" "$VENDOR_TDS_DIR/include" "$VENDOR_TDS_DIR/linux_x86_64" "$ARTIFACTORY_AUTH_DIR"
+
+                ARTIFACTORY_CERT_FILE="$ARTIFACTORY_AUTH_DIR/client-cert"
+                "$VAULT_BIN" kv get "-field=$ARTIFACTORY_CERT_VAULT_FIELD" "$ARTIFACTORY_CERT_VAULT_PATH" > "$ARTIFACTORY_CERT_FILE"
+
+                ARTIFACTORY_KEY_FILE=""
+                if [ -n "${ARTIFACTORY_KEY_VAULT_PATH:-}" ]; then
+                  ARTIFACTORY_KEY_FILE="$ARTIFACTORY_AUTH_DIR/client-key"
+                  "$VAULT_BIN" kv get "-field=$ARTIFACTORY_KEY_VAULT_FIELD" "$ARTIFACTORY_KEY_VAULT_PATH" > "$ARTIFACTORY_KEY_FILE"
+                fi
+
+                ARTIFACTORY_CA_FILE=""
+                if [ -n "${ARTIFACTORY_CA_VAULT_PATH:-}" ]; then
+                  ARTIFACTORY_CA_FILE="$ARTIFACTORY_AUTH_DIR/ca-cert"
+                  "$VAULT_BIN" kv get "-field=$ARTIFACTORY_CA_VAULT_FIELD" "$ARTIFACTORY_CA_VAULT_PATH" > "$ARTIFACTORY_CA_FILE"
+                fi
+
+                ARTIFACTORY_CERT_PASSWORD=""
+                if [ -n "${ARTIFACTORY_CERT_PASSWORD_VAULT_PATH:-}" ]; then
+                  ARTIFACTORY_CERT_PASSWORD="$("$VAULT_BIN" kv get "-field=$ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD" "$ARTIFACTORY_CERT_PASSWORD_VAULT_PATH")"
+                fi
 
                 VENDOR_ARCHIVE="$VENDOR_DOWNLOAD_DIR/vendor_package"
                 curl_args=(--fail --silent --show-error --location --cert-type "$ARTIFACTORY_CERT_TYPE")
 
-                if [ -n "${ARTIFACTORY_CERT_PASSWORD:-}" ]; then
+                if [ -n "$ARTIFACTORY_CERT_PASSWORD" ]; then
                   curl_args+=(--cert "${ARTIFACTORY_CERT_FILE}:${ARTIFACTORY_CERT_PASSWORD}")
                 else
                   curl_args+=(--cert "${ARTIFACTORY_CERT_FILE}")
                 fi
 
-                if [ -n "${ARTIFACTORY_KEY_FILE:-}" ]; then
-                  curl_args+=(--key "${ARTIFACTORY_KEY_FILE}")
+                if [ -n "$ARTIFACTORY_KEY_FILE" ]; then
+                  curl_args+=(--key "$ARTIFACTORY_KEY_FILE")
                 fi
 
-                if [ -n "${ARTIFACTORY_CA_FILE:-}" ]; then
-                  curl_args+=(--cacert "${ARTIFACTORY_CA_FILE}")
+                if [ -n "$ARTIFACTORY_CA_FILE" ]; then
+                  curl_args+=(--cacert "$ARTIFACTORY_CA_FILE")
                 fi
 
                 curl "${curl_args[@]}" -o "$VENDOR_ARCHIVE" "$ARTIFACTORY_PACKAGE_URL"
+                rm -rf "$ARTIFACTORY_AUTH_DIR"
 
                 if unzip -tq "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
                   unzip -q "$VENDOR_ARCHIVE" -d "$VENDOR_EXTRACT_DIR"
@@ -208,6 +257,7 @@ pipeline {
 
                 HEADER_DIR="$(dirname "$(find "$VENDOR_EXTRACT_DIR" -type f -name 'tds_api.h' | head -n 1)")"
                 LIB_FILE="$(find "$VENDOR_EXTRACT_DIR" -type f \\( -name 'libtds_api.so' -o -name 'tds_api.so' \\) | head -n 1)"
+                CPACK_FILE="$(find "$VENDOR_EXTRACT_DIR" -type f -name 'cpack.dat' | head -n 1 || true)"
 
                 if [ -z "$HEADER_DIR" ] || [ ! -d "$HEADER_DIR" ]; then
                   echo "Failed to find tds_api.h in extracted vendor package" >&2
@@ -217,31 +267,27 @@ pipeline {
                   echo "Failed to find libtds_api.so in extracted vendor package" >&2
                   exit 1
                 fi
-
-                LIB_DIR="$(dirname "$LIB_FILE")"
-                find "$HEADER_DIR" -maxdepth 1 -type f -name '*.h' -exec cp -f {} "$VENDOR_TDS_DIR/include/" \\;
-                find "$LIB_DIR" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) -exec cp -f {} "$VENDOR_TDS_DIR/linux_x86_64/" \\;
-
-                CPACK_FILE="$(find "$VENDOR_EXTRACT_DIR" -type f -name 'cpack.dat' | head -n 1 || true)"
-                if [ -n "$CPACK_FILE" ] && [ ! -f "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat" ]; then
-                  cp -f "$CPACK_FILE" "$VENDOR_TDS_DIR/linux_x86_64/"
-                fi
-
-                if [ ! -f "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat" ]; then
-                  echo "cpack.dat was not found in the vendor package" >&2
+                if [ -z "$CPACK_FILE" ] || [ ! -f "$CPACK_FILE" ]; then
+                  echo "Failed to find cpack.dat in extracted vendor package" >&2
                   exit 1
                 fi
 
+                LIB_DIR="$(dirname "$LIB_FILE")"
+                find "$HEADER_DIR" -maxdepth 1 -type f -name '*.h' -exec cp -f {} "$VENDOR_TDS_DIR/include/" \\;
+                find "$LIB_DIR" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' \\) -exec cp -f {} "$VENDOR_TDS_DIR/linux_x86_64/" \\;
+                cp -f "$CPACK_FILE" "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat"
+
+                test -f "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat"
                 find "$VENDOR_TDS_DIR" -maxdepth 2 -type f | sort
               '''
-              }
             }
           } else {
             sh '''
               set -euxo pipefail
               LOCAL_VENDOR_LIBRARY="$(find "$VENDOR_TDS_DIR/linux_x86_64" -maxdepth 1 -type f \\( -name 'libtds_api.so' -o -name 'tds_api.so' \\) | head -n 1 || true)"
-              if [ -z "$LOCAL_VENDOR_LIBRARY" ] && { [ -z "$TDS_VENDOR_LIBRARY" ] || [ ! -f "$TDS_VENDOR_LIBRARY" ]; }; then
-                echo "Neither a local ./tds/linux_x86_64 vendor library nor TDS_VENDOR_LIBRARY is available" >&2
+              test -f "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat"
+              if [ -z "$LOCAL_VENDOR_LIBRARY" ]; then
+                echo "Expected vendor .so under $VENDOR_TDS_DIR/linux_x86_64" >&2
                 exit 1
               fi
             '''
@@ -255,11 +301,7 @@ pipeline {
         sh '''
           set -euxo pipefail
           cd "$PROJECT_DIR"
-          EFFECTIVE_VENDOR_LIBRARY="$TDS_VENDOR_LIBRARY"
-
-          if [ -d "$VENDOR_TDS_DIR/linux_x86_64" ]; then
-            EFFECTIVE_VENDOR_LIBRARY="$(find "$VENDOR_TDS_DIR/linux_x86_64" -maxdepth 1 -type f \\( -name 'libtds_api.so' -o -name 'tds_api.so' \\) | head -n 1)"
-          fi
+          EFFECTIVE_VENDOR_LIBRARY="$(find "$VENDOR_TDS_DIR/linux_x86_64" -maxdepth 1 -type f \\( -name 'libtds_api.so' -o -name 'tds_api.so' \\) | head -n 1 || true)"
 
           if [ -z "$EFFECTIVE_VENDOR_LIBRARY" ] || [ ! -f "$EFFECTIVE_VENDOR_LIBRARY" ]; then
             echo "effective vendor library does not exist: $EFFECTIVE_VENDOR_LIBRARY" >&2
@@ -269,7 +311,9 @@ pipeline {
           cmake -S . -B "$BUILD_DIR" \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DTDS_VENDOR_LIBRARY="$EFFECTIVE_VENDOR_LIBRARY" \
-            -DREPORT_STAGE_DIR="$STAGE_DIR"
+            -DREPORT_STAGE_DIR="$STAGE_DIR" \
+            -DREPORT_INSTALL_SINGLE_CONFIG=ON \
+            -DREPORT_SINGLE_CONFIG_SOURCE="$PROJECT_DIR/config/report.properties"
         '''
       }
     }
@@ -298,6 +342,10 @@ pipeline {
           set -euxo pipefail
           cmake --build "$BUILD_DIR" --target report_stage
           test -f "$STAGE_DIR/bin/report"
+          test -f "$STAGE_DIR/config/report.properties"
+          test "$(find "$STAGE_DIR/config" -maxdepth 1 -type f | wc -l)" -eq 1
+          test ! -f "$STAGE_DIR/config/dev.properties"
+          test ! -f "$STAGE_DIR/config/qa.properties"
           find "$STAGE_DIR/lib" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) | sort
           test -f "$STAGE_DIR/lib/cpack.dat"
           tar -C "$STAGE_DIR" -czf "$BUILD_DIR/$PACKAGE_NAME" .
@@ -322,13 +370,22 @@ pipeline {
         ]) {
           sh '''
             set -euxo pipefail
-            CONFIG_PATH="$STAGE_DIR/config/${SMOKE_ENV}.properties"
-            if [ -f "$STAGE_DIR/config/report.properties" ]; then
-              CONFIG_PATH="$STAGE_DIR/config/report.properties"
-            fi
+
+            load_profile() {
+              set +u
+              for profile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile" "$HOME/.bashrc"; do
+                if [ -f "$profile" ]; then
+                  . "$profile"
+                fi
+              done
+              set -u
+            }
+
+            load_profile
+            test -n "${KRB5CCNAME:-}"
+            klist >/dev/null
+
             "$STAGE_DIR/bin/report" \
-              --env "$SMOKE_ENV" \
-              --config "$CONFIG_PATH" \
               --dry-run \
               --to "$SMOKE_TO"
           '''

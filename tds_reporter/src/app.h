@@ -88,7 +88,7 @@ struct CliOptions
 {
     bool help = false;
     bool dry_run = false;
-    std::string env = "dev";
+    std::string env;
     std::string config_path;
     std::vector<std::string> to;
     std::vector<std::string> cc;

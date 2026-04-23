@@ -13,6 +13,12 @@ set(TDS_VENDOR_INCLUDE_DIR "${TDS_VENDOR_ROOT}/include" CACHE PATH "Path to vend
 set(TDS_VENDOR_LIBRARY "" CACHE FILEPATH "Path to vendor link library: .so on Linux, .lib on Windows")
 set(TDS_VENDOR_RUNTIME "" CACHE FILEPATH "Path to vendor runtime library: .so on Linux, .dll on Windows")
 set(REPORT_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH "Directory used by the report_stage target")
+option(REPORT_INSTALL_SINGLE_CONFIG "Install only config/report.properties into the runtime package" OFF)
+set(
+    REPORT_SINGLE_CONFIG_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties"
+    CACHE FILEPATH
+    "Source file installed as config/report.properties when REPORT_INSTALL_SINGLE_CONFIG is ON")
 
 add_library(
     report_lib
@@ -158,6 +164,13 @@ if(REPORT_HAS_VENDOR_API AND NOT EXISTS "${TDS_VENDOR_INCLUDE_DIR}/tds_api.h")
     message(FATAL_ERROR "TDS_VENDOR_INCLUDE_DIR must contain tds_api.h: ${TDS_VENDOR_INCLUDE_DIR}")
 endif()
 
+if(REPORT_HAS_VENDOR_API AND TDS_VENDOR_LIBRARY_DIR AND NOT EXISTS "${TDS_VENDOR_LIBRARY_DIR}/cpack.dat")
+    message(
+        FATAL_ERROR
+        "Live builds require cpack.dat beside the vendor library. "
+        "Place dll/lib/cpack.dat under ./tds/win32 or so/cpack.dat under ./tds/linux_x86_64.")
+endif()
+
 if(REPORT_HAS_VENDOR_API)
     target_compile_definitions(report_lib PRIVATE REPORT_HAS_VENDOR_API=1)
 endif()
@@ -235,14 +248,29 @@ if(WIN32 AND TDS_VENDOR_INSTALL_FILES)
     )
 endif()
 
-install(
-    FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/dev.properties"
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/qa.properties"
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties.template"
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/prod.properties.template"
-    DESTINATION config
-)
+if(REPORT_INSTALL_SINGLE_CONFIG)
+    if(NOT EXISTS "${REPORT_SINGLE_CONFIG_SOURCE}")
+        message(
+            FATAL_ERROR
+            "REPORT_INSTALL_SINGLE_CONFIG=ON requires an existing source file installed as config/report.properties: "
+            "${REPORT_SINGLE_CONFIG_SOURCE}")
+    endif()
+
+    install(
+        FILES "${REPORT_SINGLE_CONFIG_SOURCE}"
+        DESTINATION config
+        RENAME report.properties
+    )
+else()
+    install(
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/dev.properties"
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/qa.properties"
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties.template"
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/prod.properties.template"
+        DESTINATION config
+    )
+endif()
 
 install(
     PROGRAMS
@@ -250,13 +278,6 @@ install(
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/render-config.ps1"
     DESTINATION scripts
 )
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties")
-    install(
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties"
-        DESTINATION config
-    )
-endif()
 
 install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/logs\")")
 

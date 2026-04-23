@@ -35,6 +35,24 @@ void SetEnv(const std::string& key, const std::string& value)
 #endif
 }
 
+class ScopedCurrentPath
+{
+public:
+    explicit ScopedCurrentPath(const std::filesystem::path& path)
+        : previous_path_(std::filesystem::current_path())
+    {
+        std::filesystem::current_path(path);
+    }
+
+    ~ScopedCurrentPath()
+    {
+        std::filesystem::current_path(previous_path_);
+    }
+
+private:
+    std::filesystem::path previous_path_;
+};
+
 report::AppConfig BuildTestConfig(const std::filesystem::path& output_dir)
 {
     report::AppConfig config;
@@ -179,6 +197,61 @@ void TestLoadConfig()
         std::filesystem::path(config.log.directory).filename() == "logs",
         "log directory should be resolved relative to the config");
     AssertTrue(config.log.level == "warn", "log level should be parsed");
+}
+
+void TestLoadConfigUsesFileEnvWhenCliEnvMissing()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_file_env_test";
+    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path config_path = temp_dir / "test.properties";
+
+    std::ofstream output(config_path);
+    output
+        << "env.name=prod\n"
+        << "tds.drtp_host=10.0.0.1\n"
+        << "tds.drtp_port=6003\n"
+        << "tds.user=10000\n"
+        << "tds.password=secret\n"
+        << "smtp.host=mail.local\n"
+        << "smtp.port=2587\n"
+        << "smtp.from=sender@example.com\n";
+    output.close();
+
+    report::CliOptions cli;
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
+
+    AssertTrue(config.env_name == "prod", "config env should be used when --env is omitted");
+}
+
+void TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_config_env_test";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir / "config");
+    WriteFile(temp_dir / "config" / "report.properties", "env.name=prod\n");
+    WriteFile(temp_dir / "config" / "qa.properties", "env.name=qa\n");
+
+    const ScopedCurrentPath scoped_path(temp_dir);
+    const std::string config_path = report::DefaultConfigPath("qa");
+
+    AssertTrue(
+        std::filesystem::path(config_path).filename() == "qa.properties",
+        "explicit --env should prefer <env>.properties over report.properties");
+}
+
+void TestDefaultConfigPathUsesSingleConfigWhenEnvMissing()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_single_config_test";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir / "config");
+    WriteFile(temp_dir / "config" / "report.properties", "env.name=prod\n");
+
+    const ScopedCurrentPath scoped_path(temp_dir);
+    const std::string config_path = report::DefaultConfigPath("");
+
+    AssertTrue(
+        std::filesystem::path(config_path).filename() == "report.properties",
+        "single-config package should use report.properties when --env is omitted");
 }
 
 void TestLoadConfigWithVaultBackedTdsPassword()
@@ -375,6 +448,9 @@ int main()
     {
         TestParseCli();
         TestLoadConfig();
+        TestLoadConfigUsesFileEnvWhenCliEnvMissing();
+        TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig();
+        TestDefaultConfigPathUsesSingleConfigWhenEnvMissing();
         TestLoadConfigWithVaultBackedTdsPassword();
         TestStubClientAndCsv();
         TestMimeAndDryRun();

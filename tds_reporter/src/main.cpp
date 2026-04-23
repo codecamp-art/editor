@@ -10,11 +10,13 @@ void PrintUsage()
 {
     std::cout
         << "Usage:\n"
-        << "  report --env dev [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
+        << "  report [--env dev] [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
         << "               [--cust-list 1001,1002] [--output-dir path] [--trade-date YYYYMMDD]\n"
         << "               [--dry-run] [--stub-file path]\n\n"
         << "Notes:\n"
         << "  --stub-file lets you debug on Windows without the vendor RHEL8 .so file.\n"
+        << "  Packaged runs auto-discover config beside the executable, so --config is usually unnecessary.\n"
+        << "  A production package can start with no arguments when config/report.properties is present.\n"
         << "  --dry-run writes an .eml preview instead of calling curl SMTP.\n";
 }
 
