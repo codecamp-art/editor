@@ -143,6 +143,16 @@ The application does not read or require `kerberos_realm`, `keytab_path`, `krb5c
 
 After manually placing the vendor `.so` and `cpack.dat` in `tds/linux_x86_64`:
 
+Install the build tools once if the machine does not already have them:
+
+```bash
+sudo dnf install -y gcc-c++ make cmake curl
+```
+
+The `linux-rhel8-release` preset now uses `Unix Makefiles`, not `Ninja`, because a default RHEL8 environment usually has `make` more often than `ninja-build`.
+
+If `cmake --preset linux-rhel8-release` still reports `CMAKE_CXX_COMPILER not set`, that machine is missing the C++ toolchain and you still need `gcc-c++`.
+
 ```bash
 cmake --preset linux-rhel8-release
 cmake --build --preset linux-rhel8-release --parallel
