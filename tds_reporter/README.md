@@ -155,6 +155,8 @@ If `cmake --preset linux-rhel8-release` still reports `CMAKE_CXX_COMPILER not se
 
 If you previously ran the older `Ninja`-based preset, that old cache may still exist under `build/linux-rhel8-release`. The preset now uses `build/linux-rhel8-release-make`, so a fresh pull no longer collides with that old directory. The old directory can be removed manually when convenient.
 
+If an older generated installer reports `Installer payload marker was not found`, remove that `.run` file and rebuild the `report_run_installer` target.
+
 ```bash
 cmake --preset linux-rhel8-release
 cmake --build --preset linux-rhel8-release --parallel

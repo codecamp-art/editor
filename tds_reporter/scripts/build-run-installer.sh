@@ -33,7 +33,18 @@ payload_path="${tmp_dir}/payload.tar.gz"
 mkdir -p "$(dirname "${output_path}")"
 
 tar -C "${stage_dir}" -czf "${payload_path}" .
-sed "s|@REPORT_DEFAULT_INSTALL_DIR_NAME@|${default_install_dir_name}|g" "${stub_path}" > "${output_path}"
+awk -v default_install_dir_name="${default_install_dir_name}" '
+{
+    line = $0
+    sub(/\r$/, "", line)
+    if (line == "__ARCHIVE_BELOW__") {
+        exit 0
+    }
+    gsub(/@REPORT_DEFAULT_INSTALL_DIR_NAME@/, default_install_dir_name, line)
+    print line
+}
+' "${stub_path}" > "${output_path}"
+printf '%s\n' "__ARCHIVE_BELOW__" >> "${output_path}"
 cat "${payload_path}" >> "${output_path}"
 chmod +x "${output_path}"
 

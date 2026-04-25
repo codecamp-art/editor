@@ -123,7 +123,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-archive_line="$(awk '/^__ARCHIVE_BELOW__$/ { print NR + 1; exit 0; }' "$0")"
+archive_line="$(awk '{ line = $0; sub(/\r$/, "", line); if (line == "__ARCHIVE_BELOW__") { print NR + 1; exit 0; } }' "$0")"
 if [ -z "${archive_line}" ]; then
     printf 'Installer payload marker was not found.\n' >&2
     exit 1
