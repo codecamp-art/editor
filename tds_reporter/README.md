@@ -153,12 +153,14 @@ The `linux-rhel8-release` preset now uses `Unix Makefiles`, not `Ninja`, because
 
 If `cmake --preset linux-rhel8-release` still reports `CMAKE_CXX_COMPILER not set`, that machine is missing the C++ toolchain and you still need `gcc-c++`.
 
+If you previously ran the older `Ninja`-based preset, that old cache may still exist under `build/linux-rhel8-release`. The preset now uses `build/linux-rhel8-release-make`, so a fresh pull no longer collides with that old directory. The old directory can be removed manually when convenient.
+
 ```bash
 cmake --preset linux-rhel8-release
 cmake --build --preset linux-rhel8-release --parallel
 ctest --preset linux-rhel8-release
-cmake --build build/linux-rhel8-release --target report_run_installer
-./build/linux-rhel8-release/client_funding_risk_report-installer.run --env qa --prefix "$PWD/install_qa"
+cmake --build --preset linux-rhel8-release --target report_run_installer
+./build/linux-rhel8-release-make/client_funding_risk_report-installer.run --env qa --prefix "$PWD/install_qa"
 ./install_qa/bin/report --dry-run --to qa-ops@example.com
 ```
 

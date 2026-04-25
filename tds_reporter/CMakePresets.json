@@ -30,7 +30,7 @@
     {
       "name": "linux-rhel8-release",
       "generator": "Unix Makefiles",
-      "binaryDir": "${sourceDir}/build/${presetName}",
+      "binaryDir": "${sourceDir}/build/${presetName}-make",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "TDS_VENDOR_LIBRARY": "${sourceDir}/tds/linux_x86_64/libtds_api.so"
