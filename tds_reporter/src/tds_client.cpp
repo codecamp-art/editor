@@ -208,8 +208,6 @@ public:
                 record.cust_name = ExtractFixedString(fund->cust_name, sizeof(fund->cust_name));
                 record.fund_account_no =
                     ExtractFixedString(fund->fund_account_no, sizeof(fund->fund_account_no));
-                record.currency_code =
-                    ExtractFixedString(fund->currency_code, sizeof(fund->currency_code));
                 record.dyn_rights = fund->dyn_rights;
                 record.hold_profit = fund->hold_profit;
                 record.avail_fund = fund->avail_fund;
@@ -403,7 +401,6 @@ private:
         const std::size_t cust_no_index = required_index("cust_no");
         const std::size_t cust_name_index = required_index("cust_name");
         const std::size_t fund_account_index = required_index("fund_account_no");
-        const std::size_t currency_index = required_index("currency_code");
         const std::size_t dyn_rights_index = required_index("dyn_rights");
         const std::size_t hold_profit_index = required_index("hold_profit");
         const std::size_t avail_fund_index = required_index("avail_fund");
@@ -424,7 +421,6 @@ private:
             record.cust_no = values.at(cust_no_index);
             record.cust_name = values.at(cust_name_index);
             record.fund_account_no = values.at(fund_account_index);
-            record.currency_code = values.at(currency_index);
             record.dyn_rights = ParseDouble(values.at(dyn_rights_index));
             record.hold_profit = ParseDouble(values.at(hold_profit_index));
             record.avail_fund = ParseDouble(values.at(avail_fund_index));
@@ -460,7 +456,7 @@ std::unique_ptr<ITdsClient> CreateClient(const AppConfig& config, const CliOptio
 #else
     throw std::runtime_error(
         "live TDS client is unavailable in this build. Use --stub-file, "
-        "or configure the vendor library for your current platform.");
+        "or place the supplier files under the fixed tds directory for your platform.");
 #endif
 }
 

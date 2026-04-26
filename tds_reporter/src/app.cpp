@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -491,24 +492,6 @@ std::string GetEnvironmentValue(const std::string& key)
     return value;
 }
 
-void SetEnvironmentValue(const std::string& key, const std::string& value)
-{
-#ifdef _WIN32
-    _putenv_s(key.c_str(), value.c_str());
-#else
-    setenv(key.c_str(), value.c_str(), 1);
-#endif
-}
-
-void ClearEnvironmentValue(const std::string& key)
-{
-#ifdef _WIN32
-    _putenv_s(key.c_str(), "");
-#else
-    unsetenv(key.c_str());
-#endif
-}
-
 std::string EffectiveVaultValue(
     const std::string& configured_value,
     const std::string& env_name,
@@ -531,41 +514,12 @@ std::string EffectiveVaultValue(
 VaultConfig BuildEffectiveVaultConfig(const VaultConfig& configured)
 {
     VaultConfig effective = configured;
-    effective.executable = EffectiveVaultValue(configured.executable, "VAULT_BIN", "vault");
+    effective.curl_executable = EffectiveVaultValue(configured.curl_executable, "CURL_BIN", "curl");
     effective.address = EffectiveVaultValue(configured.address, "VAULT_ADDR");
     effective.namespace_name = EffectiveVaultValue(configured.namespace_name, "VAULT_NAMESPACE");
     effective.auth_path = EffectiveVaultValue(configured.auth_path, "VAULT_AUTH_PATH");
     return effective;
 }
-
-class ScopedEnvOverride
-{
-public:
-    ScopedEnvOverride(const std::string& key, const std::string& value)
-        : key_(key),
-          previous_value_(GetEnvironmentValue(key)),
-          had_previous_(std::getenv(key.c_str()) != nullptr)
-    {
-        SetEnvironmentValue(key_, value);
-    }
-
-    ~ScopedEnvOverride()
-    {
-        if (had_previous_)
-        {
-            SetEnvironmentValue(key_, previous_value_);
-        }
-        else
-        {
-            ClearEnvironmentValue(key_);
-        }
-    }
-
-private:
-    std::string key_;
-    std::string previous_value_;
-    bool had_previous_ = false;
-};
 
 std::string TrimTrailingWhitespace(std::string value)
 {
@@ -621,6 +575,146 @@ struct VaultSecretReference
     std::string field;
 };
 
+std::string TrimSlashes(std::string value)
+{
+    while (!value.empty() && value.front() == '/')
+    {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && value.back() == '/')
+    {
+        value.pop_back();
+    }
+    return value;
+}
+
+std::string VaultApiUrl(const VaultConfig& vault, const std::string& api_path)
+{
+    if (vault.address.empty())
+    {
+        throw std::runtime_error("VAULT_ADDR or vault.address is required for vault-backed secrets");
+    }
+
+    std::string address = vault.address;
+    while (!address.empty() && address.back() == '/')
+    {
+        address.pop_back();
+    }
+
+    return address + "/v1/" + TrimSlashes(api_path);
+}
+
+std::string VaultKerberosLoginPath(const VaultConfig& vault)
+{
+    const std::string auth_path = TrimSlashes(vault.auth_path.empty() ? "kerberos" : vault.auth_path);
+    return auth_path.rfind("auth/", 0) == 0 ? auth_path + "/login" : "auth/" + auth_path + "/login";
+}
+
+std::pair<std::string, std::string> SplitVaultSecretMountPath(const std::string& path)
+{
+    const std::string normalized = TrimSlashes(path);
+    const std::size_t delimiter = normalized.find('/');
+    if (delimiter == std::string::npos || delimiter == 0 || delimiter + 1 >= normalized.size())
+    {
+        throw std::runtime_error("vault secret path must include mount and path: " + path);
+    }
+
+    return {normalized.substr(0, delimiter), normalized.substr(delimiter + 1)};
+}
+
+std::string JsonUnescapeString(const std::string& raw)
+{
+    std::string output;
+    output.reserve(raw.size());
+
+    for (std::size_t index = 0; index < raw.size(); ++index)
+    {
+        const char ch = raw[index];
+        if (ch != '\\' || index + 1 >= raw.size())
+        {
+            output += ch;
+            continue;
+        }
+
+        const char escaped = raw[++index];
+        switch (escaped)
+        {
+            case '"': output += '"'; break;
+            case '\\': output += '\\'; break;
+            case '/': output += '/'; break;
+            case 'b': output += '\b'; break;
+            case 'f': output += '\f'; break;
+            case 'n': output += '\n'; break;
+            case 'r': output += '\r'; break;
+            case 't': output += '\t'; break;
+            default:
+                output += escaped;
+                break;
+        }
+    }
+
+    return output;
+}
+
+std::string ExtractJsonStringField(const std::string& json, const std::string& field)
+{
+    const std::string quoted_field = "\"" + field + "\"";
+    std::size_t search_pos = 0;
+
+    while ((search_pos = json.find(quoted_field, search_pos)) != std::string::npos)
+    {
+        std::size_t pos = search_pos + quoted_field.size();
+        while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos])) != 0)
+        {
+            ++pos;
+        }
+        if (pos >= json.size() || json[pos] != ':')
+        {
+            search_pos = pos;
+            continue;
+        }
+        ++pos;
+        while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos])) != 0)
+        {
+            ++pos;
+        }
+        if (pos >= json.size() || json[pos] != '"')
+        {
+            search_pos = pos;
+            continue;
+        }
+
+        ++pos;
+        std::string raw_value;
+        bool escaped = false;
+        for (; pos < json.size(); ++pos)
+        {
+            const char ch = json[pos];
+            if (escaped)
+            {
+                raw_value += '\\';
+                raw_value += ch;
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+            if (ch == '"')
+            {
+                return JsonUnescapeString(raw_value);
+            }
+            raw_value += ch;
+        }
+
+        break;
+    }
+
+    return "";
+}
+
 bool IsVaultSecretReference(const std::string& value)
 {
     return value.rfind("vault://", 0) == 0;
@@ -639,49 +733,35 @@ VaultSecretReference ParseVaultSecretReference(const std::string& value)
     return {body.substr(0, delimiter), body.substr(delimiter + 1)};
 }
 
-std::vector<std::unique_ptr<ScopedEnvOverride>> ApplyVaultEnvironment(
-    const VaultConfig& vault,
-    const std::string& token = "")
-{
-    std::vector<std::unique_ptr<ScopedEnvOverride>> overrides;
-
-    if (!vault.address.empty())
-    {
-        overrides.push_back(std::make_unique<ScopedEnvOverride>("VAULT_ADDR", vault.address));
-    }
-    if (!vault.namespace_name.empty())
-    {
-        overrides.push_back(std::make_unique<ScopedEnvOverride>("VAULT_NAMESPACE", vault.namespace_name));
-    }
-    if (!token.empty())
-    {
-        overrides.push_back(std::make_unique<ScopedEnvOverride>("VAULT_TOKEN", token));
-    }
-
-    return overrides;
-}
-
 std::string LoginToVault(const VaultConfig& configured_vault)
 {
     const VaultConfig vault = BuildEffectiveVaultConfig(configured_vault);
-    auto env_overrides = ApplyVaultEnvironment(vault);
-    std::string command = QuoteForShell(vault.executable) + " login -token-only -no-store";
+    const std::string login_url = VaultApiUrl(vault, VaultKerberosLoginPath(vault));
+    std::string command =
+        QuoteForShell(vault.curl_executable) +
+        " --fail --silent --show-error --request POST --negotiate --user :";
 
-    if (!vault.auth_path.empty())
+    if (!vault.namespace_name.empty())
     {
-        command += " -path=" + QuoteForShell(vault.auth_path);
+        command += " --header " + QuoteForShell("X-Vault-Namespace: " + vault.namespace_name);
     }
-
-    command += " -method=kerberos";
+    command += " " + QuoteForShell(login_url);
 
     const CommandResult result = RunCommandCapture(command);
-    if (result.exit_code != 0 || result.output.empty())
+    if (result.exit_code != 0)
     {
         throw std::runtime_error(
-            "vault login failed: " + (result.output.empty() ? std::string("no output") : result.output));
+            "vault kerberos HTTP login failed: " +
+            (result.output.empty() ? std::string("no output") : result.output));
     }
 
-    return result.output;
+    const std::string token = ExtractJsonStringField(result.output, "client_token");
+    if (token.empty())
+    {
+        throw std::runtime_error("vault kerberos HTTP login did not return auth.client_token");
+    }
+
+    return token;
 }
 
 std::string ReadVaultSecret(const std::string& reference, const VaultConfig& configured_vault)
@@ -689,25 +769,45 @@ std::string ReadVaultSecret(const std::string& reference, const VaultConfig& con
     const VaultSecretReference secret = ParseVaultSecretReference(reference);
     const VaultConfig vault = BuildEffectiveVaultConfig(configured_vault);
     const std::string token = LoginToVault(vault);
-    auto env_overrides = ApplyVaultEnvironment(vault, token);
 
-    const std::string command =
-        QuoteForShell(vault.executable) + " kv get -field=" + QuoteForShell(secret.field) +
-        " " + QuoteForShell(secret.path);
-    const CommandResult result = RunCommandCapture(command);
+    const auto [mount_path, secret_path] = SplitVaultSecretMountPath(secret.path);
+    const std::vector<std::string> candidate_paths = {
+        mount_path + "/data/" + secret_path,
+        mount_path + "/" + secret_path
+    };
 
-    if (result.exit_code != 0)
+    std::string last_error;
+    for (const std::string& candidate_path : candidate_paths)
     {
-        throw std::runtime_error(
-            "vault kv get failed for " + secret.path + "#" + secret.field + ": " + result.output);
-    }
-    if (result.output.empty())
-    {
-        throw std::runtime_error(
-            "vault secret resolved to an empty value: " + secret.path + "#" + secret.field);
+        std::string command =
+            QuoteForShell(vault.curl_executable) +
+            " --fail --silent --show-error --request GET" +
+            " --header " + QuoteForShell("X-Vault-Token: " + token);
+
+        if (!vault.namespace_name.empty())
+        {
+            command += " --header " + QuoteForShell("X-Vault-Namespace: " + vault.namespace_name);
+        }
+        command += " " + QuoteForShell(VaultApiUrl(vault, candidate_path));
+
+        const CommandResult result = RunCommandCapture(command);
+        if (result.exit_code != 0)
+        {
+            last_error = result.output;
+            continue;
+        }
+
+        const std::string secret_value = ExtractJsonStringField(result.output, secret.field);
+        if (!secret_value.empty())
+        {
+            return secret_value;
+        }
+
+        last_error = "field not found in vault response";
     }
 
-    return result.output;
+    throw std::runtime_error(
+        "vault HTTP read failed for " + secret.path + "#" + secret.field + ": " + last_error);
 }
 
 std::string ResolveSecretReference(const std::string& value, const VaultConfig& vault)
@@ -726,8 +826,8 @@ std::vector<CustomerFundRecord> SortRecords(std::vector<CustomerFundRecord> reco
         records.begin(),
         records.end(),
         [](const CustomerFundRecord& left, const CustomerFundRecord& right) {
-            return std::tie(left.cust_no, left.fund_account_no, left.currency_code) <
-                   std::tie(right.cust_no, right.fund_account_no, right.currency_code);
+            return std::tie(left.cust_no, left.fund_account_no) <
+                   std::tie(right.cust_no, right.fund_account_no);
         });
     return records;
 }
@@ -1152,7 +1252,7 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.log.directory = ResolveConfigRelativePath(config_dir, GetValue(properties, "log.dir", "../logs"));
     config.log.level = ParseLogLevelValue(GetValue(properties, "log.level", config.log.level));
 
-    config.vault.executable = GetValue(properties, "vault.executable", config.vault.executable);
+    config.vault.curl_executable = GetValue(properties, "vault.curl_executable", config.vault.curl_executable);
     config.vault.address = GetValue(properties, "vault.address");
     config.vault.namespace_name = GetValue(properties, "vault.namespace");
     config.vault.auth_path = GetValue(properties, "vault.auth_path");
@@ -1180,8 +1280,6 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.smtp.port = ParseIntValue(
         GetValue(properties, "smtp.port", std::to_string(config.smtp.port)),
         "smtp.port");
-    config.smtp.username = GetValue(properties, "smtp.username");
-    config.smtp.password = GetValue(properties, "smtp.password");
     config.smtp.from = GetRequiredValue(properties, "smtp.from");
     config.smtp.security = ToLower(GetValue(properties, "smtp.security", config.smtp.security));
     config.smtp.client_cert_path =
@@ -1219,7 +1317,7 @@ std::string WriteCsvReport(const std::vector<CustomerFundRecord>& records, const
         throw std::runtime_error("failed to create csv report: " + output_path.string());
     }
 
-    output << "trade_date,cust_no,cust_name,fund_account_no,currency_code,"
+    output << "trade_date,cust_no,cust_name,fund_account_no,"
            << "dyn_rights,hold_profit,avail_fund,risk_degree1,risk_degree2\n";
 
     for (const CustomerFundRecord& record : SortRecords(records))
@@ -1228,7 +1326,6 @@ std::string WriteCsvReport(const std::vector<CustomerFundRecord>& records, const
                << EscapeCsv(record.cust_no) << ','
                << EscapeCsv(record.cust_name) << ','
                << EscapeCsv(record.fund_account_no) << ','
-               << EscapeCsv(record.currency_code) << ','
                << FormatDouble(record.dyn_rights) << ','
                << FormatDouble(record.hold_profit) << ','
                << FormatDouble(record.avail_fund) << ','
@@ -1325,12 +1422,6 @@ std::string BuildCurlConfig(const MailRequest& request, const AppConfig& config,
     for (const std::string& recipient : request.cc)
     {
         curl_config << "mail-rcpt = \"" << EscapeCurlConfigValue(recipient) << "\"\n";
-    }
-    if (!config.smtp.username.empty())
-    {
-        curl_config << "user = \""
-                    << EscapeCurlConfigValue(config.smtp.username + ":" + config.smtp.password)
-                    << "\"\n";
     }
     if (has_client_cert)
     {

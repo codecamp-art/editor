@@ -84,57 +84,48 @@ void WriteFile(const std::filesystem::path& path, const std::string& content)
     output << content;
 }
 
-std::filesystem::path CreateFakeVaultExecutable(const std::filesystem::path& temp_dir)
+std::filesystem::path CreateFakeCurlExecutable(const std::filesystem::path& temp_dir)
 {
 #ifdef _WIN32
-    const std::filesystem::path script_path = temp_dir / "fake-vault.cmd";
+    const std::filesystem::path script_path = temp_dir / "fake-curl.cmd";
     WriteFile(
         script_path,
         "@echo off\r\n"
         "set args=%*\r\n"
-        "echo %args% | findstr /C:\"login\" >nul\r\n"
+        "echo %args% | findstr /C:\"/v1/auth/kerberos/login\" >nul\r\n"
         "if %errorlevel%==0 (\r\n"
-        "  echo %args% | findstr /C:\"-method=kerberos\" >nul\r\n"
+        "  echo %args% | findstr /C:\"--negotiate\" >nul\r\n"
         "  if not %errorlevel%==0 (\r\n"
-        "    echo missing kerberos method: %args% 1>&2\r\n"
+        "    echo missing curl kerberos negotiate option: %args% 1>&2\r\n"
         "    exit /b 1\r\n"
         "  )\r\n"
-        "  echo %args% | findstr /C:\"username=\" /C:\"service=\" /C:\"realm=\" /C:\"keytab_path=\" /C:\"krb5conf_path=\" /C:\"disable_fast_negotiation=\" >nul\r\n"
-        "  if %errorlevel%==0 (\r\n"
-        "    echo unexpected legacy kerberos args: %args% 1>&2\r\n"
-        "    exit /b 1\r\n"
-        "  )\r\n"
-        "  echo fake-vault-token\r\n"
+        "  echo {\"auth\":{\"client_token\":\"fake-vault-token\"}}\r\n"
         "  exit /b 0\r\n"
         ")\r\n"
-        "echo %args% | findstr /C:\"kv get\" >nul\r\n"
+        "echo %args% | findstr /C:\"/v1/secret/data/tds/qa\" >nul\r\n"
         "if %errorlevel%==0 (\r\n"
-            "  echo vault-secret-value\r\n"
+        "  echo {\"data\":{\"data\":{\"password\":\"vault-secret-value\"}}}\r\n"
         "  exit /b 0\r\n"
         ")\r\n"
-        "echo unexpected vault command: %args% 1>&2\r\n"
+        "echo unexpected curl command: %args% 1>&2\r\n"
         "exit /b 1\r\n");
     return script_path;
 #else
-    const std::filesystem::path script_path = temp_dir / "fake-vault.sh";
+    const std::filesystem::path script_path = temp_dir / "fake-curl.sh";
     WriteFile(
         script_path,
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "if printf '%s\\n' \"$*\" | grep -q 'login'; then\n"
-        "  printf '%s\\n' \"$*\" | grep -q -- '-method=kerberos'\n"
-        "  if printf '%s\\n' \"$*\" | grep -Eq 'username=|service=|realm=|keytab_path=|krb5conf_path=|disable_fast_negotiation='; then\n"
-        "    printf 'unexpected legacy kerberos args: %s\\n' \"$*\" >&2\n"
-        "    exit 1\n"
-        "  fi\n"
-        "  printf 'fake-vault-token\\n'\n"
+        "if printf '%s\\n' \"$*\" | grep -q '/v1/auth/kerberos/login'; then\n"
+        "  printf '%s\\n' \"$*\" | grep -q -- '--negotiate'\n"
+        "  printf '{\"auth\":{\"client_token\":\"fake-vault-token\"}}\\n'\n"
         "  exit 0\n"
         "fi\n"
-        "if printf '%s\\n' \"$*\" | grep -q 'kv get'; then\n"
-        "  printf 'vault-secret-value\\n'\n"
+        "if printf '%s\\n' \"$*\" | grep -q '/v1/secret/data/tds/qa'; then\n"
+        "  printf '{\"data\":{\"data\":{\"password\":\"vault-secret-value\"}}}\\n'\n"
         "  exit 0\n"
         "fi\n"
-        "printf 'unexpected vault command: %s\\n' \"$*\" >&2\n"
+        "printf 'unexpected curl command: %s\\n' \"$*\" >&2\n"
         "exit 1\n");
     std::filesystem::permissions(
         script_path,
@@ -334,7 +325,7 @@ void TestLoadConfigWithVaultBackedTdsPassword()
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_vault_test";
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "vault.properties";
-    const std::filesystem::path vault_executable = CreateFakeVaultExecutable(temp_dir);
+    const std::filesystem::path curl_executable = CreateFakeCurlExecutable(temp_dir);
 
     std::ofstream output(config_path);
     output
@@ -343,7 +334,7 @@ void TestLoadConfigWithVaultBackedTdsPassword()
         << "tds.drtp_port=6003\n"
         << "tds.user=10000\n"
         << "tds.password=vault://secret/tds/qa#password\n"
-        << "vault.executable=" << vault_executable.string() << "\n"
+        << "vault.curl_executable=" << curl_executable.string() << "\n"
         << "vault.address=https://vault.example.com\n"
         << "smtp.host=mail.local\n"
         << "smtp.port=2587\n"
@@ -389,8 +380,8 @@ void TestMimeAndDryRun()
     const report::AppConfig config = BuildTestConfig(output_dir);
 
     const std::vector<report::CustomerFundRecord> records {
-        {20260418, "1001", "Alpha Capital", "FA1001", "CNY", 1000.5, 12.5, 800.0, 0.12, 0.15},
-        {20260418, "1002", "Beta Futures", "FA1002", "CNY", 2000.5, -8.5, 1200.0, 0.08, 0.11}
+        {20260418, "1001", "Alpha Capital", "FA1001", 1000.5, 12.5, 800.0, 0.12, 0.15},
+        {20260418, "1002", "Beta Futures", "FA1002", 2000.5, -8.5, 1200.0, 0.08, 0.11}
     };
     const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
 
@@ -436,7 +427,7 @@ void TestCurlConfigWithClientCertificate()
     config.smtp.client_key_type = "PEM";
 
     const std::vector<report::CustomerFundRecord> records {
-        {20260418, "1001", "Alpha Capital", "FA1001", "CNY", 1000.5, 12.5, 800.0, 0.12, 0.15}
+        {20260418, "1001", "Alpha Capital", "FA1001", 1000.5, 12.5, 800.0, 0.12, 0.15}
     };
     const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
 
@@ -453,6 +444,7 @@ void TestCurlConfigWithClientCertificate()
     AssertContains(curl_config, "cert-type = \"PEM\"", "curl cert type");
     AssertContains(curl_config, "key-type = \"PEM\"", "curl key type");
     AssertContains(curl_config, "ssl-reqd", "curl starttls requirement");
+    AssertTrue(curl_config.find("user = ") == std::string::npos, "smtp relay must not use basic auth");
 }
 
 void TestVendorTextDecodingAndErrorFormatting()

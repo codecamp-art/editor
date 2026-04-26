@@ -8,7 +8,22 @@ pipeline {
   }
 
   parameters {
-    string(name: 'TDS_VENDOR_LIBRARY', defaultValue: '', description: 'Optional absolute path to the vendor .so. Leave empty to auto-detect ./tds/linux_x86_64/libtds_api.so')
+    string(name: 'ARTIFACTORY_PACKAGE_URL', defaultValue: '', description: 'Optional HTTPS URL of the supplier install package. When set, Jenkins downloads it and rebuilds the fixed ./tds supplier layout.')
+    string(name: 'ARTIFACTORY_CERT_VAULT_PATH', defaultValue: '', description: 'Vault KV path containing the Artifactory client certificate used by curl')
+    string(name: 'ARTIFACTORY_CERT_VAULT_FIELD', defaultValue: 'cert', description: 'Vault KV field name for the Artifactory client certificate')
+    string(name: 'ARTIFACTORY_KEY_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory client private key')
+    string(name: 'ARTIFACTORY_KEY_VAULT_FIELD', defaultValue: 'key', description: 'Vault KV field name for the Artifactory client private key')
+    string(name: 'ARTIFACTORY_CA_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory CA bundle')
+    string(name: 'ARTIFACTORY_CA_VAULT_FIELD', defaultValue: 'ca_cert', description: 'Vault KV field name for the Artifactory CA bundle')
+    string(name: 'ARTIFACTORY_CERT_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory certificate password')
+    string(name: 'ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the Artifactory certificate password')
+    string(name: 'ARTIFACTORY_CERT_TYPE', defaultValue: 'PEM', description: 'Client certificate type passed to curl, for example PEM or P12')
+    string(name: 'CURL_BIN', defaultValue: 'curl', description: 'curl executable used for Vault HTTP API and Artifactory downloads')
+    string(name: 'VAULT_ADDR', defaultValue: '', description: 'Vault address, for example https://vault.example.com:8200')
+    string(name: 'VAULT_NAMESPACE', defaultValue: '', description: 'Optional Vault namespace')
+    string(name: 'VAULT_AUTH_PATH', defaultValue: '', description: 'Optional non-default Vault auth mount path')
+    string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the supplier zip password')
+    string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the supplier zip password')
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
     booleanParam(name: 'RUN_STUB_SMOKE', defaultValue: true, description: 'Run a deterministic stub dry-run after unit tests')
   }
@@ -19,20 +34,43 @@ pipeline {
     STAGE_DIR = "${env.WORKSPACE}/build_pr/client_funding_risk_report"
     INSTALLER_PATH = "${env.WORKSPACE}/build_pr/client_funding_risk_report-installer.run"
     SMOKE_INSTALL_DIR = "${env.WORKSPACE}/build_pr/smoke_install"
+    VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
+    VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
+    VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
+    ARTIFACTORY_AUTH_DIR = "${env.WORKSPACE}/artifactory_auth"
+    VAULT_RUNTIME_TOKEN = ""
   }
 
   stages {
+    stage('Prepare Vault Access') {
+      when {
+        expression { return params.ARTIFACTORY_PACKAGE_URL?.trim() || params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim() }
+      }
+      steps {
+        script {
+          env.VAULT_RUNTIME_TOKEN = load('jenkins/report_common.groovy').prepareVaultAccess(params)
+        }
+      }
+    }
+
+    stage('Prepare Vendor SDK') {
+      steps {
+        script {
+          load('jenkins/report_common.groovy').prepareVendorSdk(
+            params: params,
+            vaultToken: env.VAULT_RUNTIME_TOKEN
+          )
+        }
+      }
+    }
+
     stage('Configure') {
       steps {
-        sh '''
-          set -euxo pipefail
-          cd "$PROJECT_DIR"
-          cmake -S . -B "$BUILD_DIR" \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DTDS_VENDOR_LIBRARY="$TDS_VENDOR_LIBRARY" \
-            -DREPORT_STAGE_DIR="$STAGE_DIR" \
-            -DREPORT_RUN_INSTALLER_PATH="$INSTALLER_PATH"
-        '''
+        script {
+          load('jenkins/report_common.groovy').configureCmake(
+            runInstallerPath: env.INSTALLER_PATH
+          )
+        }
       }
     }
 
@@ -76,7 +114,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'output/*, build_pr/Testing/**', allowEmptyArchive: true
+      archiveArtifacts artifacts: 'output/*, build_pr/Testing/**, build_pr/client_funding_risk_report/**, build_pr/*.run', allowEmptyArchive: true
     }
   }
 }

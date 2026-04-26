@@ -13,7 +13,6 @@ struct CustomerFundRecord
     std::string cust_no;
     std::string cust_name;
     std::string fund_account_no;
-    std::string currency_code;
     double dyn_rights = 0.0;
     double hold_profit = 0.0;
     double avail_fund = 0.0;
@@ -37,8 +36,6 @@ struct SmtpConfig
 {
     std::string host;
     int port = 25;
-    std::string username;
-    std::string password;
     std::string from;
     std::string security = "plain";
     std::string client_cert_path;
@@ -58,7 +55,7 @@ struct LogConfig
 
 struct VaultConfig
 {
-    std::string executable;
+    std::string curl_executable;
     std::string address;
     std::string namespace_name;
     std::string auth_path;

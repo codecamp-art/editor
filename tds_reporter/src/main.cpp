@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <set>
+#include <stdexcept>
 
 namespace {
 
@@ -14,7 +15,8 @@ void PrintUsage()
         << "               [--cust-list 1001,1002] [--output-dir path] [--trade-date YYYYMMDD]\n"
         << "               [--dry-run] [--stub-file path]\n\n"
         << "Notes:\n"
-        << "  --stub-file lets you debug on Windows without the vendor RHEL8 .so file.\n"
+        << "  --stub-file lets you debug without a local supplier TDS runtime.\n"
+        << "  Windows local builds can read DRTP with win32 supplier files, but must use --dry-run.\n"
         << "  Packaged runs auto-discover config beside the executable, so --config is usually unnecessary.\n"
         << "  A production package can start with no arguments when config/report.properties is present.\n"
         << "  --dry-run writes an .eml preview instead of calling curl SMTP.\n";
@@ -46,6 +48,13 @@ int main(int argc, char** argv)
         const std::string config_path =
             cli.config_path.empty() ? report::DefaultConfigPath(cli.env) : cli.config_path;
         const report::AppConfig config = report::LoadConfig(config_path, cli);
+#ifdef _WIN32
+        if (!cli.dry_run)
+        {
+            throw std::runtime_error(
+                "Windows local builds only support --dry-run mail preview; live SMTP delivery runs on Linux/Jenkins.");
+        }
+#endif
         report::InitializeLogger(config);
         report::LogInfo(
             "startup",

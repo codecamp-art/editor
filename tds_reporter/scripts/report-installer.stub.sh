@@ -30,9 +30,64 @@ looks_like_report_install() {
     local target_dir="$1"
     [ -f "${target_dir}/${install_marker_file}" ] || {
         [ -x "${target_dir}/bin/report" ] &&
-        [ -f "${target_dir}/config/dev.properties" ] &&
-        [ -x "${target_dir}/scripts/render-config.sh" ]
+        [ -d "${target_dir}/config" ] &&
+        {
+            [ -f "${target_dir}/config/report.properties" ] ||
+            [ -f "${target_dir}/config/report.properties.template" ]
+        }
     }
+}
+
+render_env_references() {
+    local rendered="$1"
+    local match name fallback value
+
+    while [[ "${rendered}" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)(:([^}]*))?\} ]]; do
+        match="${BASH_REMATCH[0]}"
+        name="${BASH_REMATCH[1]}"
+        fallback="${BASH_REMATCH[3]:-}"
+        value="${!name:-}"
+
+        if [ -z "${value}" ]; then
+            value="${fallback}"
+        fi
+
+        rendered="${rendered/"${match}"/${value}}"
+    done
+
+    printf '%s\n' "${rendered}"
+}
+
+append_rendered_file() {
+    local input_path="$1"
+    local output_path="$2"
+    local line
+
+    while IFS= read -r line || [ -n "${line}" ]; do
+        render_env_references "${line}"
+    done < "${input_path}" >> "${output_path}"
+}
+
+render_config() {
+    local selected_env="$1"
+    local output_path="$2"
+    local base_template_path="${install_prefix}/config/report.properties.template"
+    local overlay_path="${install_prefix}/config/${selected_env}.properties"
+
+    if [ ! -f "${base_template_path}" ]; then
+        printf 'Base template does not exist: %s\n' "${base_template_path}" >&2
+        exit 1
+    fi
+    if [ ! -f "${overlay_path}" ]; then
+        printf 'Environment overlay does not exist: %s\n' "${overlay_path}" >&2
+        exit 1
+    fi
+
+    mkdir -p "$(dirname "${output_path}")"
+    : > "${output_path}"
+    append_rendered_file "${base_template_path}" "${output_path}"
+    printf '\n' >> "${output_path}"
+    append_rendered_file "${overlay_path}" "${output_path}"
 }
 
 ensure_safe_install_prefix() {
@@ -138,7 +193,12 @@ if [ ! -x "${install_prefix}/bin/report" ]; then
     exit 1
 fi
 
-"${install_prefix}/scripts/render-config.sh" "${env_name}" "${install_prefix}/config/report.properties"
+render_config "${env_name}" "${install_prefix}/config/report.properties"
+rm -f \
+    "${install_prefix}/config/dev.properties" \
+    "${install_prefix}/config/qa.properties" \
+    "${install_prefix}/config/prod.properties" \
+    "${install_prefix}/config/report.properties.template"
 printf 'installed_by=%s\n' "${0##*/}" > "${install_prefix}/${install_marker_file}"
 
 cat <<EOF
@@ -148,8 +208,7 @@ Rendered config/report.properties for environment: ${env_name}
 Run:
   ${install_prefix}/bin/report
 
-Switch environment later:
-  ${install_prefix}/run-report.sh <dev|qa|prod> ...
+Switch environment later by re-running this installer with another --env value.
 EOF
 exit 0
 __ARCHIVE_BELOW__
