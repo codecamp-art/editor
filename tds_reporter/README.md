@@ -220,6 +220,9 @@ Fixed Jenkins integration config:
 - these values are not Jenkins UI parameters; update the helper only when Vault locations or the supplier package version changes
 - placeholder values beginning with `REPLACE_ME_` fail fast before Vault or Artifactory access
 - `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it selects the runtime `--env`, not package download credentials
+- Vault token is kept out of Jenkins environment variables and `curl` argv; Vault HTTP calls use temporary `curl --config` files with mode `600`
+- Artifactory certificate password is kept out of `curl` argv and shell environment; the download also uses a temporary `curl --config` file
+- password-protected ZIP extraction still uses standard `unzip -P`, which exposes the ZIP password in process argv; prefer removing the ZIP password and relying on Artifactory mTLS, or use a dedicated extractor that reads the password from a protected file descriptor
 
 Jenkins helper flow:
 

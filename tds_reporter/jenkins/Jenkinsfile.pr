@@ -22,31 +22,24 @@ pipeline {
     VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
     VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
     ARTIFACTORY_AUTH_DIR = "${env.WORKSPACE}/artifactory_auth"
-    VAULT_RUNTIME_TOKEN = ""
   }
 
   stages {
-    stage('Prepare Vault Access') {
-      steps {
-        script {
-          def common = load('jenkins/report_common.groovy')
-          def integrationConfig = common.fixedIntegrationConfig('pr')
-          common.validateFixedIntegrationConfig(integrationConfig, 'pr')
-          env.VAULT_RUNTIME_TOKEN = common.prepareVaultAccess(integrationConfig)
-        }
-      }
-    }
-
     stage('Prepare Vendor SDK') {
       steps {
         script {
           def common = load('jenkins/report_common.groovy')
           def integrationConfig = common.fixedIntegrationConfig('pr')
           common.validateFixedIntegrationConfig(integrationConfig, 'pr')
-          common.prepareVendorSdk(
-            params: integrationConfig,
-            vaultToken: env.VAULT_RUNTIME_TOKEN
-          )
+          String vaultToken = common.prepareVaultAccess(integrationConfig)
+          try {
+            common.prepareVendorSdk(
+              params: integrationConfig,
+              vaultToken: vaultToken
+            )
+          } finally {
+            vaultToken = ''
+          }
         }
       }
     }

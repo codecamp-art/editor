@@ -25,31 +25,24 @@ pipeline {
     VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
     ARTIFACTORY_AUTH_DIR = "${env.WORKSPACE}/artifactory_auth"
     SMOKE_INSTALL_DIR = "${env.WORKSPACE}/smoke_install"
-    VAULT_RUNTIME_TOKEN = ""
   }
 
   stages {
-    stage('Prepare Vault Access') {
-      steps {
-        script {
-          def common = load('jenkins/report_common.groovy')
-          def integrationConfig = common.fixedIntegrationConfig('release')
-          common.validateFixedIntegrationConfig(integrationConfig, 'release')
-          env.VAULT_RUNTIME_TOKEN = common.prepareVaultAccess(integrationConfig)
-        }
-      }
-    }
-
     stage('Prepare Vendor SDK') {
       steps {
         script {
           def common = load('jenkins/report_common.groovy')
           def integrationConfig = common.fixedIntegrationConfig('release')
           common.validateFixedIntegrationConfig(integrationConfig, 'release')
-          common.prepareVendorSdk(
-            params: integrationConfig,
-            vaultToken: env.VAULT_RUNTIME_TOKEN
-          )
+          String vaultToken = common.prepareVaultAccess(integrationConfig)
+          try {
+            common.prepareVendorSdk(
+              params: integrationConfig,
+              vaultToken: vaultToken
+            )
+          } finally {
+            vaultToken = ''
+          }
         }
       }
     }

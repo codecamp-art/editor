@@ -1,7 +1,44 @@
 import groovy.json.JsonSlurperClassic
+import java.util.UUID
 
 String shellQuote(String value) {
   return "'" + (value ?: '').replace("'", "'\"'\"'") + "'"
+}
+
+String curlConfigQuote(String value) {
+  return '"' + (value ?: '')
+    .replace('\\', '\\\\')
+    .replace('"', '\\"')
+    .replace('\r', '\\r')
+    .replace('\n', '\\n') + '"'
+}
+
+String curlConfigOption(String name, String value = null) {
+  return value == null ? name : "${name} = ${curlConfigQuote(value)}"
+}
+
+String secretTempPath(String prefix) {
+  return "${pwd(tmp: true)}/${prefix}-${UUID.randomUUID().toString()}"
+}
+
+void writeSecretFile(String path, String content) {
+  writeFile(file: path, text: content)
+  sh """#!/usr/bin/env bash
+set +x
+set -euo pipefail
+chmod 600 ${shellQuote(path)}
+"""
+}
+
+void deleteSecretFile(String path) {
+  if (!path?.trim()) {
+    return
+  }
+
+  sh """#!/usr/bin/env bash
+set +x
+rm -f ${shellQuote(path)}
+"""
 }
 
 String trimSlashes(String value) {
@@ -110,18 +147,36 @@ String vaultApiUrl(Map vault, String apiPath) {
   return "${address}/v1/${trimSlashes(apiPath)}"
 }
 
-String vaultCurl(Map vault, String method, String apiPath, List<String> extraArgs = []) {
+String vaultCurl(Map vault, String method, String apiPath, List<String> extraConfigLines = []) {
   String curlBin = (vault.curlBin ?: 'curl').trim()
   String namespace = (vault.namespace ?: '').trim()
-  String namespaceArg = namespace ? "--header ${shellQuote("X-Vault-Namespace: ${namespace}")}" : ''
+  List<String> configLines = [
+    curlConfigOption('fail'),
+    curlConfigOption('silent'),
+    curlConfigOption('show-error'),
+    curlConfigOption('request', method),
+    curlConfigOption('url', vaultApiUrl(vault, apiPath))
+  ]
+  configLines.addAll(extraConfigLines)
+  if (namespace) {
+    configLines << curlConfigOption('header', "X-Vault-Namespace: ${namespace}")
+  }
 
-  return sh(
-    returnStdout: true,
-    script: """#!/usr/bin/env bash
+  String configPath = secretTempPath('vault-curl')
+  writeSecretFile(configPath, configLines.join('\n') + '\n')
+
+  try {
+    return sh(
+      returnStdout: true,
+      script: """#!/usr/bin/env bash
+set +x
 set -euo pipefail
-${shellQuote(curlBin)} --fail --silent --show-error --request ${shellQuote(method)} ${extraArgs.join(' ')} ${namespaceArg} ${shellQuote(vaultApiUrl(vault, apiPath))}
+${shellQuote(curlBin)} --config ${shellQuote(configPath)}
 """
-  ).trim()
+    ).trim()
+  } finally {
+    deleteSecretFile(configPath)
+  }
 }
 
 String vaultKerberosLogin(Map vault) {
@@ -131,7 +186,15 @@ String vaultKerberosLogin(Map vault) {
   }
 
   def payload = new JsonSlurperClassic().parseText(
-    vaultCurl(vault, 'POST', "${authPath}/login", ['--negotiate', '--user', ':'])
+    vaultCurl(
+      vault,
+      'POST',
+      "${authPath}/login",
+      [
+        curlConfigOption('negotiate'),
+        curlConfigOption('user', ':')
+      ]
+    )
   )
   String token = payload?.auth?.client_token?.toString() ?: ''
   if (!token) {
@@ -161,7 +224,12 @@ String vaultKvGet(Map vault, String token, String secretPath, String field) {
   for (String candidatePath : ["${mount}/data/${rest}", "${mount}/${rest}"]) {
     try {
       def payload = new JsonSlurperClassic().parseText(
-        vaultCurl(vault, 'GET', candidatePath, ["--header ${shellQuote("X-Vault-Token: ${token}")}"])
+        vaultCurl(
+          vault,
+          'GET',
+          candidatePath,
+          [curlConfigOption('header', "X-Vault-Token: ${token}")]
+        )
       )
       def data = payload?.data
       def value = null
@@ -264,37 +332,46 @@ void prepareVendorSdk(Map args) {
       'password'
     )
 
-    withEnv([
-      "CURL_BIN=${pipelineParams.CURL_BIN?.trim() ?: 'curl'}",
-      "ARTIFACTORY_PACKAGE_URL=${pipelineParams.ARTIFACTORY_PACKAGE_URL.trim()}",
-      "ARTIFACTORY_CERT_FILE=${env.ARTIFACTORY_AUTH_DIR}/client-cert",
-      "ARTIFACTORY_KEY_FILE=${pipelineParams.ARTIFACTORY_KEY_VAULT_PATH?.trim() ? "${env.ARTIFACTORY_AUTH_DIR}/client-key" : ''}",
-      "ARTIFACTORY_CA_FILE=${pipelineParams.ARTIFACTORY_CA_VAULT_PATH?.trim() ? "${env.ARTIFACTORY_AUTH_DIR}/ca-cert" : ''}",
-      "ARTIFACTORY_CERT_PASSWORD=${artifactoryCertPassword}",
-      "ARTIFACTORY_CERT_TYPE=${pipelineParams.ARTIFACTORY_CERT_TYPE?.trim() ?: 'PEM'}",
-      "VENDOR_PACKAGE_ZIP_PASSWORD=${vendorZipPassword}"
-    ]) {
-      sh '''#!/usr/bin/env bash
+    String artifactoryCurlConfigPath = secretTempPath('artifactory-curl')
+    String artifactoryCertFile = "${env.ARTIFACTORY_AUTH_DIR}/client-cert"
+    String artifactoryCertSpec = artifactoryCertPassword
+      ? "${artifactoryCertFile}:${artifactoryCertPassword}"
+      : artifactoryCertFile
+    List<String> artifactoryCurlConfig = [
+      curlConfigOption('fail'),
+      curlConfigOption('silent'),
+      curlConfigOption('show-error'),
+      curlConfigOption('location'),
+      curlConfigOption('cert-type', pipelineParams.ARTIFACTORY_CERT_TYPE?.trim() ?: 'PEM'),
+      curlConfigOption('cert', artifactoryCertSpec),
+      curlConfigOption('output', "${env.VENDOR_DOWNLOAD_DIR}/vendor_package"),
+      curlConfigOption('url', pipelineParams.ARTIFACTORY_PACKAGE_URL.trim())
+    ]
+
+    if (pipelineParams.ARTIFACTORY_KEY_VAULT_PATH?.trim()) {
+      artifactoryCurlConfig << curlConfigOption('key', "${env.ARTIFACTORY_AUTH_DIR}/client-key")
+    }
+
+    if (pipelineParams.ARTIFACTORY_CA_VAULT_PATH?.trim()) {
+      artifactoryCurlConfig << curlConfigOption('cacert', "${env.ARTIFACTORY_AUTH_DIR}/ca-cert")
+    }
+
+    writeSecretFile(artifactoryCurlConfigPath, artifactoryCurlConfig.join('\n') + '\n')
+
+    try {
+      withEnv([
+        "CURL_BIN=${pipelineParams.CURL_BIN?.trim() ?: 'curl'}",
+        "ARTIFACTORY_PACKAGE_URL=${pipelineParams.ARTIFACTORY_PACKAGE_URL.trim()}",
+        "ARTIFACTORY_CURL_CONFIG_FILE=${artifactoryCurlConfigPath}",
+        "VENDOR_PACKAGE_ZIP_PASSWORD=${vendorZipPassword}"
+      ]) {
+        sh '''#!/usr/bin/env bash
+        set +x
         set -euo pipefail
 
         VENDOR_ARCHIVE="$VENDOR_DOWNLOAD_DIR/vendor_package"
-        curl_args=(--fail --silent --show-error --location --cert-type "$ARTIFACTORY_CERT_TYPE")
-
-        if [ -n "${ARTIFACTORY_CERT_PASSWORD:-}" ]; then
-          curl_args+=(--cert "${ARTIFACTORY_CERT_FILE}:${ARTIFACTORY_CERT_PASSWORD}")
-        else
-          curl_args+=(--cert "${ARTIFACTORY_CERT_FILE}")
-        fi
-
-        if [ -n "${ARTIFACTORY_KEY_FILE:-}" ]; then
-          curl_args+=(--key "$ARTIFACTORY_KEY_FILE")
-        fi
-
-        if [ -n "${ARTIFACTORY_CA_FILE:-}" ]; then
-          curl_args+=(--cacert "$ARTIFACTORY_CA_FILE")
-        fi
-
-        "$CURL_BIN" "${curl_args[@]}" -o "$VENDOR_ARCHIVE" "$ARTIFACTORY_PACKAGE_URL"
+        "$CURL_BIN" --config "$ARTIFACTORY_CURL_CONFIG_FILE"
+        rm -f "$ARTIFACTORY_CURL_CONFIG_FILE"
         rm -rf "$ARTIFACTORY_AUTH_DIR"
 
         if unzip -tq "$VENDOR_ARCHIVE" >/dev/null 2>&1; then
@@ -336,6 +413,13 @@ void prepareVendorSdk(Map args) {
         test -f "$VENDOR_TDS_DIR/linux_x86_64/libtds_api.so"
         test -f "$VENDOR_TDS_DIR/linux_x86_64/cpack.dat"
         find "$VENDOR_TDS_DIR" -maxdepth 2 -type f | sort
+      '''
+      }
+    } finally {
+      deleteSecretFile(artifactoryCurlConfigPath)
+      sh '''#!/usr/bin/env bash
+        set +x
+        rm -rf "$ARTIFACTORY_AUTH_DIR"
       '''
     }
     return
