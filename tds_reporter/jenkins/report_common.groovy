@@ -15,6 +15,81 @@ String trimSlashes(String value) {
   return result
 }
 
+Map fixedIntegrationConfig(String pipelineName) {
+  // Replace these fixed values in code only; Jenkins UI should not provide them.
+  // Set optional Vault paths to '' when that material is not required.
+  Map shared = [
+    ARTIFACTORY_PACKAGE_URL: 'REPLACE_ME_SUPPLIER_PACKAGE_URL',
+    CURL_BIN: 'curl',
+    ARTIFACTORY_CERT_TYPE: 'PEM'
+  ]
+
+  Map pr = [
+    VAULT_ADDR: 'REPLACE_ME_PR_VAULT_ADDR',
+    VAULT_NAMESPACE: 'REPLACE_ME_PR_VAULT_NAMESPACE',
+    VAULT_AUTH_PATH: 'kerberos',
+    ARTIFACTORY_CERT_VAULT_PATH: 'REPLACE_ME_PR_ARTIFACTORY_CERT_VAULT_PATH',
+    ARTIFACTORY_CERT_VAULT_FIELD: 'cert',
+    ARTIFACTORY_KEY_VAULT_PATH: 'REPLACE_ME_PR_ARTIFACTORY_KEY_VAULT_PATH',
+    ARTIFACTORY_KEY_VAULT_FIELD: 'key',
+    ARTIFACTORY_CA_VAULT_PATH: 'REPLACE_ME_PR_ARTIFACTORY_CA_VAULT_PATH',
+    ARTIFACTORY_CA_VAULT_FIELD: 'ca_cert',
+    ARTIFACTORY_CERT_PASSWORD_VAULT_PATH: 'REPLACE_ME_PR_ARTIFACTORY_CERT_PASSWORD_VAULT_PATH',
+    ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD: 'password',
+    VENDOR_PACKAGE_PASSWORD_VAULT_PATH: 'REPLACE_ME_PR_VENDOR_PACKAGE_PASSWORD_VAULT_PATH',
+    VENDOR_PACKAGE_PASSWORD_VAULT_FIELD: 'password'
+  ]
+
+  Map release = [
+    VAULT_ADDR: 'REPLACE_ME_RELEASE_VAULT_ADDR',
+    VAULT_NAMESPACE: 'REPLACE_ME_RELEASE_VAULT_NAMESPACE',
+    VAULT_AUTH_PATH: 'kerberos',
+    ARTIFACTORY_CERT_VAULT_PATH: 'REPLACE_ME_RELEASE_ARTIFACTORY_CERT_VAULT_PATH',
+    ARTIFACTORY_CERT_VAULT_FIELD: 'cert',
+    ARTIFACTORY_KEY_VAULT_PATH: 'REPLACE_ME_RELEASE_ARTIFACTORY_KEY_VAULT_PATH',
+    ARTIFACTORY_KEY_VAULT_FIELD: 'key',
+    ARTIFACTORY_CA_VAULT_PATH: 'REPLACE_ME_RELEASE_ARTIFACTORY_CA_VAULT_PATH',
+    ARTIFACTORY_CA_VAULT_FIELD: 'ca_cert',
+    ARTIFACTORY_CERT_PASSWORD_VAULT_PATH: 'REPLACE_ME_RELEASE_ARTIFACTORY_CERT_PASSWORD_VAULT_PATH',
+    ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD: 'password',
+    VENDOR_PACKAGE_PASSWORD_VAULT_PATH: 'REPLACE_ME_RELEASE_VENDOR_PACKAGE_PASSWORD_VAULT_PATH',
+    VENDOR_PACKAGE_PASSWORD_VAULT_FIELD: 'password'
+  ]
+
+  Map selected = pipelineName == 'release' ? release : pr
+  return shared + selected
+}
+
+void validateFixedIntegrationConfig(Map config, String pipelineName) {
+  List<String> requiredKeys = [
+    'ARTIFACTORY_PACKAGE_URL',
+    'VAULT_ADDR',
+    'ARTIFACTORY_CERT_VAULT_PATH',
+    'ARTIFACTORY_CERT_VAULT_FIELD',
+    'VENDOR_PACKAGE_PASSWORD_VAULT_PATH',
+    'VENDOR_PACKAGE_PASSWORD_VAULT_FIELD'
+  ]
+
+  List<String> invalidKeys = []
+  config.each { key, rawValue ->
+    String value = rawValue?.toString()?.trim() ?: ''
+    if (value.startsWith('REPLACE_ME_')) {
+      invalidKeys << key.toString()
+    }
+  }
+
+  requiredKeys.each { key ->
+    String value = config[key]?.toString()?.trim() ?: ''
+    if (!value) {
+      invalidKeys << key
+    }
+  }
+
+  if (invalidKeys) {
+    error("Fixed Jenkins integration config for ${pipelineName} is incomplete: ${invalidKeys.unique().join(', ')}")
+  }
+}
+
 Map vaultConfigFromParams(def pipelineParams) {
   return [
     curlBin: pipelineParams.CURL_BIN?.trim() ?: 'curl',

@@ -194,26 +194,20 @@ Release assumptions:
 - Jenkins user has a cron-refreshed TGT
 - the Jenkins systemd service startup loads the user's profile so the Jenkins process inherits `KRB5CCNAME`
 - the pipeline trusts the inherited Kerberos environment and does not re-check `KRB5CCNAME` or run `klist`
-- Jenkins has `curl` available through `CURL_BIN` or `PATH`
+- Jenkins has `curl` available through the fixed `CURL_BIN` value or `PATH`
 - Jenkins parses Vault JSON with the built-in Groovy JSON parser, not Python
 - Artifactory client cert, key, CA, and optional cert password come from Vault, not Jenkins local file credentials
 - supplier files are normalized into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
 - Jenkins builds one `.run` installer per build
 - the live smoke installs that `.run` into a temporary directory with `REPORT_RUNTIME_ENV`
 
-Important parameters:
+Fixed Jenkins integration config:
 
-- `ARTIFACTORY_PACKAGE_URL`
-- `ARTIFACTORY_CERT_VAULT_PATH`
-- optional `ARTIFACTORY_KEY_VAULT_PATH`
-- optional `ARTIFACTORY_CA_VAULT_PATH`
-- optional `ARTIFACTORY_CERT_PASSWORD_VAULT_PATH`
-- `VAULT_ADDR`
-- optional `VAULT_NAMESPACE`
-- optional `VAULT_AUTH_PATH`
-- optional `CURL_BIN`
-- optional `VENDOR_PACKAGE_PASSWORD_VAULT_PATH`
-- optional `REPORT_RUNTIME_ENV`
+- `jenkins/report_common.groovy` owns the shared Artifactory package URL
+- the same helper owns separate PR and Release Vault paths, fields, namespace, auth path, and package password secret paths
+- these values are not Jenkins UI parameters; update the helper only when Vault locations or the supplier package version changes
+- placeholder values beginning with `REPLACE_ME_` fail fast before Vault or Artifactory access
+- `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it controls the installed runtime environment, not package download credentials
 
 Core flow:
 
@@ -234,9 +228,8 @@ Shared Jenkins helper: [jenkins/report_common.groovy](/D:/Codes/local/Test/tds_r
 
 The PR pipeline now uses the same supplier package preparation model as release:
 
-- optional `ARTIFACTORY_PACKAGE_URL` downloads the supplier package from Artifactory
+- the fixed Artifactory package URL downloads the supplier package from Artifactory
 - Artifactory certificate, optional key, optional CA, optional certificate password, and optional supplier ZIP password come from Vault
 - the downloaded package may be ZIP, password-protected ZIP, `.tar.gz`, or `.tar`
 - extracted supplier files are normalized into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
-- if `ARTIFACTORY_PACKAGE_URL` is not set, PR expects those fixed paths to be pre-populated in the workspace
 - PR smoke builds the `.run` installer, installs it into a temporary directory with `--env dev`, and runs the installed `bin/report`

@@ -8,26 +8,10 @@ pipeline {
   }
 
   parameters {
-    string(name: 'ARTIFACTORY_PACKAGE_URL', defaultValue: '', description: 'Optional HTTPS URL of the supplier install package. When set, Jenkins downloads it and rebuilds the fixed ./tds supplier layout.')
-    string(name: 'ARTIFACTORY_CERT_VAULT_PATH', defaultValue: '', description: 'Vault KV path containing the Artifactory client certificate used by curl')
-    string(name: 'ARTIFACTORY_CERT_VAULT_FIELD', defaultValue: 'cert', description: 'Vault KV field name for the Artifactory client certificate')
-    string(name: 'ARTIFACTORY_KEY_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory client private key')
-    string(name: 'ARTIFACTORY_KEY_VAULT_FIELD', defaultValue: 'key', description: 'Vault KV field name for the Artifactory client private key')
-    string(name: 'ARTIFACTORY_CA_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory CA bundle')
-    string(name: 'ARTIFACTORY_CA_VAULT_FIELD', defaultValue: 'ca_cert', description: 'Vault KV field name for the Artifactory CA bundle')
-    string(name: 'ARTIFACTORY_CERT_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the Artifactory certificate password')
-    string(name: 'ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the Artifactory certificate password')
-    string(name: 'ARTIFACTORY_CERT_TYPE', defaultValue: 'PEM', description: 'Client certificate type passed to curl, for example PEM or P12')
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
     booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a packaged dry-run after staging')
     string(name: 'REPORT_RUNTIME_ENV', defaultValue: 'prod', description: 'Environment name rendered into config/report.properties before the optional live smoke')
     string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional live smoke run')
-    string(name: 'CURL_BIN', defaultValue: 'curl', description: 'curl executable used for Vault HTTP API and Artifactory downloads')
-    string(name: 'VAULT_ADDR', defaultValue: '', description: 'Vault address, for example https://vault.example.com:8200')
-    string(name: 'VAULT_NAMESPACE', defaultValue: '', description: 'Optional Vault namespace')
-    string(name: 'VAULT_AUTH_PATH', defaultValue: '', description: 'Optional non-default Vault auth mount path')
-    string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_PATH', defaultValue: '', description: 'Optional Vault KV path containing the supplier zip password')
-    string(name: 'VENDOR_PACKAGE_PASSWORD_VAULT_FIELD', defaultValue: 'password', description: 'Vault KV field name for the supplier zip password')
   }
 
   environment {
@@ -45,12 +29,12 @@ pipeline {
 
   stages {
     stage('Prepare Vault Access') {
-      when {
-        expression { return params.ARTIFACTORY_PACKAGE_URL?.trim() || params.VENDOR_PACKAGE_PASSWORD_VAULT_PATH?.trim() }
-      }
       steps {
         script {
-          env.VAULT_RUNTIME_TOKEN = load('jenkins/report_common.groovy').prepareVaultAccess(params)
+          def common = load('jenkins/report_common.groovy')
+          def integrationConfig = common.fixedIntegrationConfig('release')
+          common.validateFixedIntegrationConfig(integrationConfig, 'release')
+          env.VAULT_RUNTIME_TOKEN = common.prepareVaultAccess(integrationConfig)
         }
       }
     }
@@ -58,8 +42,11 @@ pipeline {
     stage('Prepare Vendor SDK') {
       steps {
         script {
-          load('jenkins/report_common.groovy').prepareVendorSdk(
-            params: params,
+          def common = load('jenkins/report_common.groovy')
+          def integrationConfig = common.fixedIntegrationConfig('release')
+          common.validateFixedIntegrationConfig(integrationConfig, 'release')
+          common.prepareVendorSdk(
+            params: integrationConfig,
             vaultToken: env.VAULT_RUNTIME_TOKEN
           )
         }
@@ -116,21 +103,27 @@ pipeline {
         expression { return params.RUN_LIVE_SMOKE }
       }
       steps {
-        withEnv([
-          "CURL_BIN=${params.CURL_BIN?.trim() ?: 'curl'}",
-          "VAULT_ADDR=${params.VAULT_ADDR?.trim() ?: ''}",
-          "VAULT_NAMESPACE=${params.VAULT_NAMESPACE?.trim() ?: ''}",
-          "VAULT_AUTH_PATH=${params.VAULT_AUTH_PATH?.trim() ?: ''}"
-        ]) {
-          sh '''
-            set -euxo pipefail
+        script {
+          def common = load('jenkins/report_common.groovy')
+          def integrationConfig = common.fixedIntegrationConfig('release')
+          common.validateFixedIntegrationConfig(integrationConfig, 'release')
 
-            rm -rf "$SMOKE_INSTALL_DIR"
-            "$BUILD_DIR/$PACKAGE_NAME" --env "$REPORT_RUNTIME_ENV" --prefix "$SMOKE_INSTALL_DIR"
-            "$SMOKE_INSTALL_DIR/bin/report" \
-              --dry-run \
-              --to "$SMOKE_TO"
-          '''
+          withEnv([
+            "CURL_BIN=${integrationConfig.CURL_BIN?.trim() ?: 'curl'}",
+            "VAULT_ADDR=${integrationConfig.VAULT_ADDR?.trim() ?: ''}",
+            "VAULT_NAMESPACE=${integrationConfig.VAULT_NAMESPACE?.trim() ?: ''}",
+            "VAULT_AUTH_PATH=${integrationConfig.VAULT_AUTH_PATH?.trim() ?: ''}"
+          ]) {
+            sh '''
+              set -euxo pipefail
+
+              rm -rf "$SMOKE_INSTALL_DIR"
+              "$BUILD_DIR/$PACKAGE_NAME" --env "$REPORT_RUNTIME_ENV" --prefix "$SMOKE_INSTALL_DIR"
+              "$SMOKE_INSTALL_DIR/bin/report" \
+                --dry-run \
+                --to "$SMOKE_TO"
+            '''
+          }
         }
       }
     }
