@@ -15,19 +15,6 @@
 namespace report {
 namespace {
 
-constexpr int kTdsApiGetVersionFail = 430000101;
-constexpr int kTdsApiInitFail = 430000102;
-constexpr int kTdsApiCreateHandleFail = 430000103;
-constexpr int kTdsApiLoginFail = 430000104;
-constexpr int kTdsApiQueryFuncNoFail = 430000105;
-constexpr int kTdsApiIncompatibility = 430000106;
-constexpr int kTdsApiLogoutFail = 430000107;
-constexpr int kTdsApiUserNotLogin = 430000108;
-constexpr int kTdsApiQueryTradeDateFail = 430000109;
-constexpr int kTdsApiQuerySerialFail = 430000110;
-constexpr int kTdsApiQuerySnapshotFail = 430000111;
-constexpr int kTdsApiSubscribeFail = 430000112;
-constexpr int kTdsApiUnsubscribeFail = 430000113;
 constexpr int kTdsNoMoreData = 1009;
 
 std::string Trim(const std::string& value)
@@ -244,11 +231,13 @@ std::string ConvertEncodingToUtf8(const std::string& input, const char* from_enc
 
 std::string TryDecodeVendorText(const std::string& value)
 {
-    if (value.empty() || IsAscii(value) || IsValidUtf8(value))
+    if (value.empty() || IsAscii(value))
     {
         return value;
     }
 
+    // Vendor text is GBK/GB18030; prefer that path before UTF-8 fallback because
+    // some GBK byte pairs are also syntactically valid UTF-8.
 #ifdef _WIN32
     for (const unsigned int code_page : {54936U, 936U})
     {
@@ -269,42 +258,12 @@ std::string TryDecodeVendorText(const std::string& value)
     }
 #endif
 
-    return value;
-}
-
-const char* DescribeTdsErrorCodeInternal(int error_code)
-{
-    switch (error_code)
+    if (IsValidUtf8(value))
     {
-    case kTdsApiGetVersionFail:
-        return u8"failed to query TDS API version; \u83b7\u53d6TDS API\u7248\u672c\u4fe1\u606f\u5931\u8d25";
-    case kTdsApiInitFail:
-        return u8"failed to initialize TDS API; \u521d\u59cb\u5316TDS API\u5931\u8d25";
-    case kTdsApiCreateHandleFail:
-        return u8"failed to create TDS handle; \u521b\u5efATDS\u53e5\u67c4\u5931\u8d25";
-    case kTdsApiLoginFail:
-        return u8"login rejected by TDS; \u7528\u6237\u767b\u5f55\u5931\u8d25";
-    case kTdsApiQueryFuncNoFail:
-        return u8"failed to query function number; \u67e5\u8be2\u4e3b\u529f\u80fd\u53f7\u5931\u8d25";
-    case kTdsApiIncompatibility:
-        return u8"vendor API version is incompatible; \u7248\u672c\u4e0d\u517c\u5bb9";
-    case kTdsApiLogoutFail:
-        return u8"logout failed; \u7528\u6237\u5f55\u51fa\u5931\u8d25";
-    case kTdsApiUserNotLogin:
-        return u8"user is not logged in; \u7528\u6237\u5f53\u524d\u672a\u767b\u5f55";
-    case kTdsApiQueryTradeDateFail:
-        return u8"failed to query trade date; \u67e5\u8be2\u4ea4\u6613\u65e5\u671f\u5931\u8d25";
-    case kTdsApiQuerySerialFail:
-        return u8"failed to query serial data; \u67e5\u8be2\u6d41\u6c34\u4fe1\u606f\u5931\u8d25";
-    case kTdsApiQuerySnapshotFail:
-        return u8"failed to query snapshot data; \u67e5\u8be2\u5feb\u7167\u4fe1\u606f\u5931\u8d25";
-    case kTdsApiSubscribeFail:
-        return u8"failed to subscribe customer data; \u8ba2\u9605\u5931\u8d25";
-    case kTdsApiUnsubscribeFail:
-        return u8"failed to unsubscribe customer data; \u9000\u8ba2\u5931\u8d25";
-    default:
-        return nullptr;
+        return value;
     }
+
+    return value;
 }
 
 } // namespace
@@ -312,12 +271,6 @@ const char* DescribeTdsErrorCodeInternal(int error_code)
 std::string DecodeVendorText(const std::string& value)
 {
     return TryDecodeVendorText(Trim(value));
-}
-
-std::string DescribeTdsErrorCode(int error_code)
-{
-    const char* description = DescribeTdsErrorCodeInternal(error_code);
-    return description == nullptr ? "" : description;
 }
 
 bool IsTdsNoMoreDataResult(int error_code, const std::string& error_message)
@@ -357,15 +310,10 @@ std::string FormatTdsApiError(
     const std::string& error_message)
 {
     const std::string decoded_message = DecodeVendorText(error_message);
-    const std::string description = DescribeTdsErrorCode(error_code);
 
     std::ostringstream output;
     output << operation << " failed: " << error_code;
-    if (!description.empty())
-    {
-        output << " (" << description << ")";
-    }
-    if (!decoded_message.empty() && description.find(decoded_message) == std::string::npos)
+    if (!decoded_message.empty())
     {
         output << ": " << decoded_message;
     }

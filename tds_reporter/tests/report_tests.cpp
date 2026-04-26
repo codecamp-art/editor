@@ -412,6 +412,34 @@ void TestMimeAndDryRun()
     AssertTrue(std::filesystem::exists(result.preview_path), "dry run preview should exist");
 }
 
+void TestDecodedVendorTextFlowsToCsvAndEmail()
+{
+    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_gbk_output_test";
+    std::filesystem::create_directories(output_dir);
+    const report::AppConfig config = BuildTestConfig(output_dir);
+    const std::string customer_name = report::DecodeVendorText("\xC9\xCF\xBA\xA3\xBF\xCD\xBB\xA7");
+
+    const std::vector<report::CustomerFundRecord> records {
+        {20260418, "1001", customer_name, "FA1001", 1000.5, 12.5, 800.0, 0.12, 0.15}
+    };
+    const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
+    const std::string csv_content = ReadFile(csv_path);
+
+    report::CliOptions cli;
+    cli.to = {"dest@example.com"};
+    const report::MailRequest request =
+        report::BuildMailRequest(records, config, cli, 20260418, csv_path);
+    const std::string mime = report::BuildMimeMessage(request);
+
+    AssertTrue(customer_name == u8"\u4E0A\u6D77\u5BA2\u6237", "GBK customer name should decode to UTF-8");
+    AssertContains(csv_content, u8"\u4E0A\u6D77\u5BA2\u6237", "csv should contain UTF-8 customer name");
+    AssertContains(mime, u8"\u4E0A\u6D77\u5BA2\u6237", "email body should contain UTF-8 customer name");
+    AssertContains(
+        mime,
+        "Content-Type: text/csv; charset=\"utf-8\";",
+        "csv attachment should declare UTF-8");
+}
+
 void TestCurlConfigWithClientCertificate()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_curl_test";
@@ -450,6 +478,7 @@ void TestCurlConfigWithClientCertificate()
 void TestVendorTextDecodingAndErrorFormatting()
 {
     const std::string gbk_error = "\xB4\xB4\xBD\xA8\x54\x44\x53\xBE\xE4\xB1\xFA\xCA\xA7\xB0\xDC";
+    const std::string gbk_valid_utf8_bytes("\xD2\xBB", 2);
     const std::string decoded = report::DecodeVendorText(gbk_error);
     const std::string formatted =
         report::FormatTdsApiError("TdsApi_reqLogin", 430000103, gbk_error);
@@ -457,22 +486,38 @@ void TestVendorTextDecodingAndErrorFormatting()
     AssertTrue(
         decoded == u8"\u521B\u5EFATDS\u53E5\u67C4\u5931\u8D25",
         "GBK vendor text should decode to UTF-8");
-    AssertContains(
-        report::DescribeTdsErrorCode(430000103),
-        "failed to create TDS handle",
-        "known TDS error code description");
+    AssertTrue(
+        report::DecodeVendorText(gbk_valid_utf8_bytes) == u8"\u4E00",
+        "GBK vendor text should be decoded before UTF-8 fallback");
     AssertContains(formatted, "430000103", "formatted error code");
-    AssertContains(formatted, "failed to create TDS handle", "formatted error description");
+    AssertContains(
+        formatted,
+        u8"\u521B\u5EFATDS\u53E5\u67C4\u5931\u8D25",
+        "formatted vendor error reason");
+    AssertTrue(
+        formatted.find("failed to create TDS handle") == std::string::npos,
+        "formatted TDS error should not include maintained internal descriptions");
+
+    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_gbk_log_test";
+    std::filesystem::create_directories(output_dir);
+    report::AppConfig config = BuildTestConfig(output_dir);
+    report::InitializeLogger(config);
+    report::LogError("tds_vendor_error", formatted);
+    const std::string log_path = report::CurrentLogFilePath();
+    report::ShutdownLogger();
+    AssertContains(ReadFile(log_path), u8"\u521B\u5EFATDS\u53E5\u67C4\u5931\u8D25", "log should contain UTF-8 vendor reason");
 }
 
 void TestNoMoreDataDetection()
 {
+    const std::string gbk_no_more_data =
+        "\xC3\xBB\xD3\xD0\xB8\xFC\xB6\xE0\xCA\xFD\xBE\xDD";
     AssertTrue(
         report::IsTdsNoMoreDataResult(1009, ""),
         "error code 1009 should be treated as end-of-data");
     AssertTrue(
-        report::IsTdsNoMoreDataResult(1, u8"\u6ca1\u6709\u66f4\u591a\u6570\u636e"),
-        "decoded vendor message should be treated as end-of-data");
+        report::IsTdsNoMoreDataResult(1, gbk_no_more_data),
+        "GBK vendor message should be treated as end-of-data");
     AssertTrue(
         !report::IsTdsNoMoreDataResult(430000111, "snapshot failed"),
         "real snapshot errors must not be ignored");
@@ -521,6 +566,7 @@ int main()
         TestLoadConfigWithVaultBackedTdsPassword();
         TestStubClientAndCsv();
         TestMimeAndDryRun();
+        TestDecodedVendorTextFlowsToCsvAndEmail();
         TestCurlConfigWithClientCertificate();
         TestVendorTextDecodingAndErrorFormatting();
         TestNoMoreDataDetection();

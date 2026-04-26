@@ -1392,7 +1392,7 @@ std::string BuildMimeMessage(const MailRequest& request)
     output << request.html_body << "\r\n";
     output << "\r\n";
     output << "--" << boundary << "\r\n";
-    output << "Content-Type: text/csv; name=\"" << request.attachment_name << "\"\r\n";
+    output << "Content-Type: text/csv; charset=\"utf-8\"; name=\"" << request.attachment_name << "\"\r\n";
     output << "Content-Transfer-Encoding: base64\r\n";
     output << "Content-Disposition: attachment; filename=\"" << request.attachment_name << "\"\r\n";
     output << "\r\n";
