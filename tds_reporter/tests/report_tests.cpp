@@ -26,6 +26,21 @@ void AssertContains(const std::string& haystack, const std::string& needle, cons
     }
 }
 
+template <typename Callable>
+void AssertThrows(Callable&& callable, const std::string& message)
+{
+    try
+    {
+        callable();
+    }
+    catch (const std::exception&)
+    {
+        return;
+    }
+
+    throw std::runtime_error(message);
+}
+
 void SetEnv(const std::string& key, const std::string& value)
 {
 #ifdef _WIN32
@@ -147,6 +162,8 @@ void TestParseCli()
         "--cc=cc@example.com",
         "--cust-list",
         "1001,1002",
+        "--drtp-endpoints",
+        "10.1.1.1:7001,10.1.1.2:7002",
         "--dry-run",
         "--trade-date",
         "20260419"
@@ -159,6 +176,7 @@ void TestParseCli()
     AssertTrue(options.to.size() == 2, "expected two To recipients");
     AssertTrue(options.cc.size() == 1, "expected one Cc recipient");
     AssertTrue(options.cust_filters.size() == 2, "expected two customer filters");
+    AssertTrue(options.drtp_endpoints == "10.1.1.1:7001,10.1.1.2:7002", "expected drtp endpoints override");
     AssertTrue(options.dry_run, "expected dry_run=true");
     AssertTrue(options.trade_date_override == 20260419, "expected trade date override");
 }
@@ -173,8 +191,7 @@ void TestLoadConfig()
     std::ofstream output(config_path);
     output
         << "env.name=dev\n"
-        << "tds.drtp_host=10.0.0.1\n"
-        << "tds.drtp_port=6003\n"
+        << "tds.drtp_endpoints=10.0.0.1:6003\n"
         << "tds.user=10000\n"
         << "tds.password=${TDS_TEST_PASSWORD:}\n"
         << "smtp.host=mail.local\n"
@@ -194,6 +211,9 @@ void TestLoadConfig()
 
     AssertTrue(config.env_name == "prod", "cli env should override file env");
     AssertTrue(config.output_dir == "custom-output", "cli output dir should override file output dir");
+    AssertTrue(config.tds.drtp_endpoints.size() == 1, "single DRTP endpoint should be configured");
+    AssertTrue(config.tds.drtp_endpoints.front().host == "10.0.0.1", "DRTP endpoint host should be parsed");
+    AssertTrue(config.tds.drtp_endpoints.front().port == 6003, "DRTP endpoint port should be parsed");
     AssertTrue(config.tds.password == "super-secret", "env reference should be resolved");
     AssertTrue(config.smtp.port == 2587, "smtp port should be parsed");
     AssertTrue(config.smtp.security == "starttls", "smtp security should be parsed");
@@ -214,8 +234,7 @@ void TestLoadConfigUsesFileEnvWhenCliEnvMissing()
     std::ofstream output(config_path);
     output
         << "env.name=prod\n"
-        << "tds.drtp_host=10.0.0.1\n"
-        << "tds.drtp_port=6003\n"
+        << "tds.drtp_endpoints=10.0.0.1:6003\n"
         << "tds.user=10000\n"
         << "tds.password=secret\n"
         << "smtp.host=mail.local\n"
@@ -227,19 +246,19 @@ void TestLoadConfigUsesFileEnvWhenCliEnvMissing()
     const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
     AssertTrue(config.env_name == "prod", "config env should be used when --env is omitted");
+    AssertTrue(config.tds.drtp_endpoints.size() == 1, "DRTP endpoint should be configured");
 }
 
-void TestLoadConfigMergesSharedTemplateAndEnvOverlay()
+void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_overlay_test";
     std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir);
-    const std::filesystem::path template_path = temp_dir / "report.properties.template";
+    const std::filesystem::path shared_path = temp_dir / "report.properties";
     const std::filesystem::path config_path = temp_dir / "qa.properties";
 
     WriteFile(
-        template_path,
-        "tds.drtp_port=6003\n"
+        shared_path,
         "tds.user=10000\n"
         "tds.password=shared-secret\n"
         "smtp.host=mail.shared\n"
@@ -251,19 +270,20 @@ void TestLoadConfigMergesSharedTemplateAndEnvOverlay()
     WriteFile(
         config_path,
         "env.name=qa\n"
-        "tds.drtp_host=10.10.20.30\n"
+        "tds.drtp_endpoints=10.10.20.30:6003\n"
         "email.default_to=qa-ops@example.com\n");
 
     report::CliOptions cli;
     const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
     AssertTrue(config.env_name == "qa", "overlay env should be applied");
-    AssertTrue(config.tds.drtp_host == "10.10.20.30", "overlay tds host should be applied");
-    AssertTrue(config.tds.drtp_port == 6003, "shared template tds port should be applied");
-    AssertTrue(config.tds.user == "10000", "shared template tds user should be applied");
-    AssertTrue(config.tds.password == "shared-secret", "shared template password should be applied");
-    AssertTrue(config.smtp.host == "mail.shared", "shared template smtp host should be applied");
-    AssertTrue(config.smtp.port == 2587, "shared template smtp port should be applied");
+    AssertTrue(config.tds.drtp_endpoints.size() == 1, "overlay host should produce one endpoint");
+    AssertTrue(config.tds.drtp_endpoints.front().host == "10.10.20.30", "overlay endpoint host should be applied");
+    AssertTrue(config.tds.drtp_endpoints.front().port == 6003, "overlay endpoint port should be applied");
+    AssertTrue(config.tds.user == "10000", "shared properties tds user should be applied");
+    AssertTrue(config.tds.password == "shared-secret", "shared properties password should be applied");
+    AssertTrue(config.smtp.host == "mail.shared", "shared properties smtp host should be applied");
+    AssertTrue(config.smtp.port == 2587, "shared properties smtp port should be applied");
     AssertTrue(config.default_to == std::vector<std::string>{"qa-ops@example.com"}, "overlay recipients should be applied");
     AssertTrue(config.default_cc == std::vector<std::string>{"shared-cc@example.com"}, "shared cc should be applied");
     AssertTrue(
@@ -274,7 +294,62 @@ void TestLoadConfigMergesSharedTemplateAndEnvOverlay()
         "shared log dir should be resolved relative to the overlay config");
 }
 
-void TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig()
+void TestLoadConfigParsesMultipleDrtpEndpoints()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_drtp_multi_test";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path config_path = temp_dir / "qa.properties";
+
+    WriteFile(
+        config_path,
+        "env.name=qa\n"
+        "tds.drtp_endpoints=10.10.20.30:6003,10.10.20.31:6004\n"
+        "tds.user=10000\n"
+        "tds.password=secret\n"
+        "smtp.host=mail.local\n"
+        "smtp.port=2587\n"
+        "smtp.from=sender@example.com\n");
+
+    report::CliOptions cli;
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
+
+    AssertTrue(config.tds.drtp_endpoints.size() == 2, "expected two DRTP endpoints");
+    AssertTrue(config.tds.drtp_endpoints[0].host == "10.10.20.30", "primary DRTP host should be first endpoint");
+    AssertTrue(config.tds.drtp_endpoints[0].port == 6003, "primary DRTP port should be first endpoint");
+    AssertTrue(config.tds.drtp_endpoints[1].host == "10.10.20.31", "second DRTP host should be parsed");
+    AssertTrue(config.tds.drtp_endpoints[1].port == 6004, "second DRTP port should be parsed");
+}
+
+void TestLoadConfigAppliesDrtpEndpointsCliOverride()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_drtp_endpoints_cli_test";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path config_path = temp_dir / "qa.properties";
+
+    WriteFile(
+        config_path,
+        "env.name=qa\n"
+        "tds.drtp_endpoints=10.10.20.30:6003\n"
+        "tds.user=10000\n"
+        "tds.password=secret\n"
+        "smtp.host=mail.local\n"
+        "smtp.port=2587\n"
+        "smtp.from=sender@example.com\n");
+
+    report::CliOptions cli;
+    cli.drtp_endpoints = "192.0.2.20:7101;192.0.2.21:7102";
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
+
+    AssertTrue(config.tds.drtp_endpoints.size() == 2, "CLI endpoints override should produce two endpoints");
+    AssertTrue(config.tds.drtp_endpoints[0].host == "192.0.2.20", "CLI endpoint host should be parsed");
+    AssertTrue(config.tds.drtp_endpoints[0].port == 7101, "CLI endpoint port should be parsed");
+    AssertTrue(config.tds.drtp_endpoints[1].host == "192.0.2.21", "second CLI endpoint host should be parsed");
+    AssertTrue(config.tds.drtp_endpoints[1].port == 7102, "second CLI endpoint port should be parsed");
+}
+
+void TestDefaultConfigPathUsesEnvOverlay()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_config_env_test";
     std::filesystem::remove_all(temp_dir);
@@ -290,34 +365,26 @@ void TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig()
         "explicit --env should prefer <env>.properties over report.properties");
 }
 
-void TestDefaultConfigPathUsesSingleConfigWhenEnvMissing()
+void TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_single_config_test";
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_unknown_env_test";
     std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir / "config");
     WriteFile(temp_dir / "config" / "report.properties", "env.name=prod\n");
 
     const ScopedCurrentPath scoped_path(temp_dir);
-    const std::string config_path = report::DefaultConfigPath("");
+    const std::string config_path = report::DefaultConfigPath("uat");
 
     AssertTrue(
-        std::filesystem::path(config_path).filename() == "report.properties",
-        "single-config package should use report.properties when --env is omitted");
+        std::filesystem::path(config_path).filename() == "uat.properties",
+        "unknown --env should resolve to the requested overlay and fail open if the file is absent");
 }
 
-void TestDefaultConfigPathDoesNotFallBackToDevWhenEnvMissing()
+void TestDefaultConfigPathRejectsMissingEnv()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_requires_single_config_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir / "config");
-    WriteFile(temp_dir / "config" / "dev.properties", "env.name=dev\n");
-
-    const ScopedCurrentPath scoped_path(temp_dir);
-    const std::string config_path = report::DefaultConfigPath("");
-
-    AssertTrue(
-        std::filesystem::path(config_path).filename() == "report.properties",
-        "when --env is omitted the runtime should require report.properties instead of falling back to dev.properties");
+    AssertThrows(
+        []() { (void)report::DefaultConfigPath(""); },
+        "packaged runs should require --env instead of using shared report.properties alone");
 }
 
 void TestLoadConfigWithVaultBackedTdsPassword()
@@ -330,8 +397,7 @@ void TestLoadConfigWithVaultBackedTdsPassword()
     std::ofstream output(config_path);
     output
         << "env.name=qa\n"
-        << "tds.drtp_host=10.0.0.1\n"
-        << "tds.drtp_port=6003\n"
+        << "tds.drtp_endpoints=10.0.0.1:6003\n"
         << "tds.user=10000\n"
         << "tds.password=vault://secret/tds/qa#password\n"
         << "vault.curl_executable=" << curl_executable.string() << "\n"
@@ -559,10 +625,12 @@ int main()
         TestParseCli();
         TestLoadConfig();
         TestLoadConfigUsesFileEnvWhenCliEnvMissing();
-        TestLoadConfigMergesSharedTemplateAndEnvOverlay();
-        TestDefaultConfigPathPrefersExplicitEnvOverSingleConfig();
-        TestDefaultConfigPathUsesSingleConfigWhenEnvMissing();
-        TestDefaultConfigPathDoesNotFallBackToDevWhenEnvMissing();
+        TestLoadConfigMergesSharedPropertiesAndEnvOverlay();
+        TestLoadConfigParsesMultipleDrtpEndpoints();
+        TestLoadConfigAppliesDrtpEndpointsCliOverride();
+        TestDefaultConfigPathUsesEnvOverlay();
+        TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv();
+        TestDefaultConfigPathRejectsMissingEnv();
         TestLoadConfigWithVaultBackedTdsPassword();
         TestStubClientAndCsv();
         TestMimeAndDryRun();

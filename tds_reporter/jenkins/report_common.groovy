@@ -349,8 +349,8 @@ void prepareVendorSdk(Map args) {
   '''
 }
 
-void configureCmake(Map args) {
-  String runInstallerPath = args.runInstallerPath
+void configureCmake(Map args = [:]) {
+  String packagePath = args.packagePath ?: "${env.BUILD_DIR}/client_funding_risk_report.tar.gz"
 
   sh """#!/usr/bin/env bash
     set -euxo pipefail
@@ -362,7 +362,7 @@ void configureCmake(Map args) {
     cmake -S . -B "\$BUILD_DIR" \\
       -DCMAKE_BUILD_TYPE="\$BUILD_TYPE" \\
       -DREPORT_STAGE_DIR="\$STAGE_DIR" \\
-      -DREPORT_RUN_INSTALLER_PATH=${shellQuote(runInstallerPath)}
+      -DREPORT_PACKAGE_PATH=${shellQuote(packagePath)}
   """
 }
 

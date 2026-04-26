@@ -16,7 +16,7 @@ set(TDS_WIN32_LIBRARY "${TDS_WIN32_DIR}/tds_api.lib")
 set(TDS_LINUX_LIBRARY "${TDS_LINUX_DIR}/libtds_api.so")
 set(TDS_LINUX_CPACK "${TDS_LINUX_DIR}/cpack.dat")
 set(REPORT_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH "Directory used by the report_stage target")
-set(REPORT_RUN_INSTALLER_PATH "${CMAKE_BINARY_DIR}/client_funding_risk_report-installer.run" CACHE FILEPATH "Output path for the Linux self-extracting .run installer")
+set(REPORT_PACKAGE_PATH "${CMAKE_BINARY_DIR}/client_funding_risk_report.tar.gz" CACHE FILEPATH "Output path for the staged runtime tarball")
 get_filename_component(REPORT_INSTALL_DIR_NAME "${REPORT_STAGE_DIR}" NAME)
 
 add_library(
@@ -186,7 +186,7 @@ install(
         "${CMAKE_CURRENT_SOURCE_DIR}/config/dev.properties"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/qa.properties"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/prod.properties"
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties.template"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/report.properties"
     DESTINATION config
 )
 
@@ -205,17 +205,13 @@ add_custom_target(
     COMMENT "Stage report under ${REPORT_STAGE_DIR}"
 )
 
-if(UNIX)
-    add_custom_target(
-        report_run_installer
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-run-installer.sh"
-            "${REPORT_STAGE_DIR}"
-            "${REPORT_RUN_INSTALLER_PATH}"
-            "${REPORT_INSTALL_DIR_NAME}"
-        DEPENDS report_stage
-        COMMENT "Build self-extracting .run installer at ${REPORT_RUN_INSTALLER_PATH}"
-    )
-endif()
+add_custom_target(
+    report_package
+    COMMAND "${CMAKE_COMMAND}" -E tar czf "${REPORT_PACKAGE_PATH}" "${REPORT_INSTALL_DIR_NAME}"
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    DEPENDS report_stage
+    COMMENT "Package staged report runtime at ${REPORT_PACKAGE_PATH}"
+)
 
 add_test(
     NAME report_tests

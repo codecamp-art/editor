@@ -101,12 +101,36 @@ std::string QueryApiVersion()
     return DecodeVendorText(version);
 }
 
+std::string FormatEndpoint(const TdsEndpoint& endpoint)
+{
+    return endpoint.host + ":" + std::to_string(endpoint.port);
+}
+
+std::string FormatEndpoints(const std::vector<TdsEndpoint>& endpoints)
+{
+    std::vector<std::string> values;
+    values.reserve(endpoints.size());
+    for (const TdsEndpoint& endpoint : endpoints)
+    {
+        values.push_back(FormatEndpoint(endpoint));
+    }
+    return Join(values, ",");
+}
+
 class VendorTdsClient final : public ITdsClient
 {
 public:
     explicit VendorTdsClient(const AppConfig& config) : config_(config)
     {
-        InitializeSession();
+        try
+        {
+            InitializeSession();
+        }
+        catch (...)
+        {
+            Cleanup();
+            throw;
+        }
     }
 
     ~VendorTdsClient() override
@@ -241,8 +265,7 @@ private:
     std::string BuildConnectionContext(bool password_is_set) const
     {
         std::ostringstream output;
-        output << "host=" << config_.tds.drtp_host
-               << ", port=" << config_.tds.drtp_port
+        output << "endpoints=" << FormatEndpoints(config_.tds.drtp_endpoints)
                << ", user=" << config_.tds.user
                << ", function_no=" << config_.tds.function_no
                << ", password_set=" << (password_is_set ? "yes" : "no")
@@ -262,8 +285,8 @@ private:
             "tds_session_init",
             "Initializing vendor TDS session",
             {
-                {"drtp_host", config_.tds.drtp_host},
-                {"drtp_port", std::to_string(config_.tds.drtp_port)},
+                {"drtp_endpoints", FormatEndpoints(config_.tds.drtp_endpoints)},
+                {"drtp_endpoint_count", std::to_string(config_.tds.drtp_endpoints.size())},
                 {"function_no", std::to_string(config_.tds.function_no)}
             });
         int err_code = 0;
@@ -281,11 +304,30 @@ private:
         initialized_ = true;
         api_version_ = QueryApiVersion();
 
-        std::string drtp_host = config_.tds.drtp_host;
-        if (!TdsApi_addDrtpNode(drtp_host.data(), config_.tds.drtp_port))
+        int registered_nodes = 0;
+        for (const TdsEndpoint& endpoint : config_.tds.drtp_endpoints)
+        {
+            std::string endpoint_host = endpoint.host;
+            if (TdsApi_addDrtpNode(endpoint_host.data(), endpoint.port))
+            {
+                ++registered_nodes;
+                LogInfo(
+                    "tds_drtp_node_registered",
+                    "Registered vendor DRTP node",
+                    {{"drtp_endpoint", FormatEndpoint(endpoint)}});
+            }
+            else
+            {
+                LogWarn(
+                    "tds_drtp_node_register_failed",
+                    "Vendor DRTP node registration failed; continuing with remaining nodes",
+                    {{"drtp_endpoint", FormatEndpoint(endpoint)}});
+            }
+        }
+        if (registered_nodes == 0)
         {
             throw std::runtime_error(
-                "TdsApi_addDrtpNode failed (" + BuildConnectionContext(false) + ")");
+                "TdsApi_addDrtpNode failed for all endpoints (" + BuildConnectionContext(false) + ")");
         }
 
         std::string user = config_.tds.user;
@@ -297,12 +339,12 @@ private:
                 FormatTdsApiError("TdsApi_reqLogin", err_code, err_msg) +
                 " (" + BuildConnectionContext(!password.empty()) + ")");
         }
-        logged_in_ = true;
         LogInfo(
             "tds_session_ready",
             "Vendor TDS session is ready",
             {
-                {"drtp_host", config_.tds.drtp_host},
+                {"drtp_endpoints", FormatEndpoints(config_.tds.drtp_endpoints)},
+                {"drtp_registered_node_count", std::to_string(registered_nodes)},
                 {"user", config_.tds.user},
                 {"api_version", api_version_}
             });
@@ -313,20 +355,22 @@ private:
         int err_code = 0;
         char err_msg[256] = {0};
 
-        if (logged_in_)
+        if (initialized_ && !logout_attempted_)
         {
+            logout_attempted_ = true;
             TdsApi_reqLogout(&err_code, err_msg);
         }
         if (initialized_)
         {
             TdsApi_finalize();
+            initialized_ = false;
         }
         LogDebug("tds_session_cleanup", "Vendor TDS session cleaned up");
     }
 
     AppConfig config_;
     bool initialized_ = false;
-    bool logged_in_ = false;
+    bool logout_attempted_ = false;
     std::string api_version_;
 };
 #endif
@@ -448,8 +492,8 @@ std::unique_ptr<ITdsClient> CreateClient(const AppConfig& config, const CliOptio
         "client_create",
         "Using live vendor TDS client",
         {
-            {"drtp_host", config.tds.drtp_host},
-            {"drtp_port", std::to_string(config.tds.drtp_port)},
+            {"drtp_endpoints", FormatEndpoints(config.tds.drtp_endpoints)},
+            {"drtp_endpoint_count", std::to_string(config.tds.drtp_endpoints.size())},
             {"function_no", std::to_string(config.tds.function_no)}
         });
     return std::make_unique<VendorTdsClient>(config);

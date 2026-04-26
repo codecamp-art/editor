@@ -20,10 +20,15 @@ struct CustomerFundRecord
     double risk_degree2 = 0.0;
 };
 
+struct TdsEndpoint
+{
+    std::string host;
+    int port = 0;
+};
+
 struct TdsConnectionConfig
 {
-    std::string drtp_host;
-    int drtp_port = 0;
+    std::vector<TdsEndpoint> drtp_endpoints;
     std::string user;
     std::string password;
     int req_timeout_ms = 300000;
@@ -81,6 +86,7 @@ struct CliOptions
     bool dry_run = false;
     std::string env;
     std::string config_path;
+    std::string drtp_endpoints;
     std::vector<std::string> to;
     std::vector<std::string> cc;
     std::vector<std::string> cust_filters;

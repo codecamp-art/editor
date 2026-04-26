@@ -16,7 +16,7 @@ pipeline {
     PROJECT_DIR = "${env.WORKSPACE}"
     BUILD_DIR = "${env.WORKSPACE}/build_pr"
     STAGE_DIR = "${env.WORKSPACE}/build_pr/client_funding_risk_report"
-    INSTALLER_PATH = "${env.WORKSPACE}/build_pr/client_funding_risk_report-installer.run"
+    PACKAGE_PATH = "${env.WORKSPACE}/build_pr/client_funding_risk_report-pr.tar.gz"
     SMOKE_INSTALL_DIR = "${env.WORKSPACE}/build_pr/smoke_install"
     VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
     VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
@@ -55,7 +55,7 @@ pipeline {
       steps {
         script {
           load('jenkins/report_common.groovy').configureCmake(
-            runInstallerPath: env.INSTALLER_PATH
+            packagePath: env.PACKAGE_PATH
           )
         }
       }
@@ -79,6 +79,21 @@ pipeline {
       }
     }
 
+    stage('Package') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          cmake --build "$BUILD_DIR" --target report_package
+          test -f "$STAGE_DIR/bin/report"
+          test -f "$STAGE_DIR/config/report.properties"
+          test -f "$STAGE_DIR/config/dev.properties"
+          test -f "$STAGE_DIR/config/qa.properties"
+          test -f "$STAGE_DIR/config/prod.properties"
+          test -f "$PACKAGE_PATH"
+        '''
+      }
+    }
+
     stage('Stub Smoke') {
       when {
         expression { return params.RUN_STUB_SMOKE }
@@ -87,10 +102,8 @@ pipeline {
         sh '''
           set -euxo pipefail
           cd "$PROJECT_DIR"
-          cmake --build "$BUILD_DIR" --target report_run_installer
-          rm -rf "$SMOKE_INSTALL_DIR"
-          "$INSTALLER_PATH" --env dev --prefix "$SMOKE_INSTALL_DIR"
-          "$SMOKE_INSTALL_DIR/bin/report" \
+          "$STAGE_DIR/bin/report" \
+            --env dev \
             --stub-file "$PROJECT_DIR/tests/data/stub_snapshot.csv" \
             --dry-run \
             --to pr-smoke@example.com
@@ -101,7 +114,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'output/*, build_pr/Testing/**, build_pr/client_funding_risk_report/**, build_pr/*.run', allowEmptyArchive: true
+      archiveArtifacts artifacts: 'output/*, build_pr/Testing/**, build_pr/client_funding_risk_report/**, build_pr/*.tar.gz', allowEmptyArchive: true
     }
   }
 }

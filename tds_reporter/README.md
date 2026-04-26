@@ -6,64 +6,55 @@
 
 The package is environment-neutral.
 
-- `config/report.properties.template` holds the shared defaults
+- `config/report.properties` holds the shared defaults
 - `config/dev.properties`, `config/qa.properties`, and `config/prod.properties` only hold environment-specific overrides
-- the SMTP section is maintained once in `report.properties.template`, not duplicated per environment
+- the SMTP section is maintained once in `report.properties`, not duplicated per environment
 - SMTP relay authentication is certificate-only; there is no SMTP username/password configuration
 - the Vault section is also reduced to shared settings only: `vault.curl_executable`, `vault.address`, `vault.namespace`, and `vault.auth_path`
 
-At install time, the selected environment overlay is merged onto `report.properties.template` and written to `config/report.properties`.
+At runtime, `--env dev|qa|prod` loads `config/report.properties` first and then overlays `config/<env>.properties`.
 
-After that, users start `bin/report` directly and do not need `--env` or `--config`.
+Packaged runs must start with `bin/report --env <env>` and normally do not need `--config`.
+
+## DRTP Endpoints
+
+Each environment can configure multiple DRTP access points:
+
+```properties
+tds.drtp_endpoints=10.10.20.30:6003,10.10.20.31:6003
+```
+
+At startup the program registers every endpoint with the supplier API through `TdsApi_addDrtpNode` before login. If one node is unavailable, the supplier runtime can use another registered node.
+
+Temporary runtime overrides:
+
+```bash
+bin/report --env qa --drtp-endpoints 10.10.20.50:6003,10.10.20.51:6003
+```
 
 ## Packaging Model
 
-- Windows local build is only for debugging and does not need installer packaging
-- RHEL8 local and Jenkins release both produce the same `.run` installer
+- Windows local build is only for debugging and does not need release packaging
+- RHEL8 local, Jenkins PR, and Jenkins release use the staged runtime directory directly or package it as a plain `.tar.gz`
+- every package contains all config files: `report.properties`, `dev.properties`, `qa.properties`, and `prod.properties`
 
 Linux release flow:
 
 1. Build the staged runtime
-2. Wrap it into one `.run` installer
-3. Execute the installer with `--env`
-4. The installer extracts the package, renders `config/report.properties`, and leaves a ready-to-run standalone directory behind
+2. Optionally wrap the staged directory into one `.tar.gz`
+3. Unpack/copy the staged directory to the target path
+4. Start the program with `--env`
 
-## Linux `.run` Installer
-
-Usage:
+After unpacking/copying:
 
 ```bash
-./client_funding_risk_report-installer.run --env qa --prefix /home/user/apps/report
+/home/user/apps/report/bin/report --env qa
 ```
 
-Behavior:
-
-1. Extract into `--prefix`
-2. Merge `config/report.properties.template` with `config/qa.properties`
-3. Write the result to `config/report.properties`
-4. Remove the environment overlays and template from the installed `config` directory
-5. Leave `bin/report` and a ready-to-run `config/report.properties` in that directory
-
-Options:
-
-- `--env <dev|qa|prod>` required
-- `--prefix <path>` optional, default is `./client_funding_risk_report`
-
-Reinstall behavior:
-
-- if `--prefix` already contains a previous `report` installation, the installer replaces it automatically
-- if `--prefix` points to an unrelated non-empty directory, the installer refuses to overwrite it
-
-After install:
+To switch environment, run with another `--env` value:
 
 ```bash
-/home/user/apps/report/bin/report
-```
-
-To switch environment later, rerun the installer with another `--env` value:
-
-```bash
-./client_funding_risk_report-installer.run --env prod --prefix /home/user/apps/report
+/home/user/apps/report/bin/report --env prod
 ```
 
 ## Windows Local
@@ -96,7 +87,13 @@ The command above uses live DRTP when the supplier 32-bit files exist under `tds
 .\build\windows-local-x86\Debug\report.exe --env dev --stub-file .\tests\data\stub_snapshot.csv --dry-run --to debug@example.com
 ```
 
-`report.exe --env dev` works in-place because the program now loads `config/report.properties.template` first and then overlays `config/dev.properties`.
+`report.exe --env dev` works in-place because the program now loads `config/report.properties` first and then overlays `config/dev.properties`.
+
+To temporarily test another DRTP access point:
+
+```powershell
+.\build\windows-local-x86\Debug\report.exe --env dev --drtp-endpoints 127.0.0.1:6003 --dry-run --to debug@example.com
+```
 
 If you want to inspect the staged directory locally:
 
@@ -172,15 +169,14 @@ If `cmake --preset linux-rhel8-release` still reports `CMAKE_CXX_COMPILER not se
 
 If you previously ran the older `Ninja`-based preset, that old cache may still exist under `build/linux-rhel8-release`. The preset now uses `build/linux-rhel8-release-make`, so a fresh pull no longer collides with that old directory. The old directory can be removed manually when convenient.
 
-If an older generated installer reports `Installer payload marker was not found`, remove that `.run` file and rebuild the `report_run_installer` target.
-
 ```bash
 cmake --preset linux-rhel8-release
 cmake --build --preset linux-rhel8-release --parallel
 ctest --preset linux-rhel8-release
-cmake --build --preset linux-rhel8-release --target report_run_installer
-./build/linux-rhel8-release-make/client_funding_risk_report-installer.run --env qa --prefix "$PWD/install_qa"
-./install_qa/bin/report --dry-run --to qa-ops@example.com
+cmake --build --preset linux-rhel8-release --target report_package
+mkdir -p "$PWD/install_qa"
+tar -C "$PWD/install_qa" -xzf ./build/linux-rhel8-release-make/client_funding_risk_report.tar.gz
+./install_qa/client_funding_risk_report/bin/report --env qa --dry-run --to qa-ops@example.com
 ```
 
 ## Jenkins Release
@@ -198,8 +194,8 @@ Release assumptions:
 - Jenkins parses Vault JSON with the built-in Groovy JSON parser, not Python
 - Artifactory client cert, key, CA, and optional cert password come from Vault, not Jenkins local file credentials
 - supplier files are normalized into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
-- Jenkins builds one `.run` installer per build
-- the live smoke installs that `.run` into a temporary directory with `REPORT_RUNTIME_ENV`
+- Jenkins builds one plain `.tar.gz` package per build
+- the live smoke extracts that `.tar.gz` into a temporary directory and runs with `REPORT_RUNTIME_ENV`
 
 Fixed Jenkins integration config:
 
@@ -207,7 +203,7 @@ Fixed Jenkins integration config:
 - the same helper owns separate PR and Release Vault paths, fields, namespace, auth path, and package password secret paths
 - these values are not Jenkins UI parameters; update the helper only when Vault locations or the supplier package version changes
 - placeholder values beginning with `REPLACE_ME_` fail fast before Vault or Artifactory access
-- `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it controls the installed runtime environment, not package download credentials
+- `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it selects the runtime `--env`, not package download credentials
 
 Core flow:
 
@@ -215,10 +211,10 @@ Core flow:
 2. Read the Artifactory cert materials from Vault through the HTTP API
 3. Download the supplier package from Artifactory
 4. Normalize the supplier files into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
-5. Build, test, and stage one common runtime
-6. Build `client_funding_risk_report-*.run`
-7. For smoke, install that `.run` with `--env "$REPORT_RUNTIME_ENV" --prefix "$SMOKE_INSTALL_DIR"`
-8. Run `"$SMOKE_INSTALL_DIR/bin/report" --dry-run`
+5. Build, test, and stage one common runtime containing all properties files
+6. Build `client_funding_risk_report-*.tar.gz`
+7. For smoke, extract that `.tar.gz` and run with `--env "$REPORT_RUNTIME_ENV"`
+8. Run `"$SMOKE_INSTALL_DIR/client_funding_risk_report/bin/report" --env "$REPORT_RUNTIME_ENV" --dry-run`
 
 ## Jenkins PR
 
@@ -232,4 +228,4 @@ The PR pipeline now uses the same supplier package preparation model as release:
 - Artifactory certificate, optional key, optional CA, optional certificate password, and optional supplier ZIP password come from Vault
 - the downloaded package may be ZIP, password-protected ZIP, `.tar.gz`, or `.tar`
 - extracted supplier files are normalized into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
-- PR smoke builds the `.run` installer, installs it into a temporary directory with `--env dev`, and runs the installed `bin/report`
+- PR builds the same `.tar.gz` packaging target and smoke runs the staged `bin/report --env dev`

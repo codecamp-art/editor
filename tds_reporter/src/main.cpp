@@ -11,14 +11,17 @@ void PrintUsage()
 {
     std::cout
         << "Usage:\n"
-        << "  report [--env dev] [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
+        << "  report --env dev|qa|prod [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
+        << "               [--drtp-endpoints host1:port1,host2:port2]\n"
         << "               [--cust-list 1001,1002] [--output-dir path] [--trade-date YYYYMMDD]\n"
         << "               [--dry-run] [--stub-file path]\n\n"
         << "Notes:\n"
         << "  --stub-file lets you debug without a local supplier TDS runtime.\n"
         << "  Windows local builds can read DRTP with win32 supplier files, but must use --dry-run.\n"
-        << "  Packaged runs auto-discover config beside the executable, so --config is usually unnecessary.\n"
-        << "  A production package can start with no arguments when config/report.properties is present.\n"
+        << "  --env dev|qa|prod loads config/report.properties first, then config/<env>.properties.\n"
+        << "  --drtp-endpoints temporarily overrides all configured DRTP access points.\n"
+        << "  Packaged runs require --env and auto-discover config beside the executable.\n"
+        << "  --config is only for explicit custom config files.\n"
         << "  --dry-run writes an .eml preview instead of calling curl SMTP.\n";
 }
 
@@ -43,6 +46,10 @@ int main(int argc, char** argv)
         {
             PrintUsage();
             return 0;
+        }
+        if (cli.config_path.empty() && cli.env.empty())
+        {
+            throw std::runtime_error("missing --env; use --env dev|qa|prod or pass --config path");
         }
 
         const std::string config_path =

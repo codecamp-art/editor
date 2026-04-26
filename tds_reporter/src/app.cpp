@@ -123,12 +123,12 @@ std::unordered_map<std::string, std::string> ReadProperties(const std::string& p
 {
     const std::filesystem::path resolved_path = std::filesystem::absolute(path);
     const std::filesystem::path config_dir = resolved_path.parent_path();
-    const std::filesystem::path template_path = config_dir / "report.properties.template";
+    const std::filesystem::path shared_path = config_dir / "report.properties";
 
     std::unordered_map<std::string, std::string> properties;
-    if (resolved_path.filename() != "report.properties.template" && std::filesystem::exists(template_path))
+    if (resolved_path.filename() != "report.properties" && std::filesystem::exists(shared_path))
     {
-        properties = ReadPropertiesFile(template_path.string());
+        properties = ReadPropertiesFile(shared_path.string());
     }
 
     const auto overlay_properties = ReadPropertiesFile(resolved_path.string());
@@ -199,6 +199,120 @@ std::string ParseLogLevelValue(const std::string& raw)
         return normalized;
     }
     throw std::runtime_error("invalid log.level: " + raw);
+}
+
+std::vector<std::string> SplitDelimitedList(const std::string& raw)
+{
+    std::vector<std::string> values;
+    std::string current;
+
+    for (const char ch : raw)
+    {
+        if (ch == ',' || ch == ';')
+        {
+            const std::string trimmed = Trim(current);
+            if (!trimmed.empty())
+            {
+                values.push_back(trimmed);
+            }
+            current.clear();
+        }
+        else
+        {
+            current += ch;
+        }
+    }
+
+    const std::string trimmed = Trim(current);
+    if (!trimmed.empty())
+    {
+        values.push_back(trimmed);
+    }
+
+    return values;
+}
+
+TdsEndpoint ParseDrtpEndpoint(const std::string& raw, const std::string& field_name)
+{
+    const std::string value = Trim(raw);
+    if (value.empty())
+    {
+        throw std::runtime_error("empty DRTP endpoint in " + field_name);
+    }
+
+    std::string host;
+    std::string port_text;
+    if (value.front() == '[')
+    {
+        const std::size_t close = value.find(']');
+        if (close != std::string::npos)
+        {
+            host = value.substr(1, close - 1);
+            if (close + 1 < value.size())
+            {
+                if (value[close + 1] != ':')
+                {
+                    throw std::runtime_error("invalid DRTP endpoint in " + field_name + ": " + value);
+                }
+                port_text = value.substr(close + 2);
+            }
+        }
+    }
+    else
+    {
+        const std::size_t delimiter = value.rfind(':');
+        if (delimiter != std::string::npos)
+        {
+            host = value.substr(0, delimiter);
+            port_text = value.substr(delimiter + 1);
+        }
+        else
+        {
+            host = value;
+        }
+    }
+
+    host = Trim(host);
+    if (host.empty())
+    {
+        throw std::runtime_error("invalid DRTP endpoint host in " + field_name + ": " + value);
+    }
+
+    if (port_text.empty())
+    {
+        throw std::runtime_error("DRTP endpoint must include host and port in " + field_name + ": " + value);
+    }
+
+    const int port = ParseIntValue(Trim(port_text), field_name);
+    if (port <= 0)
+    {
+        throw std::runtime_error(
+            "DRTP endpoint port is required and must be positive in " + field_name + ": " + value);
+    }
+
+    return {host, port};
+}
+
+std::vector<TdsEndpoint> ParseDrtpEndpointList(
+    const std::string& raw,
+    const std::string& field_name)
+{
+    std::vector<TdsEndpoint> endpoints;
+    for (const std::string& item : SplitDelimitedList(raw))
+    {
+        endpoints.push_back(ParseDrtpEndpoint(item, field_name));
+    }
+    return endpoints;
+}
+
+std::vector<TdsEndpoint> ApplyDrtpCliOverrides(std::vector<TdsEndpoint> endpoints, const CliOptions& cli)
+{
+    if (!cli.drtp_endpoints.empty())
+    {
+        return ParseDrtpEndpointList(cli.drtp_endpoints, "--drtp-endpoints");
+    }
+
+    return endpoints;
 }
 
 std::string CurrentTimestamp()
@@ -1170,6 +1284,11 @@ CliOptions ParseCli(int argc, char** argv)
             options.config_path = value;
             continue;
         }
+        if (const std::string value = read_value(arg, "--drtp-endpoints", index); !value.empty())
+        {
+            options.drtp_endpoints = value;
+            continue;
+        }
         if (const std::string value = read_value(arg, "--to", index); !value.empty())
         {
             options.to = SplitList(value);
@@ -1209,30 +1328,21 @@ CliOptions ParseCli(int argc, char** argv)
 
 std::string DefaultConfigPath(const std::string& env_name)
 {
-    if (!env_name.empty())
+    if (env_name.empty())
     {
-        for (const std::filesystem::path& config_root : DefaultConfigRoots())
-        {
-            const std::filesystem::path env_config = config_root / (env_name + ".properties");
-            if (std::filesystem::exists(env_config))
-            {
-                return std::filesystem::absolute(env_config).string();
-            }
-        }
+        throw std::runtime_error("missing --env; use --env dev|qa|prod or pass --config path");
     }
 
     for (const std::filesystem::path& config_root : DefaultConfigRoots())
     {
-        const std::filesystem::path single_config = config_root / "report.properties";
-        if (std::filesystem::exists(single_config))
+        const std::filesystem::path env_config = config_root / (env_name + ".properties");
+        if (std::filesystem::exists(env_config))
         {
-            return std::filesystem::absolute(single_config).string();
+            return std::filesystem::absolute(env_config).string();
         }
     }
 
-    return env_name.empty()
-        ? (std::filesystem::path("config") / "report.properties").string()
-        : (std::filesystem::path("config") / (env_name + ".properties")).string();
+    return (std::filesystem::path("config") / (env_name + ".properties")).string();
 }
 
 AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
@@ -1257,10 +1367,14 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.vault.namespace_name = GetValue(properties, "vault.namespace");
     config.vault.auth_path = GetValue(properties, "vault.auth_path");
 
-    config.tds.drtp_host = GetRequiredValue(properties, "tds.drtp_host");
-    config.tds.drtp_port = ParseIntValue(
-        GetValue(properties, "tds.drtp_port", "0"),
-        "tds.drtp_port");
+    std::vector<TdsEndpoint> drtp_endpoints =
+        ParseDrtpEndpointList(GetRequiredValue(properties, "tds.drtp_endpoints"), "tds.drtp_endpoints");
+    drtp_endpoints = ApplyDrtpCliOverrides(std::move(drtp_endpoints), cli);
+    if (drtp_endpoints.empty())
+    {
+        throw std::runtime_error("at least one DRTP endpoint is required");
+    }
+    config.tds.drtp_endpoints = std::move(drtp_endpoints);
     config.tds.user = GetRequiredValue(properties, "tds.user");
     config.tds.password = ResolveSecretReference(GetValue(properties, "tds.password"), config.vault);
     config.tds.req_timeout_ms = ParseIntValue(

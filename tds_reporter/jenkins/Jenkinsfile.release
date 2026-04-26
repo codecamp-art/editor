@@ -10,7 +10,7 @@ pipeline {
   parameters {
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
     booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a packaged dry-run after staging')
-    string(name: 'REPORT_RUNTIME_ENV', defaultValue: 'prod', description: 'Environment name rendered into config/report.properties before the optional live smoke')
+    string(name: 'REPORT_RUNTIME_ENV', defaultValue: 'prod', description: 'Environment overlay selected by --env for the optional live smoke')
     string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional live smoke run')
   }
 
@@ -18,7 +18,8 @@ pipeline {
     PROJECT_DIR = "${env.WORKSPACE}"
     BUILD_DIR = "${env.WORKSPACE}/build_release"
     STAGE_DIR = "${env.WORKSPACE}/build_release/client_funding_risk_report"
-    PACKAGE_NAME = "client_funding_risk_report-rhel8-${env.BUILD_NUMBER}.run"
+    PACKAGE_NAME = "client_funding_risk_report-rhel8-${env.BUILD_NUMBER}.tar.gz"
+    PACKAGE_PATH = "${env.WORKSPACE}/build_release/${PACKAGE_NAME}"
     VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
     VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
     VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
@@ -57,7 +58,7 @@ pipeline {
       steps {
         script {
           load('jenkins/report_common.groovy').configureCmake(
-            runInstallerPath: "${env.BUILD_DIR}/${env.PACKAGE_NAME}"
+            packagePath: env.PACKAGE_PATH
           )
         }
       }
@@ -85,13 +86,13 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
-          cmake --build "$BUILD_DIR" --target report_run_installer
+          cmake --build "$BUILD_DIR" --target report_package
           test -f "$STAGE_DIR/bin/report"
+          test -f "$STAGE_DIR/config/report.properties"
           test -f "$STAGE_DIR/config/dev.properties"
           test -f "$STAGE_DIR/config/qa.properties"
           test -f "$STAGE_DIR/config/prod.properties"
-          test ! -f "$STAGE_DIR/config/report.properties"
-          test -x "$BUILD_DIR/$PACKAGE_NAME"
+          test -f "$PACKAGE_PATH"
           find "$STAGE_DIR/lib" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) | sort
           test -f "$STAGE_DIR/lib/cpack.dat"
         '''
@@ -118,8 +119,10 @@ pipeline {
               set -euxo pipefail
 
               rm -rf "$SMOKE_INSTALL_DIR"
-              "$BUILD_DIR/$PACKAGE_NAME" --env "$REPORT_RUNTIME_ENV" --prefix "$SMOKE_INSTALL_DIR"
-              "$SMOKE_INSTALL_DIR/bin/report" \
+              mkdir -p "$SMOKE_INSTALL_DIR"
+              tar -C "$SMOKE_INSTALL_DIR" -xzf "$PACKAGE_PATH"
+              "$SMOKE_INSTALL_DIR/client_funding_risk_report/bin/report" \
+                --env "$REPORT_RUNTIME_ENV" \
                 --dry-run \
                 --to "$SMOKE_TO"
             '''
@@ -131,7 +134,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'build_release/client_funding_risk_report/**, build_release/*.run, output/*', allowEmptyArchive: false
+      archiveArtifacts artifacts: 'build_release/client_funding_risk_report/**, build_release/*.tar.gz, output/*', allowEmptyArchive: false
     }
   }
 }
