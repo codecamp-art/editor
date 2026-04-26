@@ -18,14 +18,13 @@ pipeline {
     STAGE_DIR = "${env.WORKSPACE}/build_pr/client_funding_risk_report"
     PACKAGE_PATH = "${env.WORKSPACE}/build_pr/client_funding_risk_report-pr.tar.gz"
     SMOKE_INSTALL_DIR = "${env.WORKSPACE}/build_pr/smoke_install"
-    VENDOR_DOWNLOAD_DIR = "${env.WORKSPACE}/vendor_download"
-    VENDOR_EXTRACT_DIR = "${env.WORKSPACE}/vendor_extract"
-    VENDOR_TDS_DIR = "${env.WORKSPACE}/tds"
-    ARTIFACTORY_AUTH_DIR = "${env.WORKSPACE}/artifactory_auth"
+    TDS_PACKAGE_DOWNLOAD_DIR = "${env.WORKSPACE}/tds_package_download"
+    TDS_PACKAGE_EXTRACT_DIR = "${env.WORKSPACE}/tds_package_extract"
+    TDS_DIR = "${env.WORKSPACE}/tds"
   }
 
   stages {
-    stage('Prepare Vendor SDK') {
+    stage('Prepare TDS Files') {
       steps {
         script {
           def common = load('jenkins/report_common.groovy')
@@ -33,7 +32,7 @@ pipeline {
           common.validateFixedIntegrationConfig(integrationConfig, 'pr')
           String vaultToken = common.prepareVaultAccess(integrationConfig)
           try {
-            common.prepareVendorSdk(
+            common.prepareTdsPackage(
               params: integrationConfig,
               vaultToken: vaultToken
             )

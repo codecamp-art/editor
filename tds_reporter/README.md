@@ -140,7 +140,7 @@ Rules:
 - Windows stage/install output includes every `*.dll` and `*.dat` file under `tds/win32`
 - Windows x64 build presets are intentionally not provided
 - RHEL8 local live build requires `tds/linux_x86_64/libtds_api.so` and `tds/linux_x86_64/cpack.dat`
-- Jenkins release normalizes downloaded supplier files into `workspace/tds/linux_x86_64`
+- Jenkins downloads the prebuilt TDS dependency package from Artifactory into `workspace/tds`
 - CMake does not support overriding supplier header/library paths with `-D` variables
 
 ## Vault and Kerberos
@@ -208,28 +208,31 @@ Release assumptions:
 - the pipeline trusts the inherited Kerberos environment and does not re-check `KRB5CCNAME` or run `klist`
 - Jenkins has `curl` available through the fixed `CURL_BIN` value or `PATH`
 - Jenkins parses Vault JSON with the built-in Groovy JSON parser, not Python
-- Artifactory client cert, key, CA, and optional cert password come from Vault, not Jenkins local file credentials
-- supplier files are normalized into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
+- Artifactory client cert and key are fixed files on the Jenkins server
+- no extra Artifactory CA file is configured because the corporate CA is already trusted by the server
+- optional Artifactory certificate password can still come from Vault when the local key requires it
+- the fixed Artifactory package already contains the curated TDS files under `tds/include`, `tds/linux_x86_64`, and `tds/win32`
+- Jenkins extracts that package into `workspace/tds` and validates `tds_api.h`, `libtds_api.so`, and `cpack.dat`
 - Jenkins builds one plain `.tar.gz` package per build
 - the live smoke extracts that `.tar.gz` into a temporary directory and runs with `REPORT_RUNTIME_ENV`
 
 Fixed Jenkins integration config:
 
-- `jenkins/report_common.groovy` owns the shared Artifactory package URL
-- the same helper owns separate PR and Release Vault paths, fields, namespace, auth path, and package password secret paths
-- these values are not Jenkins UI parameters; update the helper only when Vault locations or the supplier package version changes
+- `jenkins/report_common.groovy` owns the fixed Artifactory TDS package URL
+- the same helper owns the fixed Artifactory certificate/key paths and separate PR/Release Vault settings
+- these values are not Jenkins UI parameters; update the helper only when Vault locations or the curated TDS package URL changes
 - placeholder values beginning with `REPLACE_ME_` fail fast before Vault or Artifactory access
 - `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it selects the runtime `--env`, not package download credentials
 - Vault token is kept out of Jenkins environment variables and `curl` argv; Vault HTTP calls use temporary `curl --config` files with mode `600`
-- Artifactory certificate password is kept out of `curl` argv and shell environment; the download also uses a temporary `curl --config` file
-- password-protected ZIP extraction still uses standard `unzip -P`, which exposes the ZIP password in process argv; prefer removing the ZIP password and relying on Artifactory mTLS, or use a dedicated extractor that reads the password from a protected file descriptor
+- Artifactory certificate password is kept out of `curl` argv and shell environment; the download uses the fixed local certificate/key through a temporary `curl --config` file
+- the TDS package must not be password-protected; Artifactory mTLS controls download access
 
 Jenkins helper flow:
 
 1. Kerberos login to Vault through the HTTP API with curl
-2. Read the Artifactory cert materials from Vault through the HTTP API
-3. Download the supplier package from Artifactory
-4. Normalize the supplier files into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
+2. Optionally read the Artifactory certificate password from Vault
+3. Download the curated TDS dependency package from Artifactory using the fixed local certificate/key
+4. Extract it into `workspace/tds`
 5. Build, test, and stage one common runtime containing all properties files
 6. Build `client_funding_risk_report-*.tar.gz`
 7. For smoke, extract that `.tar.gz` and run with `--env "$REPORT_RUNTIME_ENV"`
@@ -241,10 +244,10 @@ Pipeline file: [jenkins/Jenkinsfile.pr](/D:/Codes/local/Test/tds_reporter/jenkin
 
 Shared Jenkins helper: [jenkins/report_common.groovy](/D:/Codes/local/Test/tds_reporter/jenkins/report_common.groovy)
 
-The PR pipeline now uses the same supplier package preparation model as release:
+The PR pipeline now uses the same TDS package preparation model as release:
 
-- the fixed Artifactory package URL downloads the supplier package from Artifactory
-- Artifactory certificate, optional key, optional CA, optional certificate password, and optional supplier ZIP password come from Vault
-- the downloaded package may be ZIP, password-protected ZIP, `.tar.gz`, or `.tar`
-- extracted supplier files are normalized into `workspace/tds/include/tds_api.h`, `workspace/tds/linux_x86_64/libtds_api.so`, and `workspace/tds/linux_x86_64/cpack.dat`
+- the fixed Artifactory package URL downloads the curated TDS package from Artifactory
+- Artifactory certificate and key are fixed files on the Jenkins server; optional certificate password can come from Vault
+- the downloaded package may be `.tar.gz`, `.tar`, or non-password-protected ZIP
+- the package must contain `tds/include`, `tds/linux_x86_64`, and `tds/win32`; Jenkins extracts it into `workspace/tds`
 - PR builds the same `.tar.gz` packaging target and smoke runs the staged `bin/report --env dev`
