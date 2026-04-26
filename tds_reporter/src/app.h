@@ -60,10 +60,11 @@ struct LogConfig
 
 struct VaultConfig
 {
-    std::string curl_executable;
     std::string address;
     std::string namespace_name;
-    std::string auth_path;
+    std::string secret_engine;
+    std::string secret_path;
+    std::string secret_key;
 };
 
 struct AppConfig

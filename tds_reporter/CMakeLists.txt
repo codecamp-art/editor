@@ -19,6 +19,10 @@ set(REPORT_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH
 set(REPORT_PACKAGE_PATH "${CMAKE_BINARY_DIR}/client_funding_risk_report.tar.gz" CACHE FILEPATH "Output path for the staged runtime tarball")
 get_filename_component(REPORT_INSTALL_DIR_NAME "${REPORT_STAGE_DIR}" NAME)
 
+if(UNIX)
+    find_package(CURL REQUIRED)
+endif()
+
 add_library(
     report_lib
     src/app.cpp
@@ -33,6 +37,14 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${TDS_INCLUDE_DIR}
 )
+
+if(CURL_FOUND)
+    target_link_libraries(report_lib PUBLIC CURL::libcurl)
+    target_compile_definitions(report_lib PUBLIC REPORT_HAS_LIBCURL=1)
+    message(STATUS "Vault HTTP access will use C++ libcurl")
+else()
+    message(STATUS "Vault HTTP access is disabled in this Windows local build")
+endif()
 
 set(REPORT_FILESYSTEM_TEST_SOURCE
 "#include <filesystem>

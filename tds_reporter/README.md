@@ -10,11 +10,24 @@ The package is environment-neutral.
 - `config/dev.properties`, `config/qa.properties`, and `config/prod.properties` only hold environment-specific overrides
 - the SMTP section is maintained once in `report.properties`, not duplicated per environment
 - SMTP relay authentication is certificate-only; there is no SMTP username/password configuration
-- the Vault section is also reduced to shared settings only: `vault.curl_executable`, `vault.address`, `vault.namespace`, and `vault.auth_path`
+- the shared Vault settings are `vault.address`, `vault.namespace`, `vault.secret_engine`, and `vault.secret_key`
+- each environment file owns only its environment-specific `vault.secret_path`
 
 At runtime, `--env dev|qa|prod` loads `config/report.properties` first and then overlays `config/<env>.properties`.
 
 Packaged runs must start with `bin/report --env <env>` and normally do not need `--config`.
+
+Vault layout:
+
+```properties
+# config/report.properties
+vault.namespace=...
+vault.secret_engine=...
+vault.secret_key=password
+
+# config/qa.properties
+vault.secret_path=...
+```
 
 ## DRTP Endpoints
 
@@ -136,22 +149,25 @@ Vault access is Kerberos-only.
 
 Behavior:
 
-1. When a config value uses `vault://...`, the program calls the Vault HTTP API with `curl --negotiate --user :`.
-2. Kerberos login uses `POST /v1/auth/kerberos/login`.
-3. Secret reads use the KV HTTP API and try KV v2 first, then KV v1.
+1. When `tds.password` is empty and `vault.secret_path` is configured, the program calls the Vault HTTP API through C++ libcurl with Kerberos SPNEGO.
+2. Kerberos login uses the fixed default auth mount: `POST /v1/auth/kerberos/login`.
+3. TDS password reads use KV v2 only: `GET /v1/<vault.secret_engine>/data/<vault.secret_path>`.
+4. The secret field is selected by `vault.secret_key`.
 
 Assumptions:
 
 - TGT is refreshed outside the program
 - on RHEL8 and Jenkins, cron refreshes the TGT for the runtime user
 - `KRB5CCNAME` is already exported by that user's shell profile
-- `report` and `curl` just inherit the current environment
+- `report` inherits the current environment and lets libcurl use the existing Kerberos credential cache
 
 The application does not read or require `kerberos_realm`, `keytab_path`, `krb5conf_path`, `service`, or `disable_fast_negotiation` from properties anymore. If `klist` already works after switching to that user, no extra runtime flag is needed.
 
-`vault.curl_executable` is the curl command used for Vault HTTP calls. Leave it as the default `curl` when the command is on `PATH`; set `CURL_BIN` or `vault.curl_executable` only when the binary lives elsewhere. The HashiCorp Vault CLI is not required on RHEL8.
+`vault.auth_path` was removed. It only meant the Vault Kerberos auth mount used for login, not the secret engine or secret path. The current implementation assumes the Kerberos auth method is mounted at the standard `kerberos` path.
 
-`bin/report` does not call `vault-http.sh`, `python3`, or the HashiCorp Vault CLI. Vault access is implemented in the C++ program itself and shells out only to `curl`.
+`tds.password` can still be set directly through `TDS_PASSWORD` for local override. When it is empty and `vault.secret_path` is configured, the program reads the password from Vault using `vault.secret_engine`, `vault.secret_path`, and `vault.secret_key`.
+
+`bin/report` does not call `vault-http.sh`, `python3`, external `curl`, or the HashiCorp Vault CLI for Vault access. Vault tokens are kept inside the process and are not written to command-line arguments, environment variables, or temp files. Vault HTTP failure messages only include libcurl errors or HTTP status, not response bodies.
 
 ## RHEL8 Local
 
@@ -160,7 +176,7 @@ After manually placing `tds/linux_x86_64/libtds_api.so` and `tds/linux_x86_64/cp
 Install the build tools once if the machine does not already have them:
 
 ```bash
-sudo dnf install -y gcc-c++ make cmake curl
+sudo dnf install -y gcc-c++ make cmake curl libcurl-devel
 ```
 
 The `linux-rhel8-release` preset now uses `Unix Makefiles`, not `Ninja`, because a default RHEL8 environment usually has `make` more often than `ninja-build`.
@@ -205,7 +221,7 @@ Fixed Jenkins integration config:
 - placeholder values beginning with `REPLACE_ME_` fail fast before Vault or Artifactory access
 - `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it selects the runtime `--env`, not package download credentials
 
-Core flow:
+Jenkins helper flow:
 
 1. Kerberos login to Vault through the HTTP API with curl
 2. Read the Artifactory cert materials from Vault through the HTTP API

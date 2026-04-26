@@ -4,11 +4,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -23,8 +24,8 @@
 #else
 #include <unistd.h>
 #endif
-#ifndef _WIN32
-#include <sys/wait.h>
+#ifdef REPORT_HAS_LIBCURL
+#include <curl/curl.h>
 #endif
 
 namespace report {
@@ -628,60 +629,207 @@ std::string EffectiveVaultValue(
 VaultConfig BuildEffectiveVaultConfig(const VaultConfig& configured)
 {
     VaultConfig effective = configured;
-    effective.curl_executable = EffectiveVaultValue(configured.curl_executable, "CURL_BIN", "curl");
     effective.address = EffectiveVaultValue(configured.address, "VAULT_ADDR");
     effective.namespace_name = EffectiveVaultValue(configured.namespace_name, "VAULT_NAMESPACE");
-    effective.auth_path = EffectiveVaultValue(configured.auth_path, "VAULT_AUTH_PATH");
+    effective.secret_engine = EffectiveVaultValue(configured.secret_engine, "VAULT_SECRET_ENGINE");
+    effective.secret_path = EffectiveVaultValue(configured.secret_path, "VAULT_SECRET_PATH");
+    effective.secret_key = EffectiveVaultValue(configured.secret_key, "VAULT_SECRET_KEY");
     return effective;
 }
 
-std::string TrimTrailingWhitespace(std::string value)
+void SecureClear(std::string& value)
 {
-    while (!value.empty() &&
-           (value.back() == '\n' || value.back() == '\r' || std::isspace(static_cast<unsigned char>(value.back()))))
+    if (!value.empty())
     {
-        value.pop_back();
+        volatile char* data = &value[0];
+        for (std::size_t index = 0; index < value.size(); ++index)
+        {
+            data[index] = '\0';
+        }
     }
-    return value;
+    value.clear();
 }
 
-struct CommandResult
+struct SecureStringScope
 {
-    int exit_code = 0;
-    std::string output;
+    explicit SecureStringScope(std::string& scoped_value)
+        : value(scoped_value)
+    {
+    }
+
+    ~SecureStringScope()
+    {
+        SecureClear(value);
+    }
+
+    std::string& value;
 };
 
-CommandResult RunCommandCapture(const std::string& command)
+struct SecureStringVector
 {
-#ifdef _WIN32
-    const std::string redirected_command = "cmd /s /c \"" + command + " 2>&1\"";
-    FILE* pipe = _popen(redirected_command.c_str(), "r");
-#else
-    const std::string redirected_command = command + " 2>&1";
-    FILE* pipe = popen(redirected_command.c_str(), "r");
-#endif
-    if (pipe == nullptr)
+    explicit SecureStringVector(std::vector<std::string> initial_values)
+        : values(std::move(initial_values))
     {
-        throw std::runtime_error("failed to execute command: " + command);
     }
 
-    std::string output;
-    char buffer[512];
-    while (std::fgets(buffer, static_cast<int>(sizeof(buffer)), pipe) != nullptr)
+    ~SecureStringVector()
     {
-        output += buffer;
+        for (std::string& value : values)
+        {
+            SecureClear(value);
+        }
     }
 
-#ifdef _WIN32
-    const int raw_exit_code = _pclose(pipe);
-    const int exit_code = raw_exit_code;
-#else
-    const int raw_exit_code = pclose(pipe);
-    const int exit_code = WIFEXITED(raw_exit_code) ? WEXITSTATUS(raw_exit_code) : raw_exit_code;
-#endif
+    std::vector<std::string> values;
+};
 
-    return {exit_code, TrimTrailingWhitespace(output)};
+#ifdef REPORT_HAS_LIBCURL
+struct CurlEasyDeleter
+{
+    void operator()(CURL* curl) const
+    {
+        curl_easy_cleanup(curl);
+    }
+};
+
+struct CurlHeaderListDeleter
+{
+    void operator()(curl_slist* headers) const
+    {
+        curl_slist_free_all(headers);
+    }
+};
+
+struct VaultHttpResponse
+{
+    CURLcode curl_code = CURLE_OK;
+    long http_status = 0;
+    std::string body;
+    std::string error;
+};
+
+void EnsureCurlGlobalInitialized()
+{
+    static std::once_flag init_once;
+    static CURLcode init_result = CURLE_FAILED_INIT;
+    std::call_once(init_once, []() {
+        init_result = curl_global_init(CURL_GLOBAL_DEFAULT);
+    });
+
+    if (init_result != CURLE_OK)
+    {
+        throw std::runtime_error(
+            std::string("failed to initialize libcurl: ") + curl_easy_strerror(init_result));
+    }
 }
+
+std::size_t WriteCurlResponse(char* data, std::size_t size, std::size_t count, void* user_data)
+{
+    const std::size_t bytes = size * count;
+    auto* output = static_cast<std::string*>(user_data);
+    output->append(data, bytes);
+    return bytes;
+}
+
+std::string CurlFailureSummary(const VaultHttpResponse& response)
+{
+    std::ostringstream message;
+    if (response.curl_code != CURLE_OK)
+    {
+        message << "libcurl error " << static_cast<int>(response.curl_code)
+                << " (" << curl_easy_strerror(response.curl_code) << ")";
+        if (!response.error.empty())
+        {
+            message << ": " << response.error;
+        }
+        return message.str();
+    }
+
+    message << "HTTP status " << response.http_status;
+    return message.str();
+}
+
+VaultHttpResponse VaultHttpRequest(
+    const VaultConfig& vault,
+    const std::string& method,
+    const std::string& url,
+    std::vector<std::string> headers,
+    bool kerberos_negotiate)
+{
+    EnsureCurlGlobalInitialized();
+
+    SecureStringVector header_storage(std::move(headers));
+    if (!vault.namespace_name.empty())
+    {
+        header_storage.values.push_back("X-Vault-Namespace: " + vault.namespace_name);
+    }
+
+    std::unique_ptr<CURL, CurlEasyDeleter> curl(curl_easy_init());
+    if (!curl)
+    {
+        throw std::runtime_error("failed to initialize a libcurl easy handle");
+    }
+
+    curl_slist* raw_headers = nullptr;
+    for (const std::string& header : header_storage.values)
+    {
+        curl_slist* appended_headers = curl_slist_append(raw_headers, header.c_str());
+        if (appended_headers == nullptr)
+        {
+            curl_slist_free_all(raw_headers);
+            throw std::runtime_error("failed to allocate libcurl HTTP headers");
+        }
+        raw_headers = appended_headers;
+    }
+    std::unique_ptr<curl_slist, CurlHeaderListDeleter> header_list(raw_headers);
+
+    VaultHttpResponse response;
+    char error_buffer[CURL_ERROR_SIZE] = {};
+
+    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER, error_buffer);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteCurlResponse);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &response.body);
+    curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT, 15L);
+    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 60L);
+
+    if (header_list)
+    {
+        curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header_list.get());
+    }
+
+    if (kerberos_negotiate)
+    {
+        curl_easy_setopt(curl.get(), CURLOPT_HTTPAUTH, CURLAUTH_NEGOTIATE);
+        curl_easy_setopt(curl.get(), CURLOPT_USERPWD, ":");
+    }
+
+    if (method == "POST")
+    {
+        curl_easy_setopt(curl.get(), CURLOPT_POST, 1L);
+        curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, "");
+        curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, 0L);
+    }
+    else if (method == "GET")
+    {
+        curl_easy_setopt(curl.get(), CURLOPT_HTTPGET, 1L);
+    }
+    else
+    {
+        curl_easy_setopt(curl.get(), CURLOPT_CUSTOMREQUEST, method.c_str());
+    }
+
+    response.curl_code = curl_easy_perform(curl.get());
+    response.error = error_buffer;
+    if (response.curl_code == CURLE_OK)
+    {
+        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &response.http_status);
+    }
+
+    return response;
+}
+#endif
 
 struct VaultSecretReference
 {
@@ -718,22 +866,23 @@ std::string VaultApiUrl(const VaultConfig& vault, const std::string& api_path)
     return address + "/v1/" + TrimSlashes(api_path);
 }
 
-std::string VaultKerberosLoginPath(const VaultConfig& vault)
+std::string VaultKerberosLoginPath()
 {
-    const std::string auth_path = TrimSlashes(vault.auth_path.empty() ? "kerberos" : vault.auth_path);
-    return auth_path.rfind("auth/", 0) == 0 ? auth_path + "/login" : "auth/" + auth_path + "/login";
+    return "auth/kerberos/login";
 }
 
-std::pair<std::string, std::string> SplitVaultSecretMountPath(const std::string& path)
+std::string VaultKvV2SecretPath(const VaultConfig& vault, const std::string& secret_path)
 {
-    const std::string normalized = TrimSlashes(path);
-    const std::size_t delimiter = normalized.find('/');
-    if (delimiter == std::string::npos || delimiter == 0 || delimiter + 1 >= normalized.size())
+    if (vault.secret_engine.empty())
     {
-        throw std::runtime_error("vault secret path must include mount and path: " + path);
+        throw std::runtime_error("VAULT_SECRET_ENGINE or vault.secret_engine is required for vault-backed secrets");
+    }
+    if (secret_path.empty())
+    {
+        throw std::runtime_error("VAULT_SECRET_PATH or vault.secret_path is required for vault-backed secrets");
     }
 
-    return {normalized.substr(0, delimiter), normalized.substr(delimiter + 1)};
+    return TrimSlashes(vault.secret_engine) + "/data/" + TrimSlashes(secret_path);
 }
 
 std::string JsonUnescapeString(const std::string& raw)
@@ -847,29 +996,22 @@ VaultSecretReference ParseVaultSecretReference(const std::string& value)
     return {body.substr(0, delimiter), body.substr(delimiter + 1)};
 }
 
+#ifdef REPORT_HAS_LIBCURL
 std::string LoginToVault(const VaultConfig& configured_vault)
 {
     const VaultConfig vault = BuildEffectiveVaultConfig(configured_vault);
-    const std::string login_url = VaultApiUrl(vault, VaultKerberosLoginPath(vault));
-    std::string command =
-        QuoteForShell(vault.curl_executable) +
-        " --fail --silent --show-error --request POST --negotiate --user :";
-
-    if (!vault.namespace_name.empty())
+    const std::string login_url = VaultApiUrl(vault, VaultKerberosLoginPath());
+    VaultHttpResponse response = VaultHttpRequest(vault, "POST", login_url, {}, true);
+    if (response.curl_code != CURLE_OK || response.http_status < 200 || response.http_status >= 300)
     {
-        command += " --header " + QuoteForShell("X-Vault-Namespace: " + vault.namespace_name);
-    }
-    command += " " + QuoteForShell(login_url);
-
-    const CommandResult result = RunCommandCapture(command);
-    if (result.exit_code != 0)
-    {
+        const std::string failure = CurlFailureSummary(response);
+        SecureClear(response.body);
         throw std::runtime_error(
-            "vault kerberos HTTP login failed: " +
-            (result.output.empty() ? std::string("no output") : result.output));
+            "vault kerberos HTTP login failed: " + failure);
     }
 
-    const std::string token = ExtractJsonStringField(result.output, "client_token");
+    const std::string token = ExtractJsonStringField(response.body, "client_token");
+    SecureClear(response.body);
     if (token.empty())
     {
         throw std::runtime_error("vault kerberos HTTP login did not return auth.client_token");
@@ -878,51 +1020,81 @@ std::string LoginToVault(const VaultConfig& configured_vault)
     return token;
 }
 
-std::string ReadVaultSecret(const std::string& reference, const VaultConfig& configured_vault)
+std::string ReadVaultSecretField(
+    const VaultConfig& configured_vault,
+    const std::string& secret_path,
+    const std::string& secret_key,
+    const std::string& secret_description)
 {
-    const VaultSecretReference secret = ParseVaultSecretReference(reference);
     const VaultConfig vault = BuildEffectiveVaultConfig(configured_vault);
-    const std::string token = LoginToVault(vault);
-
-    const auto [mount_path, secret_path] = SplitVaultSecretMountPath(secret.path);
-    const std::vector<std::string> candidate_paths = {
-        mount_path + "/data/" + secret_path,
-        mount_path + "/" + secret_path
-    };
-
-    std::string last_error;
-    for (const std::string& candidate_path : candidate_paths)
+    if (secret_key.empty())
     {
-        std::string command =
-            QuoteForShell(vault.curl_executable) +
-            " --fail --silent --show-error --request GET" +
-            " --header " + QuoteForShell("X-Vault-Token: " + token);
+        throw std::runtime_error("VAULT_SECRET_KEY or vault.secret_key is required for vault-backed secrets");
+    }
 
-        if (!vault.namespace_name.empty())
+    std::string token = LoginToVault(vault);
+    SecureStringScope clear_token_on_return(token);
+
+    {
+        std::vector<std::string> request_headers;
+        std::string token_header = "X-Vault-Token: ";
+        token_header += token;
+        request_headers.push_back(std::move(token_header));
+
+        VaultHttpResponse response = VaultHttpRequest(
+            vault,
+            "GET",
+            VaultApiUrl(vault, VaultKvV2SecretPath(vault, secret_path)),
+            std::move(request_headers),
+            false);
+        if (response.curl_code != CURLE_OK || response.http_status < 200 || response.http_status >= 300)
         {
-            command += " --header " + QuoteForShell("X-Vault-Namespace: " + vault.namespace_name);
-        }
-        command += " " + QuoteForShell(VaultApiUrl(vault, candidate_path));
-
-        const CommandResult result = RunCommandCapture(command);
-        if (result.exit_code != 0)
-        {
-            last_error = result.output;
-            continue;
+            const std::string last_error = CurlFailureSummary(response);
+            SecureClear(response.body);
+            throw std::runtime_error(
+                "vault HTTP read failed for " + secret_description + ": " + last_error);
         }
 
-        const std::string secret_value = ExtractJsonStringField(result.output, secret.field);
+        const std::string secret_value = ExtractJsonStringField(response.body, secret_key);
+        SecureClear(response.body);
         if (!secret_value.empty())
         {
             return secret_value;
         }
 
-        last_error = "field not found in vault response";
+        throw std::runtime_error(
+            "vault HTTP read failed for " + secret_description + ": field not found in vault response");
     }
-
-    throw std::runtime_error(
-        "vault HTTP read failed for " + secret.path + "#" + secret.field + ": " + last_error);
 }
+
+std::string ReadVaultSecret(const std::string& reference, const VaultConfig& configured_vault)
+{
+    const VaultSecretReference secret = ParseVaultSecretReference(reference);
+    return ReadVaultSecretField(configured_vault, secret.path, secret.field, secret.path + "#" + secret.field);
+}
+#else
+std::string ReadVaultSecretField(
+    const VaultConfig& configured_vault,
+    const std::string& secret_path,
+    const std::string& secret_key,
+    const std::string& secret_description)
+{
+    (void)configured_vault;
+    (void)secret_path;
+    (void)secret_key;
+    (void)secret_description;
+    throw std::runtime_error(
+        "Vault-backed secrets require C++ libcurl support; install libcurl-devel on RHEL8 and rebuild");
+}
+
+std::string ReadVaultSecret(const std::string& reference, const VaultConfig& configured_vault)
+{
+    (void)reference;
+    (void)configured_vault;
+    throw std::runtime_error(
+        "Vault-backed secrets require C++ libcurl support; install libcurl-devel on RHEL8 and rebuild");
+}
+#endif
 
 std::string ResolveSecretReference(const std::string& value, const VaultConfig& vault)
 {
@@ -932,6 +1104,26 @@ std::string ResolveSecretReference(const std::string& value, const VaultConfig& 
     }
 
     return ReadVaultSecret(value, vault);
+}
+
+std::string ResolveTdsPassword(const std::string& configured_password, const VaultConfig& vault)
+{
+    if (!configured_password.empty())
+    {
+        return ResolveSecretReference(configured_password, vault);
+    }
+
+    const VaultConfig effective_vault = BuildEffectiveVaultConfig(vault);
+    if (!effective_vault.secret_path.empty())
+    {
+        return ReadVaultSecretField(
+            effective_vault,
+            effective_vault.secret_path,
+            effective_vault.secret_key,
+            effective_vault.secret_path + "#" + effective_vault.secret_key);
+    }
+
+    return "";
 }
 
 std::vector<CustomerFundRecord> SortRecords(std::vector<CustomerFundRecord> records)
@@ -1362,10 +1554,11 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.log.directory = ResolveConfigRelativePath(config_dir, GetValue(properties, "log.dir", "../logs"));
     config.log.level = ParseLogLevelValue(GetValue(properties, "log.level", config.log.level));
 
-    config.vault.curl_executable = GetValue(properties, "vault.curl_executable", config.vault.curl_executable);
     config.vault.address = GetValue(properties, "vault.address");
     config.vault.namespace_name = GetValue(properties, "vault.namespace");
-    config.vault.auth_path = GetValue(properties, "vault.auth_path");
+    config.vault.secret_engine = GetValue(properties, "vault.secret_engine");
+    config.vault.secret_path = GetValue(properties, "vault.secret_path");
+    config.vault.secret_key = GetValue(properties, "vault.secret_key");
 
     std::vector<TdsEndpoint> drtp_endpoints =
         ParseDrtpEndpointList(GetRequiredValue(properties, "tds.drtp_endpoints"), "tds.drtp_endpoints");
@@ -1376,7 +1569,7 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     }
     config.tds.drtp_endpoints = std::move(drtp_endpoints);
     config.tds.user = GetRequiredValue(properties, "tds.user");
-    config.tds.password = ResolveSecretReference(GetValue(properties, "tds.password"), config.vault);
+    config.tds.password = ResolveTdsPassword(GetValue(properties, "tds.password"), config.vault);
     config.tds.req_timeout_ms = ParseIntValue(
         GetValue(properties, "tds.req_timeout_ms", std::to_string(config.tds.req_timeout_ms)),
         "tds.req_timeout_ms");

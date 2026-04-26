@@ -26,6 +26,14 @@ void AssertContains(const std::string& haystack, const std::string& needle, cons
     }
 }
 
+void AssertNotContains(const std::string& haystack, const std::string& needle, const std::string& message)
+{
+    if (haystack.find(needle) != std::string::npos)
+    {
+        throw std::runtime_error(message + " unexpectedly contained [" + needle + "]");
+    }
+}
+
 template <typename Callable>
 void AssertThrows(Callable&& callable, const std::string& message)
 {
@@ -97,59 +105,6 @@ void WriteFile(const std::filesystem::path& path, const std::string& content)
 {
     std::ofstream output(path, std::ios::binary);
     output << content;
-}
-
-std::filesystem::path CreateFakeCurlExecutable(const std::filesystem::path& temp_dir)
-{
-#ifdef _WIN32
-    const std::filesystem::path script_path = temp_dir / "fake-curl.cmd";
-    WriteFile(
-        script_path,
-        "@echo off\r\n"
-        "set args=%*\r\n"
-        "echo %args% | findstr /C:\"/v1/auth/kerberos/login\" >nul\r\n"
-        "if %errorlevel%==0 (\r\n"
-        "  echo %args% | findstr /C:\"--negotiate\" >nul\r\n"
-        "  if not %errorlevel%==0 (\r\n"
-        "    echo missing curl kerberos negotiate option: %args% 1>&2\r\n"
-        "    exit /b 1\r\n"
-        "  )\r\n"
-        "  echo {\"auth\":{\"client_token\":\"fake-vault-token\"}}\r\n"
-        "  exit /b 0\r\n"
-        ")\r\n"
-        "echo %args% | findstr /C:\"/v1/secret/data/tds/qa\" >nul\r\n"
-        "if %errorlevel%==0 (\r\n"
-        "  echo {\"data\":{\"data\":{\"password\":\"vault-secret-value\"}}}\r\n"
-        "  exit /b 0\r\n"
-        ")\r\n"
-        "echo unexpected curl command: %args% 1>&2\r\n"
-        "exit /b 1\r\n");
-    return script_path;
-#else
-    const std::filesystem::path script_path = temp_dir / "fake-curl.sh";
-    WriteFile(
-        script_path,
-        "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        "if printf '%s\\n' \"$*\" | grep -q '/v1/auth/kerberos/login'; then\n"
-        "  printf '%s\\n' \"$*\" | grep -q -- '--negotiate'\n"
-        "  printf '{\"auth\":{\"client_token\":\"fake-vault-token\"}}\\n'\n"
-        "  exit 0\n"
-        "fi\n"
-        "if printf '%s\\n' \"$*\" | grep -q '/v1/secret/data/tds/qa'; then\n"
-        "  printf '{\"data\":{\"data\":{\"password\":\"vault-secret-value\"}}}\\n'\n"
-        "  exit 0\n"
-        "fi\n"
-        "printf 'unexpected curl command: %s\\n' \"$*\" >&2\n"
-        "exit 1\n");
-    std::filesystem::permissions(
-        script_path,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
-    return script_path;
-#endif
 }
 
 void TestParseCli()
@@ -266,11 +221,14 @@ void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
         "smtp.from=sender@example.com\n"
         "email.default_cc=shared-cc@example.com\n"
         "report.output_dir=../shared-output\n"
-        "log.dir=../shared-logs\n");
+        "log.dir=../shared-logs\n"
+        "vault.secret_engine=secret\n"
+        "vault.secret_key=password\n");
     WriteFile(
         config_path,
         "env.name=qa\n"
         "tds.drtp_endpoints=10.10.20.30:6003\n"
+        "vault.secret_path=tds/qa\n"
         "email.default_to=qa-ops@example.com\n");
 
     report::CliOptions cli;
@@ -286,6 +244,9 @@ void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
     AssertTrue(config.smtp.port == 2587, "shared properties smtp port should be applied");
     AssertTrue(config.default_to == std::vector<std::string>{"qa-ops@example.com"}, "overlay recipients should be applied");
     AssertTrue(config.default_cc == std::vector<std::string>{"shared-cc@example.com"}, "shared cc should be applied");
+    AssertTrue(config.vault.secret_engine == "secret", "shared vault secret engine should be applied");
+    AssertTrue(config.vault.secret_key == "password", "shared vault secret key should be applied");
+    AssertTrue(config.vault.secret_path == "tds/qa", "overlay vault secret path should be applied");
     AssertTrue(
         std::filesystem::path(config.output_dir).filename() == "shared-output",
         "shared output dir should be resolved relative to the overlay config");
@@ -387,30 +348,45 @@ void TestDefaultConfigPathRejectsMissingEnv()
         "packaged runs should require --env instead of using shared report.properties alone");
 }
 
-void TestLoadConfigWithVaultBackedTdsPassword()
+void TestVaultSecretReferenceDoesNotUseCurlCommand()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_vault_test";
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "vault.properties";
-    const std::filesystem::path curl_executable = CreateFakeCurlExecutable(temp_dir);
 
     std::ofstream output(config_path);
     output
         << "env.name=qa\n"
         << "tds.drtp_endpoints=10.0.0.1:6003\n"
         << "tds.user=10000\n"
-        << "tds.password=vault://secret/tds/qa#password\n"
-        << "vault.curl_executable=" << curl_executable.string() << "\n"
-        << "vault.address=https://vault.example.com\n"
+        << "tds.password=vault://tds/qa#password\n"
+        << "vault.address=http://127.0.0.1:1\n"
+        << "vault.secret_engine=secret\n"
         << "smtp.host=mail.local\n"
         << "smtp.port=2587\n"
         << "smtp.from=sender@example.com\n";
     output.close();
 
     report::CliOptions cli;
-    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
+    std::string error_message;
+    try
+    {
+        (void)report::LoadConfig(config_path.string(), cli);
+    }
+    catch (const std::exception& ex)
+    {
+        error_message = ex.what();
+    }
 
-    AssertTrue(config.tds.password == "vault-secret-value", "vault-backed tds password should be resolved");
+    AssertTrue(!error_message.empty(), "test Vault endpoint should fail without a local Vault server");
+    AssertNotContains(error_message, "fake-vault-token", "Vault failure must not expose tokens");
+    AssertNotContains(error_message, "vault-secret-value", "Vault failure must not expose secret values");
+    AssertNotContains(error_message, "X-Vault-Token", "Vault failure must not expose token headers");
+
+    const std::string app_source = ReadFile(std::filesystem::path("src") / "app.cpp");
+    AssertNotContains(app_source, "RunCommandCapture", "Vault runtime must not shell out through a command wrapper");
+    AssertNotContains(app_source, "vault.curl_executable", "Vault runtime must not use a curl executable setting");
+    AssertNotContains(app_source, "curl --negotiate", "Vault runtime must use C++ libcurl instead of curl CLI");
 }
 
 void TestStubClientAndCsv()
@@ -631,7 +607,7 @@ int main()
         TestDefaultConfigPathUsesEnvOverlay();
         TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv();
         TestDefaultConfigPathRejectsMissingEnv();
-        TestLoadConfigWithVaultBackedTdsPassword();
+        TestVaultSecretReferenceDoesNotUseCurlCommand();
         TestStubClientAndCsv();
         TestMimeAndDryRun();
         TestDecodedVendorTextFlowsToCsvAndEmail();
