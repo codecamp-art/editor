@@ -79,17 +79,13 @@ Map fixedIntegrationConfig(String pipelineName) {
   Map pr = [
     VAULT_ADDR: 'REPLACE_ME_PR_VAULT_ADDR',
     VAULT_NAMESPACE: 'REPLACE_ME_PR_VAULT_NAMESPACE',
-    VAULT_AUTH_PATH: 'kerberos',
-    ARTIFACTORY_CERT_PASSWORD_VAULT_PATH: 'REPLACE_ME_PR_ARTIFACTORY_CERT_PASSWORD_VAULT_PATH',
-    ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD: 'password'
+    VAULT_AUTH_PATH: 'kerberos'
   ]
 
   Map release = [
     VAULT_ADDR: 'REPLACE_ME_RELEASE_VAULT_ADDR',
     VAULT_NAMESPACE: 'REPLACE_ME_RELEASE_VAULT_NAMESPACE',
-    VAULT_AUTH_PATH: 'kerberos',
-    ARTIFACTORY_CERT_PASSWORD_VAULT_PATH: 'REPLACE_ME_RELEASE_ARTIFACTORY_CERT_PASSWORD_VAULT_PATH',
-    ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD: 'password'
+    VAULT_AUTH_PATH: 'kerberos'
   ]
 
   Map selected = pipelineName == 'release' ? release : pr
@@ -207,67 +203,11 @@ String prepareVaultAccess(def pipelineParams) {
   return vaultKerberosLogin(vaultConfigFromParams(pipelineParams))
 }
 
-String vaultKvGet(Map vault, String token, String secretPath, String field) {
-  String normalized = trimSlashes(secretPath)
-  int delimiter = normalized.indexOf('/')
-  if (delimiter <= 0 || delimiter + 1 >= normalized.length()) {
-    error("Vault path must include mount and path: ${secretPath}")
-  }
-
-  String mount = normalized.substring(0, delimiter)
-  String rest = normalized.substring(delimiter + 1)
-  String lastError = ''
-
-  for (String candidatePath : ["${mount}/data/${rest}", "${mount}/${rest}"]) {
-    try {
-      def payload = new JsonSlurperClassic().parseText(
-        vaultCurl(
-          vault,
-          'GET',
-          candidatePath,
-          [curlConfigOption('header', "X-Vault-Token: ${token}")]
-        )
-      )
-      def data = payload?.data
-      def value = null
-      if (data instanceof Map) {
-        if (data.data instanceof Map && data.data.containsKey(field)) {
-          value = data.data[field]
-        }
-        if (value == null && data.containsKey(field)) {
-          value = data[field]
-        }
-      }
-      if (value != null && value.toString().length() > 0) {
-        return value.toString()
-      }
-      lastError = "field was empty or missing: ${secretPath}#${field}"
-    } catch (Exception ex) {
-      lastError = ex.message ?: ex.toString()
-    }
-  }
-
-  error("Vault HTTP read failed for ${secretPath}#${field}: ${lastError}")
-}
-
-String optionalVaultSecret(def pipelineParams, String token, String pathParam, String fieldParam, String fallbackField) {
-  String secretPath = pipelineParams[pathParam]?.trim() ?: ''
-  if (!secretPath) {
-    return ''
-  }
-  String field = pipelineParams[fieldParam]?.trim() ?: fallbackField
-  return vaultKvGet(vaultConfigFromParams(pipelineParams), token, secretPath, field)
-}
-
 void prepareTdsPackage(Map args) {
   def pipelineParams = args.params
-  String token = args.vaultToken ?: ''
 
   if (!pipelineParams.TDS_PACKAGE_URL?.trim()) {
     error('TDS_PACKAGE_URL is required')
-  }
-  if (!token?.trim()) {
-    error('TDS_PACKAGE_URL requires a Kerberos-authenticated Vault session so Jenkins can fetch the Artifactory certificate')
   }
 
   sh '''#!/usr/bin/env bash
@@ -275,14 +215,6 @@ void prepareTdsPackage(Map args) {
     rm -rf "$TDS_PACKAGE_DOWNLOAD_DIR" "$TDS_PACKAGE_EXTRACT_DIR" "$TDS_DIR"
     mkdir -p "$TDS_PACKAGE_DOWNLOAD_DIR" "$TDS_PACKAGE_EXTRACT_DIR"
   '''
-
-  String artifactoryCertPassword = optionalVaultSecret(
-    pipelineParams,
-    token,
-    'ARTIFACTORY_CERT_PASSWORD_VAULT_PATH',
-    'ARTIFACTORY_CERT_PASSWORD_VAULT_FIELD',
-    'password'
-  )
 
   String artifactoryCurlConfigPath = secretTempPath('artifactory-curl')
   String artifactoryCertFile = pipelineParams.ARTIFACTORY_CERT_FILE?.trim() ?: ''
@@ -294,16 +226,13 @@ void prepareTdsPackage(Map args) {
     error('ARTIFACTORY_KEY_FILE is required')
   }
 
-  String artifactoryCertSpec = artifactoryCertPassword
-    ? "${artifactoryCertFile}:${artifactoryCertPassword}"
-    : artifactoryCertFile
   List<String> artifactoryCurlConfig = [
     curlConfigOption('fail'),
     curlConfigOption('silent'),
     curlConfigOption('show-error'),
     curlConfigOption('location'),
     curlConfigOption('cert-type', pipelineParams.ARTIFACTORY_CERT_TYPE?.trim() ?: 'PEM'),
-    curlConfigOption('cert', artifactoryCertSpec),
+    curlConfigOption('cert', artifactoryCertFile),
     curlConfigOption('key', artifactoryKeyFile),
     curlConfigOption('output', "${env.TDS_PACKAGE_DOWNLOAD_DIR}/tds_package"),
     curlConfigOption('url', pipelineParams.TDS_PACKAGE_URL.trim())

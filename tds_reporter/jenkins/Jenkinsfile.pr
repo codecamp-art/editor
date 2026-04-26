@@ -30,15 +30,8 @@ pipeline {
           def common = load('jenkins/report_common.groovy')
           def integrationConfig = common.fixedIntegrationConfig('pr')
           common.validateFixedIntegrationConfig(integrationConfig, 'pr')
-          String vaultToken = common.prepareVaultAccess(integrationConfig)
-          try {
-            common.prepareTdsPackage(
-              params: integrationConfig,
-              vaultToken: vaultToken
-            )
-          } finally {
-            vaultToken = ''
-          }
+          common.prepareVaultAccess(integrationConfig)
+          common.prepareTdsPackage(params: integrationConfig)
         }
       }
     }
