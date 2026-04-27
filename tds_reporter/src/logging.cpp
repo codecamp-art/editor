@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -174,7 +175,7 @@ void EnsureLogStreamLocked()
         g_log_stream.close();
     }
 
-    g_log_stream.open(log_path, std::ios::app);
+    g_log_stream.open(log_path, std::ios::app | std::ios::binary);
     if (!g_log_stream.is_open())
     {
         throw std::runtime_error("failed to open log file: " + log_path.string());
@@ -198,20 +199,25 @@ void WriteLog(
 
     EnsureLogStreamLocked();
 
-    g_log_stream << "{\"ts\":\"" << EscapeJson(CurrentTimestamp())
-                 << "\",\"level\":\"" << EscapeJson(level)
-                 << "\",\"service\":\"" << EscapeJson(g_log_service)
-                 << "\",\"env\":\"" << EscapeJson(g_log_env)
-                 << "\",\"event\":\"" << EscapeJson(event)
-                 << "\",\"msg\":\"" << EscapeJson(message) << "\"";
+    std::ostringstream log_line;
+    log_line << "{\"ts\":\"" << EscapeJson(CurrentTimestamp())
+             << "\",\"level\":\"" << EscapeJson(level)
+             << "\",\"service\":\"" << EscapeJson(g_log_service)
+             << "\",\"env\":\"" << EscapeJson(g_log_env)
+             << "\",\"event\":\"" << EscapeJson(event)
+             << "\",\"msg\":\"" << EscapeJson(message) << "\"";
 
     for (const auto& [key, value] : fields)
     {
-        g_log_stream << ",\"" << EscapeJson(key) << "\":\"" << EscapeJson(value) << "\"";
+        log_line << ",\"" << EscapeJson(key) << "\":\"" << EscapeJson(value) << "\"";
     }
 
-    g_log_stream << "}\n";
+    log_line << "}";
+
+    g_log_stream << log_line.str() << '\n';
     g_log_stream.flush();
+    std::cout << log_line.str() << '\n';
+    std::cout.flush();
 }
 
 } // namespace

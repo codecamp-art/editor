@@ -49,6 +49,10 @@ Temporary runtime overrides:
 bin/report --env qa --drtp-endpoints 10.10.20.50:6003,10.10.20.51:6003
 ```
 
+## Logging
+
+Runtime logs are JSON lines. The same log line is written to the daily log file under `log.dir` and to standard output, so Jenkins, systemd, and the local log file see the same runtime log content.
+
 ## Packaging Model
 
 - Windows local build is only for debugging and does not need release packaging

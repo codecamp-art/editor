@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -572,10 +573,13 @@ void TestNoMoreDataDetection()
 void TestLoggerWritesJsonLine()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_logger_test";
+    std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
 
     report::AppConfig config = BuildTestConfig(output_dir);
     report::InitializeLogger(config);
+    std::ostringstream console_output;
+    std::streambuf* original_stdout = std::cout.rdbuf(console_output.rdbuf());
     report::LogInfo(
         "logger_test",
         "Logger writes json lines",
@@ -583,6 +587,7 @@ void TestLoggerWritesJsonLine()
             {"trade_date", "20260418"},
             {"mode", "test"}
         });
+    std::cout.rdbuf(original_stdout);
     const std::string log_path = report::CurrentLogFilePath();
     report::ShutdownLogger();
 
@@ -590,6 +595,7 @@ void TestLoggerWritesJsonLine()
     AssertTrue(std::filesystem::exists(log_path), "log file should be created");
 
     const std::string log_content = ReadFile(log_path);
+    AssertTrue(console_output.str() == log_content, "console log output should match file log output");
     AssertContains(log_content, "\"event\":\"logger_test\"", "log event");
     AssertContains(log_content, "\"msg\":\"Logger writes json lines\"", "log message");
     AssertContains(log_content, "\"trade_date\":\"20260418\"", "log field");

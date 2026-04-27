@@ -98,20 +98,13 @@ int main(int argc, char** argv)
         const report::SendMailResult mail_result =
             report::SendMailWithCurl(mail_request, config, cli.dry_run);
 
-        std::cout << "Environment: " << config.env_name << '\n';
-        std::cout << "Trade date: " << trade_date << '\n';
-        std::cout << "Snapshot rows: " << records.size() << '\n';
-        std::cout << "Unique customers: " << CountUniqueCustomers(records) << '\n';
-        std::cout << "CSV report: " << report_path << '\n';
+        const std::size_t unique_customers = CountUniqueCustomers(records);
         if (mail_result.sent)
         {
-            std::cout << "Email status: sent\n";
             report::LogInfo("mail_sent", "SMTP message sent", {{"csv_report", report_path}});
         }
         else
         {
-            std::cout << "Email status: dry-run preview generated\n";
-            std::cout << "Preview file: " << mail_result.preview_path << '\n';
             report::LogInfo(
                 "mail_dry_run",
                 "Dry-run mail preview generated",
@@ -120,6 +113,17 @@ int main(int argc, char** argv)
                     {"preview_file", mail_result.preview_path}
                 });
         }
+        report::LogInfo(
+            "run_summary",
+            "Report run summary",
+            {
+                {"trade_date", std::to_string(trade_date)},
+                {"snapshot_rows", std::to_string(records.size())},
+                {"unique_customers", std::to_string(unique_customers)},
+                {"csv_report", report_path},
+                {"email_status", mail_result.sent ? "sent" : "dry-run preview generated"},
+                {"preview_file", mail_result.preview_path}
+            });
 
         report::LogInfo("shutdown", "report run completed successfully");
         report::ShutdownLogger();
@@ -132,7 +136,10 @@ int main(int argc, char** argv)
             report::LogError("run_failed", ex.what());
             report::ShutdownLogger();
         }
-        std::cerr << "report failed: " << ex.what() << '\n';
+        else
+        {
+            std::cerr << "report failed: " << ex.what() << '\n';
+        }
         return 1;
     }
 }
