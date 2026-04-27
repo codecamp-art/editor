@@ -213,11 +213,6 @@ install(
 
 install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/logs\")")
 
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
-    DESTINATION .
-)
-
 add_custom_target(
     report_stage
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${REPORT_STAGE_DIR}"
