@@ -183,6 +183,20 @@ Install the build tools once if the machine does not already have them:
 sudo dnf install -y gcc-c++ make cmake curl libcurl-devel
 ```
 
+If CMake reports `Could NOT find CURL (missing: CURL_LIBRARY CURL_INCLUDE_DIR)`, the `libcurl-devel` RPM is missing. `curl --version` is not enough because it only checks the CLI runtime, while this program links C++ code against libcurl headers and libraries.
+
+```bash
+rpm -q libcurl-devel
+ls /usr/include/curl/curl.h /usr/lib64/libcurl.so
+```
+
+After installing `libcurl-devel`, rerun from a clean Linux build directory if CMake cached the failed lookup:
+
+```bash
+rm -rf build/linux-rhel8-release-make
+cmake --preset linux-rhel8-release
+```
+
 The `linux-rhel8-release` preset now uses `Unix Makefiles`, not `Ninja`, because a default RHEL8 environment usually has `make` more often than `ninja-build`.
 
 If `cmake --preset linux-rhel8-release` still reports `CMAKE_CXX_COMPILER not set`, that machine is missing the C++ toolchain and you still need `gcc-c++`.

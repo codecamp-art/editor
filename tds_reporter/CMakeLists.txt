@@ -20,7 +20,16 @@ set(REPORT_PACKAGE_PATH "${CMAKE_BINARY_DIR}/client_funding_risk_report.tar.gz" 
 get_filename_component(REPORT_INSTALL_DIR_NAME "${REPORT_STAGE_DIR}" NAME)
 
 if(UNIX)
-    find_package(CURL REQUIRED)
+    find_package(CURL QUIET)
+    if(NOT CURL_FOUND)
+        message(
+            FATAL_ERROR
+            "Linux/RHEL8 builds require libcurl development files for Vault Kerberos HTTP access. "
+            "Install the RHEL8 package `libcurl-devel` and rerun CMake. "
+            "`curl --version` only verifies the curl CLI; CMake also needs curl/curl.h and libcurl.so. "
+            "Suggested checks: `rpm -q libcurl-devel` and `ls /usr/include/curl/curl.h /usr/lib64/libcurl.so`."
+        )
+    endif()
 endif()
 
 add_library(
