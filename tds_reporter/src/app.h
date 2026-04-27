@@ -45,9 +45,6 @@ struct SmtpConfig
     std::string security = "plain";
     std::string client_cert_path;
     std::string client_key_path;
-    std::string client_cert_type = "PEM";
-    std::string client_key_type = "PEM";
-    std::string client_key_password;
     bool insecure = false;
     int connect_timeout_seconds = 15;
 };
@@ -70,7 +67,7 @@ struct VaultConfig
 struct AppConfig
 {
     std::string env_name = "dev";
-    std::string email_subject = "TDS Client Funding and Risk Ratio Report";
+    std::string email_subject;
     std::string attachment_name = "tds_customer_funds";
     std::string output_dir = "./output";
     std::vector<std::string> default_to;

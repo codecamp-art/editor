@@ -1522,7 +1522,7 @@ std::string DefaultConfigPath(const std::string& env_name)
 {
     if (env_name.empty())
     {
-        throw std::runtime_error("missing --env; use --env dev|qa|prod or pass --config path");
+        throw std::runtime_error("missing --env; use --env dev|qa|prod");
     }
 
     for (const std::filesystem::path& config_root : DefaultConfigRoots())
@@ -1539,12 +1539,17 @@ std::string DefaultConfigPath(const std::string& env_name)
 
 AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
 {
+    if (cli.env.empty())
+    {
+        throw std::runtime_error("missing --env; use --env dev|qa|prod");
+    }
+
     const std::filesystem::path config_dir = std::filesystem::absolute(path).parent_path();
     const auto properties = ReadProperties(path);
     AppConfig config;
 
-    config.env_name = cli.env.empty() ? GetValue(properties, "env.name", "dev") : cli.env;
-    config.email_subject = GetValue(properties, "email.subject", config.email_subject);
+    config.env_name = cli.env;
+    config.email_subject = GetRequiredValue(properties, "email.subject");
     config.attachment_name = GetValue(properties, "report.attachment_name", config.attachment_name);
     config.output_dir = cli.output_dir.empty()
         ? ResolveConfigRelativePath(config_dir, GetValue(properties, "report.output_dir", config.output_dir))
@@ -1593,9 +1598,6 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
         ResolveConfigRelativePath(config_dir, GetValue(properties, "smtp.client_cert_path"));
     config.smtp.client_key_path =
         ResolveConfigRelativePath(config_dir, GetValue(properties, "smtp.client_key_path"));
-    config.smtp.client_cert_type = GetValue(properties, "smtp.client_cert_type", config.smtp.client_cert_type);
-    config.smtp.client_key_type = GetValue(properties, "smtp.client_key_type", config.smtp.client_key_type);
-    config.smtp.client_key_password = GetValue(properties, "smtp.client_key_password");
     config.smtp.insecure = ParseBoolValue(
         GetValue(properties, "smtp.insecure", config.smtp.insecure ? "true" : "false"),
         "smtp.insecure");
@@ -1734,12 +1736,8 @@ std::string BuildCurlConfig(const MailRequest& request, const AppConfig& config,
     {
         curl_config << "cert = \"" << EscapeCurlConfigValue(config.smtp.client_cert_path) << "\"\n";
         curl_config << "key = \"" << EscapeCurlConfigValue(config.smtp.client_key_path) << "\"\n";
-        curl_config << "cert-type = \"" << EscapeCurlConfigValue(config.smtp.client_cert_type) << "\"\n";
-        curl_config << "key-type = \"" << EscapeCurlConfigValue(config.smtp.client_key_type) << "\"\n";
-        if (!config.smtp.client_key_password.empty())
-        {
-            curl_config << "pass = \"" << EscapeCurlConfigValue(config.smtp.client_key_password) << "\"\n";
-        }
+        curl_config << "cert-type = \"PEM\"\n";
+        curl_config << "key-type = \"PEM\"\n";
     }
     curl_config << "upload-file = \"" << EscapeCurlConfigValue(std::filesystem::path(message_path).generic_string()) << "\"\n";
     curl_config << "connect-timeout = \"" << config.smtp.connect_timeout_seconds << "\"\n";

@@ -20,8 +20,8 @@ void PrintUsage()
         << "  Windows local builds can read DRTP with win32 supplier files, but must use --dry-run.\n"
         << "  --env dev|qa|prod loads config/report.properties first, then config/<env>.properties.\n"
         << "  --drtp-endpoints temporarily overrides all configured DRTP access points.\n"
-        << "  Packaged runs require --env and auto-discover config beside the executable.\n"
-        << "  --config is only for explicit custom config files.\n"
+        << "  All runs require --env; packaged runs auto-discover config beside the executable.\n"
+        << "  --config only changes which config file is loaded; it does not select the environment.\n"
         << "  --dry-run writes an .eml preview instead of calling curl SMTP.\n";
 }
 
@@ -47,9 +47,9 @@ int main(int argc, char** argv)
             PrintUsage();
             return 0;
         }
-        if (cli.config_path.empty() && cli.env.empty())
+        if (cli.env.empty())
         {
-            throw std::runtime_error("missing --env; use --env dev|qa|prod or pass --config path");
+            throw std::runtime_error("missing --env; use --env dev|qa|prod");
         }
 
         const std::string config_path =

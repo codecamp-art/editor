@@ -145,7 +145,6 @@ void TestLoadConfig()
     SetEnv("TDS_TEST_PASSWORD", "super-secret");
     std::ofstream output(config_path);
     output
-        << "env.name=dev\n"
         << "tds.drtp_endpoints=10.0.0.1:6003\n"
         << "tds.user=10000\n"
         << "tds.password=${TDS_TEST_PASSWORD:}\n"
@@ -155,6 +154,7 @@ void TestLoadConfig()
         << "smtp.security=starttls\n"
         << "smtp.client_cert_path=/app/.cert/server.pem\n"
         << "smtp.client_key_path=/app/.cert/server.key\n"
+        << "email.subject=Prod Report\n"
         << "log.dir=../logs\n"
         << "log.level=warn\n";
     output.close();
@@ -164,7 +164,7 @@ void TestLoadConfig()
     cli.output_dir = "custom-output";
     const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
-    AssertTrue(config.env_name == "prod", "cli env should override file env");
+    AssertTrue(config.env_name == "prod", "cli env should be the runtime environment");
     AssertTrue(config.output_dir == "custom-output", "cli output dir should override file output dir");
     AssertTrue(config.tds.drtp_endpoints.size() == 1, "single DRTP endpoint should be configured");
     AssertTrue(config.tds.drtp_endpoints.front().host == "10.0.0.1", "DRTP endpoint host should be parsed");
@@ -180,7 +180,7 @@ void TestLoadConfig()
     AssertTrue(config.log.level == "warn", "log level should be parsed");
 }
 
-void TestLoadConfigUsesFileEnvWhenCliEnvMissing()
+void TestLoadConfigRejectsMissingCliEnv()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_file_env_test";
     std::filesystem::create_directories(temp_dir);
@@ -188,20 +188,19 @@ void TestLoadConfigUsesFileEnvWhenCliEnvMissing()
 
     std::ofstream output(config_path);
     output
-        << "env.name=prod\n"
         << "tds.drtp_endpoints=10.0.0.1:6003\n"
         << "tds.user=10000\n"
         << "tds.password=secret\n"
         << "smtp.host=mail.local\n"
         << "smtp.port=2587\n"
-        << "smtp.from=sender@example.com\n";
+        << "smtp.from=sender@example.com\n"
+        << "email.subject=Prod Report\n";
     output.close();
 
     report::CliOptions cli;
-    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
-
-    AssertTrue(config.env_name == "prod", "config env should be used when --env is omitted");
-    AssertTrue(config.tds.drtp_endpoints.size() == 1, "DRTP endpoint should be configured");
+    AssertThrows(
+        [&]() { (void)report::LoadConfig(config_path.string(), cli); },
+        "LoadConfig should reject missing --env");
 }
 
 void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
@@ -218,20 +217,21 @@ void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
         "tds.password=shared-secret\n"
         "smtp.host=mail.shared\n"
         "smtp.port=2587\n"
-        "smtp.from=sender@example.com\n"
-        "email.default_cc=shared-cc@example.com\n"
         "report.output_dir=../shared-output\n"
         "log.dir=../shared-logs\n"
         "vault.secret_engine=secret\n"
         "vault.secret_key=password\n");
     WriteFile(
         config_path,
-        "env.name=qa\n"
         "tds.drtp_endpoints=10.10.20.30:6003\n"
         "vault.secret_path=tds/qa\n"
-        "email.default_to=qa-ops@example.com\n");
+        "smtp.from=sender-qa@example.com\n"
+        "email.default_to=qa-ops@example.com\n"
+        "email.default_cc=qa-cc@example.com\n"
+        "email.subject=QA Report\n");
 
     report::CliOptions cli;
+    cli.env = "qa";
     const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
     AssertTrue(config.env_name == "qa", "overlay env should be applied");
@@ -242,8 +242,10 @@ void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
     AssertTrue(config.tds.password == "shared-secret", "shared properties password should be applied");
     AssertTrue(config.smtp.host == "mail.shared", "shared properties smtp host should be applied");
     AssertTrue(config.smtp.port == 2587, "shared properties smtp port should be applied");
+    AssertTrue(config.smtp.from == "sender-qa@example.com", "overlay smtp sender should be applied");
     AssertTrue(config.default_to == std::vector<std::string>{"qa-ops@example.com"}, "overlay recipients should be applied");
-    AssertTrue(config.default_cc == std::vector<std::string>{"shared-cc@example.com"}, "shared cc should be applied");
+    AssertTrue(config.default_cc == std::vector<std::string>{"qa-cc@example.com"}, "overlay cc should be applied");
+    AssertTrue(config.email_subject == "QA Report", "overlay subject should be applied");
     AssertTrue(config.vault.secret_engine == "secret", "shared vault secret engine should be applied");
     AssertTrue(config.vault.secret_key == "password", "shared vault secret key should be applied");
     AssertTrue(config.vault.secret_path == "tds/qa", "overlay vault secret path should be applied");
@@ -264,15 +266,16 @@ void TestLoadConfigParsesMultipleDrtpEndpoints()
 
     WriteFile(
         config_path,
-        "env.name=qa\n"
         "tds.drtp_endpoints=10.10.20.30:6003,10.10.20.31:6004\n"
         "tds.user=10000\n"
         "tds.password=secret\n"
         "smtp.host=mail.local\n"
         "smtp.port=2587\n"
-        "smtp.from=sender@example.com\n");
+        "smtp.from=sender@example.com\n"
+        "email.subject=QA Report\n");
 
     report::CliOptions cli;
+    cli.env = "qa";
     const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
     AssertTrue(config.tds.drtp_endpoints.size() == 2, "expected two DRTP endpoints");
@@ -291,15 +294,16 @@ void TestLoadConfigAppliesDrtpEndpointsCliOverride()
 
     WriteFile(
         config_path,
-        "env.name=qa\n"
         "tds.drtp_endpoints=10.10.20.30:6003\n"
         "tds.user=10000\n"
         "tds.password=secret\n"
         "smtp.host=mail.local\n"
         "smtp.port=2587\n"
-        "smtp.from=sender@example.com\n");
+        "smtp.from=sender@example.com\n"
+        "email.subject=QA Report\n");
 
     report::CliOptions cli;
+    cli.env = "qa";
     cli.drtp_endpoints = "192.0.2.20:7101;192.0.2.21:7102";
     const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
 
@@ -315,8 +319,8 @@ void TestDefaultConfigPathUsesEnvOverlay()
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_config_env_test";
     std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir / "config");
-    WriteFile(temp_dir / "config" / "report.properties", "env.name=prod\n");
-    WriteFile(temp_dir / "config" / "qa.properties", "env.name=qa\n");
+    WriteFile(temp_dir / "config" / "report.properties", "# shared\n");
+    WriteFile(temp_dir / "config" / "qa.properties", "# qa\n");
 
     const ScopedCurrentPath scoped_path(temp_dir);
     const std::string config_path = report::DefaultConfigPath("qa");
@@ -331,7 +335,7 @@ void TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv()
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_unknown_env_test";
     std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir / "config");
-    WriteFile(temp_dir / "config" / "report.properties", "env.name=prod\n");
+    WriteFile(temp_dir / "config" / "report.properties", "# shared\n");
 
     const ScopedCurrentPath scoped_path(temp_dir);
     const std::string config_path = report::DefaultConfigPath("uat");
@@ -356,7 +360,6 @@ void TestVaultSecretReferenceDoesNotUseCurlCommand()
 
     std::ofstream output(config_path);
     output
-        << "env.name=qa\n"
         << "tds.drtp_endpoints=10.0.0.1:6003\n"
         << "tds.user=10000\n"
         << "tds.password=vault://tds/qa#password\n"
@@ -364,10 +367,12 @@ void TestVaultSecretReferenceDoesNotUseCurlCommand()
         << "vault.secret_engine=secret\n"
         << "smtp.host=mail.local\n"
         << "smtp.port=2587\n"
-        << "smtp.from=sender@example.com\n";
+        << "smtp.from=sender@example.com\n"
+        << "email.subject=QA Report\n";
     output.close();
 
     report::CliOptions cli;
+    cli.env = "qa";
     std::string error_message;
     try
     {
@@ -493,8 +498,6 @@ void TestCurlConfigWithClientCertificate()
     config.smtp.insecure = false;
     config.smtp.client_cert_path = "/app/.cert/server.pem";
     config.smtp.client_key_path = "/app/.cert/server.key";
-    config.smtp.client_cert_type = "PEM";
-    config.smtp.client_key_type = "PEM";
 
     const std::vector<report::CustomerFundRecord> records {
         {20260418, "1001", "Alpha Capital", "FA1001", 1000.5, 12.5, 800.0, 0.12, 0.15}
@@ -515,6 +518,7 @@ void TestCurlConfigWithClientCertificate()
     AssertContains(curl_config, "key-type = \"PEM\"", "curl key type");
     AssertContains(curl_config, "ssl-reqd", "curl starttls requirement");
     AssertTrue(curl_config.find("user = ") == std::string::npos, "smtp relay must not use basic auth");
+    AssertTrue(curl_config.find("pass = ") == std::string::npos, "smtp key passphrase must not be configured");
 }
 
 void TestVendorTextDecodingAndErrorFormatting()
@@ -600,7 +604,7 @@ int main()
     {
         TestParseCli();
         TestLoadConfig();
-        TestLoadConfigUsesFileEnvWhenCliEnvMissing();
+        TestLoadConfigRejectsMissingCliEnv();
         TestLoadConfigMergesSharedPropertiesAndEnvOverlay();
         TestLoadConfigParsesMultipleDrtpEndpoints();
         TestLoadConfigAppliesDrtpEndpointsCliOverride();

@@ -8,12 +8,16 @@ The package is environment-neutral.
 
 - `config/report.properties` holds the shared defaults
 - `config/dev.properties`, `config/qa.properties`, and `config/prod.properties` only hold environment-specific overrides
-- the SMTP section is maintained once in `report.properties`, not duplicated per environment
+- the runtime environment name is selected only by `--env`; properties files do not contain `env.name`
+- shared SMTP transport settings stay in `report.properties`
+- each environment file owns `smtp.from`, `email.default_to`, `email.default_cc`, and `email.subject`
+- `smtp.from` and `email.subject` are required after the environment overlay is loaded
 - SMTP relay authentication is certificate-only; there is no SMTP username/password configuration
+- SMTP client certificate and key type are fixed to PEM; encrypted private keys are not supported
 - the shared Vault settings are `vault.address`, `vault.namespace`, `vault.secret_engine`, and `vault.secret_key`
 - each environment file owns only its environment-specific `vault.secret_path`
 
-At runtime, `--env dev|qa|prod` loads `config/report.properties` first and then overlays `config/<env>.properties`.
+At runtime, `--env dev|qa|prod` loads `config/report.properties` first and then overlays `config/<env>.properties`. `--config` can point at a custom properties file, but it does not replace `--env`.
 
 Packaged runs must start with `bin/report --env <env>` and normally do not need `--config`.
 
