@@ -429,7 +429,17 @@ void TestMimeAndDryRun()
 
     const std::vector<report::CustomerFundRecord> records {
         {20260418, "1001", "Alpha Capital", "FA1001", 1000.5, 12.5, 800.0, 0.12, 0.15},
-        {20260418, "1002", "Beta Futures", "FA1002", 2000.5, -8.5, 1200.0, 0.08, 0.11}
+        {
+            20260418,
+            "1002",
+            "Beta &lt;td style=&quot;border:1px solid #29445d;&quot;&gt;Futures",
+            "FA1002",
+            2000.5,
+            -8.5,
+            1200.0,
+            0.08,
+            0.11
+        }
     };
     const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
 
@@ -448,12 +458,20 @@ void TestMimeAndDryRun()
     AssertContains(mime, "Beta Futures", "mime html body should contain every customer");
     AssertContains(
         mime,
-        u8"\u5BA2\u6237\u8D44\u91D1\u53CA\u98CE\u9669\u5EA6 Funding &amp; Risk ratio",
+        u8"\u5BA2\u6237\u8D44\u91D1\u53CA\u98CE\u9669\u5EA6 Funding &amp; Risk Ratio",
         "mime body section title");
     AssertContains(mime, u8"Total \u5408\u8BA1:", "mime body total row");
     AssertContains(mime, "1,000.50", "mime amount formatting");
     AssertContains(mime, "12.00%", "mime risk formatting");
     AssertContains(mime, "No Action Required", "mime threshold note");
+    AssertContains(mime, "white-space:nowrap", "mail table cells should avoid wrapping");
+    AssertContains(mime, "background:#2f75b5", "mail table header color");
+    AssertContains(mime, "background:#e2f0d9", "mail risk column color");
+    AssertContains(mime, "*Risk Ratio 2", "risk ratio 2 header");
+    AssertNotContains(mime, "{{", "mail template placeholders should be rendered");
+    AssertNotContains(mime, "BEGIN FUNDING", "mail template block markers should be removed");
+    AssertNotContains(mime, "&lt;td", "customer text should not show escaped html table tags");
+    AssertNotContains(mime, "style=&quot;border", "customer text should not show escaped html attributes");
 
     const report::SendMailResult result = report::SendMailWithCurl(request, config, true);
     AssertTrue(!result.sent, "dry run should not mark mail as sent");

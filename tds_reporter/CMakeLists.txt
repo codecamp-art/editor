@@ -211,6 +211,12 @@ install(
     DESTINATION config
 )
 
+install(
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/templates/client_funding_risk_report.html"
+    DESTINATION templates
+)
+
 install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/logs\")")
 
 add_custom_target(

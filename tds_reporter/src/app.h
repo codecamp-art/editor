@@ -68,6 +68,7 @@ struct AppConfig
 {
     std::string env_name = "dev";
     std::string email_subject;
+    std::string email_template_path;
     std::string attachment_name = "tds_customer_funds";
     std::string output_dir = "./output";
     std::vector<std::string> default_to;

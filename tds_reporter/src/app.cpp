@@ -409,6 +409,94 @@ std::string EscapeHtml(const std::string& value)
     return escaped;
 }
 
+void ReplaceAll(std::string& text, const std::string& from, const std::string& to)
+{
+    if (from.empty())
+    {
+        return;
+    }
+
+    std::size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos)
+    {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+std::string DecodeBasicHtmlEntities(std::string text)
+{
+    ReplaceAll(text, "&amp;", "&");
+    ReplaceAll(text, "&nbsp;", " ");
+    ReplaceAll(text, "&#160;", " ");
+    ReplaceAll(text, "&lt;", "<");
+    ReplaceAll(text, "&gt;", ">");
+    ReplaceAll(text, "&quot;", "\"");
+    ReplaceAll(text, "&#39;", "'");
+    ReplaceAll(text, "&apos;", "'");
+    return text;
+}
+
+std::string StripHtmlTags(const std::string& value)
+{
+    std::string stripped;
+    stripped.reserve(value.size());
+
+    for (std::size_t index = 0; index < value.size();)
+    {
+        if (value[index] == '<')
+        {
+            const std::size_t close = value.find('>', index + 1);
+            if (close != std::string::npos && close - index <= 512)
+            {
+                if (!stripped.empty() && stripped.back() != ' ')
+                {
+                    stripped += ' ';
+                }
+                index = close + 1;
+                continue;
+            }
+        }
+
+        stripped += value[index];
+        ++index;
+    }
+
+    return stripped;
+}
+
+std::string NormalizeCellText(const std::string& value)
+{
+    const std::string without_tags = StripHtmlTags(DecodeBasicHtmlEntities(value));
+
+    std::string normalized;
+    normalized.reserve(without_tags.size());
+    bool pending_space = false;
+
+    for (const unsigned char ch : without_tags)
+    {
+        if (std::isspace(ch) != 0)
+        {
+            pending_space = true;
+            continue;
+        }
+
+        if (pending_space && !normalized.empty())
+        {
+            normalized += ' ';
+        }
+        normalized += static_cast<char>(ch);
+        pending_space = false;
+    }
+
+    return Trim(normalized);
+}
+
+std::string EscapeCellText(const std::string& value)
+{
+    return EscapeHtml(NormalizeCellText(value));
+}
+
 std::string Base64Encode(const std::string& input)
 {
     static const char kAlphabet[] =
@@ -1184,6 +1272,105 @@ std::string FormatPercentage(double value)
     return InsertThousandsSeparators(output.str()) + "%";
 }
 
+constexpr const char* kDefaultEmailTemplateName = "client_funding_risk_report.html";
+
+std::string ReadTextFile(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open())
+    {
+        throw std::runtime_error("failed to open email template: " + path.string());
+    }
+
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
+}
+
+std::vector<std::filesystem::path> DefaultTemplateRoots()
+{
+    std::vector<std::filesystem::path> roots;
+    const std::filesystem::path executable_path = CurrentExecutablePath();
+    if (!executable_path.empty())
+    {
+        const std::filesystem::path executable_dir = executable_path.parent_path();
+        roots.push_back((executable_dir / ".." / "templates").lexically_normal());
+        roots.push_back((executable_dir / "templates").lexically_normal());
+        roots.push_back((executable_dir.parent_path() / "templates").lexically_normal());
+    }
+
+    roots.emplace_back("templates");
+    roots.emplace_back(std::filesystem::path("..") / "templates");
+    return roots;
+}
+
+std::filesystem::path ResolveEmailTemplatePath(const AppConfig& config)
+{
+    if (!config.email_template_path.empty())
+    {
+        return std::filesystem::absolute(config.email_template_path);
+    }
+
+    for (const std::filesystem::path& root : DefaultTemplateRoots())
+    {
+        const std::filesystem::path candidate = root / kDefaultEmailTemplateName;
+        if (std::filesystem::exists(candidate))
+        {
+            return std::filesystem::absolute(candidate);
+        }
+    }
+
+    throw std::runtime_error(
+        std::string("failed to locate email template: ") + kDefaultEmailTemplateName);
+}
+
+std::string LoadEmailTemplate(const AppConfig& config)
+{
+    return ReadTextFile(ResolveEmailTemplatePath(config));
+}
+
+void ReplaceTemplateValue(std::string& text, const std::string& key, const std::string& value)
+{
+    ReplaceAll(text, "{{" + key + "}}", value);
+}
+
+std::string RenderTemplateFragment(
+    std::string template_text,
+    const std::vector<std::pair<std::string, std::string>>& values)
+{
+    for (const auto& [key, value] : values)
+    {
+        ReplaceTemplateValue(template_text, key, value);
+    }
+    return template_text;
+}
+
+std::string ExtractTemplateBlock(
+    std::string& template_text,
+    const std::string& block_name,
+    const std::string& replacement)
+{
+    const std::string begin_marker = "<!-- BEGIN " + block_name + " -->";
+    const std::string end_marker = "<!-- END " + block_name + " -->";
+    const std::size_t begin = template_text.find(begin_marker);
+    if (begin == std::string::npos)
+    {
+        throw std::runtime_error("email template missing block: " + block_name);
+    }
+
+    const std::size_t content_begin = begin + begin_marker.size();
+    const std::size_t end = template_text.find(end_marker, content_begin);
+    if (end == std::string::npos)
+    {
+        throw std::runtime_error("email template missing end block: " + block_name);
+    }
+
+    const std::size_t replace_end = end + end_marker.size();
+    const std::string block = template_text.substr(content_begin, end - content_begin);
+    template_text.replace(begin, replace_end - begin, replacement);
+    return block;
+}
+
 std::string BuildReportTitle(const AppConfig& config, int trade_date)
 {
     return config.email_subject + " - Market Close " + std::to_string(trade_date);
@@ -1249,137 +1436,60 @@ std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const 
     }
 
     const std::string report_title = BuildReportTitle(config, trade_date);
-
-    std::ostringstream output;
-    output << "<html><body style=\"margin:0;padding:18px 28px;font-family:Calibri,Arial,sans-serif;"
-              "font-size:14px;line-height:1.35;color:#111;\">";
-    output << "<div style=\"max-width:768px;\">";
-    output << "<p style=\"margin:0 0 22px 0;font-size:16px;font-weight:700;\">"
-           << EscapeHtml(report_title) << "</p>";
+    std::string summary_text;
 
     if (issue_count == 0)
     {
-        output << "<p style=\"margin:0 0 22px 0;font-size:15px;\">"
-               << "As of 15:00 of T Day, no client funding and risk ratio issues identified from Risk Management."
-               << "</p>";
+        summary_text = "As of 15:00 of T Day, no client funding and risk ratio issues identified from Risk Management.";
     }
     else
     {
-        output << "<p style=\"margin:0 0 22px 0;font-size:15px;\">"
-               << "As of 15:00 of T Day, "
-               << issue_count
-               << " client funding and risk ratio issue(s) identified from Risk Management."
-               << "</p>";
+        std::ostringstream summary;
+        summary << "As of 15:00 of T Day, "
+                << issue_count
+                << " client funding and risk ratio issue(s) identified from Risk Management.";
+        summary_text = summary.str();
     }
 
-    output << "<p style=\"margin:0 0 8px 0;font-size:16px;font-weight:700;\">"
-           << u8"\u5BA2\u6237\u8D44\u91D1\u53CA\u98CE\u9669\u5EA6 Funding &amp; Risk ratio"
-           << "</p>";
-    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:768px;max-width:100%;border-collapse:collapse;"
-              "border:1px solid #29445d;table-layout:fixed;\">";
-    output << "<tr style=\"background:#0f4f8a;color:#fff;font-weight:700;text-align:center;\">"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:12%;font-size:13px;\">"
-           << u8"\u5BA2\u6237\u53F7"
-           << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:16%;font-size:13px;\">"
-           << u8"\u5BA2\u6237\u540D\u79F0"
-           << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:14%;font-size:13px;\">"
-           << u8"\u5BA2\u6237\u6743\u76CA"
-           << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:14%;font-size:13px;\">"
-           << u8"\u6D6E\u52A8\u76C8\u4E8F"
-           << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:18%;font-size:13px;\">"
-           << u8"\u53EF\u7528\u8D44\u91D1"
-           << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:13%;font-size:13px;\">"
-           << u8"*\u98CE\u9669\u5EA6 1"
-           << "</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;width:13%;font-size:13px;\">"
-           << u8"*\u98CE\u9669\u5EA6 2"
-           << "</th>"
-           << "</tr>";
-    output << "<tr style=\"background:#0f4f8a;color:#fff;font-weight:700;text-align:center;\">"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Account</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Client</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Total Equity</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">MTM PnL</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">Available Funds</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">*Risk Ratio 1</th>"
-           << "<th style=\"border:1px solid #29445d;padding:8px 6px;font-size:13px;\">*Risk Ratio 2</th>"
-           << "</tr>";
-    output << "<tr style=\"background:#ffffff;\">"
-           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;font-weight:700;\">"
-           << u8"Total \u5408\u8BA1:"
-           << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;\">&nbsp;</td>"
-           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
-           << FormatAmount(total_dyn_rights) << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
-           << FormatAmount(total_hold_profit) << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
-           << FormatAmount(total_avail_fund) << "</td>"
-           << "<td style=\"border:1px solid #29445d;padding:7px 8px;background:#dfe9d9;\">&nbsp;</td>"
-           << "<td style=\"border:1px solid #29445d;padding:7px 8px;background:#dfe9d9;\">&nbsp;</td>"
-           << "</tr>";
+    std::string template_html = LoadEmailTemplate(config);
+    const std::string total_row_template =
+        ExtractTemplateBlock(template_html, "FUNDING_TOTAL_ROW", "{{FUNDING_TOTAL_ROW}}");
+    const std::string data_row_template =
+        ExtractTemplateBlock(template_html, "FUNDING_DATA_ROW", "{{FUNDING_DATA_ROWS}}");
 
+    const std::string total_row_html = RenderTemplateFragment(
+        total_row_template,
+        {
+            {"TOTAL_LABEL", EscapeHtml(u8"Total \u5408\u8BA1:")},
+            {"TOTAL_EQUITY", FormatAmount(total_dyn_rights)},
+            {"TOTAL_MTM_PNL", FormatAmount(total_hold_profit)},
+            {"TOTAL_AVAILABLE_FUNDS", FormatAmount(total_avail_fund)}
+        });
+
+    std::ostringstream data_rows_html;
     for (const MailReportRow& row : rows)
     {
-        output << "<tr style=\"background:#ffffff;\">"
-               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;\">"
-               << EscapeHtml(row.cust_no) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;\">"
-               << EscapeHtml(row.cust_name) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
-               << FormatAmount(row.total_equity) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
-               << FormatAmount(row.mtm_pnl) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;\">"
-               << FormatAmount(row.available_funds) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;background:#dfe9d9;\">"
-               << FormatPercentage(row.risk_ratio1) << "</td>"
-               << "<td style=\"border:1px solid #29445d;padding:7px 8px;font-size:13px;text-align:right;background:#dfe9d9;\">"
-               << FormatPercentage(row.risk_ratio2) << "</td>"
-               << "</tr>";
+        data_rows_html << RenderTemplateFragment(
+            data_row_template,
+            {
+                {"ACCOUNT", EscapeCellText(row.cust_no)},
+                {"CLIENT", EscapeCellText(row.cust_name)},
+                {"TOTAL_EQUITY", FormatAmount(row.total_equity)},
+                {"MTM_PNL", FormatAmount(row.mtm_pnl)},
+                {"AVAILABLE_FUNDS", FormatAmount(row.available_funds)},
+                {"RISK_RATIO_1", FormatPercentage(row.risk_ratio1)},
+                {"RISK_RATIO_2", FormatPercentage(row.risk_ratio2)}
+            });
     }
 
-    output << "</table>";
-    output << "<div style=\"margin-top:32px;max-width:360px;\">";
-    output << "<p style=\"margin:0 0 8px 0;font-size:14px;font-weight:700;\">"
-           << "*Note: Risk ratio escalation threshold"
-           << "</p>";
-    output << "<table cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;min-width:360px;\">";
-    output << "<tr>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#dcead2;font-size:12px;font-weight:700;\">No Action Required</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#dcead2;font-size:12px;font-weight:700;\">&lt;70%</td>"
-           << "</tr>";
-    output << "<tr>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#f1d54d;font-size:12px;font-weight:700;\">Alert</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#f1d54d;font-size:12px;font-weight:700;\">&gt;70%</td>"
-           << "</tr>";
-    output << "<tr>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#d8a06c;font-size:12px;font-weight:700;\">Official Margin Call</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#d8a06c;font-size:12px;font-weight:700;\">&gt;80%</td>"
-           << "</tr>";
-    output << "<tr>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#c41212;color:#111;font-size:12px;font-weight:700;\">Final Official Margin</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 1</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#c41212;color:#111;font-size:12px;font-weight:700;\">&gt;100%</td>"
-           << "</tr>";
-    output << "<tr>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#3b0202;color:#fff;font-size:12px;font-weight:700;\">Forced Liquidation</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#ffffff;font-size:12px;\">Risk ratio 2</td>"
-           << "<td style=\"padding:5px 10px;border:1px solid #666;background:#3b0202;color:#fff;font-size:12px;font-weight:700;\">&gt;100%</td>"
-           << "</tr>";
-    output << "</table>";
-    output << "</div>";
-    output << "</div>";
-    output << "</body></html>";
-    return output.str();
+    return RenderTemplateFragment(
+        template_html,
+        {
+            {"REPORT_TITLE", EscapeHtml(report_title)},
+            {"SUMMARY_TEXT", EscapeHtml(summary_text)},
+            {"FUNDING_TOTAL_ROW", total_row_html},
+            {"FUNDING_DATA_ROWS", data_rows_html.str()}
+        });
 }
 
 } // namespace
@@ -1550,6 +1660,8 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
 
     config.env_name = cli.env;
     config.email_subject = GetRequiredValue(properties, "email.subject");
+    config.email_template_path =
+        ResolveConfigRelativePath(config_dir, GetValue(properties, "email.template_path"));
     config.attachment_name = GetValue(properties, "report.attachment_name", config.attachment_name);
     config.output_dir = cli.output_dir.empty()
         ? ResolveConfigRelativePath(config_dir, GetValue(properties, "report.output_dir", config.output_dir))
