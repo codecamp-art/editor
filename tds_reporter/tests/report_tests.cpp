@@ -454,6 +454,11 @@ void TestMimeAndDryRun()
         "Subject: Test Client Funding and Risk Ratio Report - Market Close 20260418",
         "mime subject");
     AssertContains(mime, "Content-Disposition: attachment;", "mime attachment");
+    AssertContains(mime, ">Hello Team,</p>", "mime html greeting");
+    AssertNotContains(
+        mime,
+        "<p style=\"margin:0 0 14px 0;font-size:12px;font-weight:700;\">Test Client Funding",
+        "mime body should not repeat the report title");
     AssertContains(mime, "Alpha Capital", "mime html body");
     AssertContains(mime, "Beta Futures", "mime html body should contain every customer");
     AssertContains(
@@ -464,6 +469,9 @@ void TestMimeAndDryRun()
     AssertContains(mime, "1,000.50", "mime amount formatting");
     AssertContains(mime, "12.00%", "mime risk formatting");
     AssertContains(mime, "No Action Required", "mime threshold note");
+    AssertContains(mime, "font-size:11px", "mail body font size");
+    AssertContains(mime, "font-size:10px", "mail table font size");
+    AssertContains(mime, "width:920px", "main mail table width");
     AssertContains(mime, "white-space:nowrap", "mail table cells should avoid wrapping");
     AssertContains(mime, "background:#2f75b5", "mail table header color");
     AssertContains(mime, "background:#e2f0d9", "mail risk column color");

@@ -91,6 +91,7 @@ endif()
 
 set(TDS_LIBRARY_DIR "")
 set(TDS_INSTALL_FILES "")
+set(TDS_BIN_INSTALL_FILES "")
 set(TDS_INSTALL_DESTINATION "")
 set(REPORT_COPY_TDS_TO_BINARY_DIR OFF)
 set(REPORT_HAS_VENDOR_API OFF)
@@ -133,7 +134,8 @@ elseif(UNIX)
     endif()
 
     get_filename_component(TDS_LIBRARY_DIR "${TDS_LINUX_LIBRARY}" DIRECTORY)
-    set(TDS_INSTALL_FILES "${TDS_LINUX_LIBRARY}" "${TDS_LINUX_CPACK}")
+    set(TDS_INSTALL_FILES "${TDS_LINUX_LIBRARY}")
+    set(TDS_BIN_INSTALL_FILES "${TDS_LINUX_CPACK}")
     target_link_libraries(report_lib PRIVATE "${TDS_LINUX_LIBRARY}")
     set(REPORT_HAS_VENDOR_API ON)
     message(STATUS "Linux build will enable live TDS calls from ${TDS_LINUX_DIR}")
@@ -170,6 +172,10 @@ if(TDS_INSTALL_FILES)
     list(REMOVE_DUPLICATES TDS_INSTALL_FILES)
 endif()
 
+if(TDS_BIN_INSTALL_FILES)
+    list(REMOVE_DUPLICATES TDS_BIN_INSTALL_FILES)
+endif()
+
 if(REPORT_COPY_TDS_TO_BINARY_DIR AND TDS_INSTALL_FILES)
     foreach(TDS_FILE IN LISTS TDS_INSTALL_FILES)
         add_custom_command(
@@ -199,6 +205,13 @@ if(TDS_INSTALL_FILES)
     install(
         FILES ${TDS_INSTALL_FILES}
         DESTINATION "${TDS_INSTALL_DESTINATION}"
+    )
+endif()
+
+if(TDS_BIN_INSTALL_FILES)
+    install(
+        FILES ${TDS_BIN_INSTALL_FILES}
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
     )
 endif()
 
