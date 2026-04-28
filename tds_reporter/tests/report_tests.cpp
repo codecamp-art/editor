@@ -456,6 +456,8 @@ void TestMimeAndDryRun()
     AssertContains(mime, "Content-Disposition: attachment;", "mime attachment");
     AssertContains(mime, ">Hello Team,</p>", "mime html greeting");
     AssertNotContains(mime, ">Test Client Funding", "mime body should not repeat the report title");
+    AssertContains(mime, "As of ", "mime summary should include report time");
+    AssertContains(mime, " of T Day,", "mime summary should use T Day wording");
     AssertContains(mime, "Alpha Capital", "mime html body");
     AssertContains(mime, "Beta Futures", "mime html body should contain every customer");
     AssertContains(
@@ -481,6 +483,10 @@ void TestMimeAndDryRun()
     AssertNotContains(mime, "BEGIN FUNDING", "mail template block markers should be removed");
     AssertNotContains(mime, "&lt;td", "customer text should not show escaped html table tags");
     AssertNotContains(mime, "style=&quot;border", "customer text should not show escaped html attributes");
+    AssertNotContains(
+        ReadFile(std::filesystem::path("src") / "app.cpp"),
+        "As of 15:00 of T Day",
+        "email summary time should not be hardcoded");
 
     const report::SendMailResult result = report::SendMailWithCurl(request, config, true);
     AssertTrue(!result.sent, "dry run should not mark mail as sent");

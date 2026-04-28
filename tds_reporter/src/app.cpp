@@ -332,6 +332,22 @@ std::string CurrentTimestamp()
     return output.str();
 }
 
+std::string CurrentLocalTimeOfDay()
+{
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+    std::tm time_info {};
+#ifdef _WIN32
+    localtime_s(&time_info, &now_time);
+#else
+    localtime_r(&now_time, &time_info);
+#endif
+
+    std::ostringstream output;
+    output << std::put_time(&time_info, "%H:%M");
+    return output.str();
+}
+
 std::string FormatDouble(double value)
 {
     std::ostringstream output;
@@ -1436,16 +1452,19 @@ std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const 
     }
 
     const std::string report_title = BuildReportTitle(config, trade_date);
+    const std::string report_time = CurrentLocalTimeOfDay();
     std::string summary_text;
 
     if (issue_count == 0)
     {
-        summary_text = "As of 15:00 of T Day, no client funding and risk ratio issues identified from Risk Management.";
+        summary_text =
+            "As of " + report_time +
+            " of T Day, no client funding and risk ratio issues identified from Risk Management.";
     }
     else
     {
         std::ostringstream summary;
-        summary << "As of 15:00 of T Day, "
+        summary << "As of " << report_time << " of T Day, "
                 << issue_count
                 << " client funding and risk ratio issue(s) identified from Risk Management.";
         summary_text = summary.str();
