@@ -1,6 +1,6 @@
 # Copy this file to either:
-#   ./tds-sdk.properties
-#   ~/.tds_reporter/tds-sdk.properties
+#   ./tds.properties
+#   ~/.tds/tds.properties
 #
 # The local file is intentionally gitignored because it may contain credentials.
 
@@ -24,4 +24,3 @@ tds.sdk.token=REPLACE_WITH_TOKEN
 # tds.sdk.auth=cert
 # tds.sdk.certFile=/path/to/artifactory-client.pem
 # tds.sdk.keyFile=/path/to/artifactory-client.key
-# tds.sdk.certType=PEM

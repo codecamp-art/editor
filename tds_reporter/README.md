@@ -145,8 +145,9 @@ tds/
 
 Local credential/config files:
 
-- copy `tds-sdk.properties.example` to `tds-sdk.properties` in this directory, or to `~/.tds_reporter/tds-sdk.properties`
-- `tds-sdk.properties` is gitignored and may contain local Artifactory token or certificate/key paths
+- copy `tds.properties.example` to `tds.properties` in this directory, or to `~/.tds/tds.properties`
+- on Windows, `~/.tds/tds.properties` resolves to `%USERPROFILE%\.tds\tds.properties`, for example `C:\Users\<user>\.tds\tds.properties`
+- `tds.properties` is gitignored and may contain local Artifactory token or certificate/key paths
 - `TDS_SDK_PROPERTIES_FILE` may point at a different properties file
 - CMake also accepts non-secret overrides such as `-DTDS_SDK_URL=...`, `-DTDS_SDK_AUTH=...`, `-DTDS_SDK_CERT_FILE=...`, and `-DTDS_SDK_KEY_FILE=...`
 
@@ -182,7 +183,6 @@ tds.sdk.url=https://artifactory.example.com/artifactory/vendor/tds_sdk.zip
 tds.sdk.auth=cert
 tds.sdk.certFile=/path/to/artifactory-client.pem
 tds.sdk.keyFile=/path/to/artifactory-client.key
-tds.sdk.certType=PEM
 ```
 
 The standalone preparation command is:
@@ -221,7 +221,7 @@ The application does not read or require `kerberos_realm`, `keytab_path`, `krb5c
 
 ## RHEL8 Local
 
-After configuring Artifactory access in `tds-sdk.properties`:
+After configuring Artifactory access in `tds.properties`:
 
 Install the build tools once if the machine does not already have them:
 
@@ -284,11 +284,12 @@ Fixed Jenkins integration config:
 
 - `jenkins/report_common.groovy` owns the fixed Artifactory TDS package URL
 - the same helper owns the fixed Artifactory certificate/key paths and separate PR/Release Vault settings
+- set Jenkins certificate paths by replacing `ARTIFACTORY_CERT_FILE` and `ARTIFACTORY_KEY_FILE` in `fixedIntegrationConfig`; both values should be absolute paths on the Jenkins RHEL8 agent
 - these values are not Jenkins UI parameters; update the helper only when Vault locations or the curated TDS package URL changes
 - placeholder values beginning with `REPLACE_ME_` fail fast before Vault or Artifactory access
 - `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it selects the runtime `--env`, not package download credentials
 - Vault token is kept out of Jenkins environment variables and `curl` argv; Vault HTTP login uses a temporary `curl --config` file with mode `600`
-- Artifactory download is delegated to `cmake/PrepareTdsSdk.cmake`, which uses the fixed local certificate/key through a temporary `curl --config` file
+- Artifactory download is delegated to `cmake/PrepareTdsSdk.cmake`, which uses the fixed local certificate/key through a temporary `curl --config` file and hard-coded PEM cert type
 - the TDS package must not be password-protected; Artifactory mTLS controls download access
 
 Jenkins helper flow:

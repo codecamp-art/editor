@@ -72,8 +72,7 @@ Map fixedIntegrationConfig(String pipelineName) {
     TDS_PACKAGE_URL: 'REPLACE_ME_TDS_PACKAGE_URL',
     ARTIFACTORY_CERT_FILE: 'REPLACE_ME_ARTIFACTORY_CERT_FILE',
     ARTIFACTORY_KEY_FILE: 'REPLACE_ME_ARTIFACTORY_KEY_FILE',
-    CURL_BIN: 'curl',
-    ARTIFACTORY_CERT_TYPE: 'PEM'
+    CURL_BIN: 'curl'
   ]
 
   Map pr = [
@@ -241,7 +240,6 @@ void prepareTdsPackage(Map args) {
       -DTDS_SDK_URL=${shellQuote(pipelineParams.TDS_PACKAGE_URL.trim())} \\
       -DTDS_SDK_CERT_FILE=${shellQuote(artifactoryCertFile)} \\
       -DTDS_SDK_KEY_FILE=${shellQuote(artifactoryKeyFile)} \\
-      -DTDS_SDK_CERT_TYPE=${shellQuote(pipelineParams.ARTIFACTORY_CERT_TYPE?.trim() ?: 'PEM')} \\
       -DTDS_SDK_CURL_BIN=${shellQuote(pipelineParams.CURL_BIN?.trim() ?: 'curl')} \\
       -P ${shellQuote("${env.PROJECT_DIR}/cmake/PrepareTdsSdk.cmake")}
 
