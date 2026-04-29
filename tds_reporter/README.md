@@ -1,6 +1,6 @@
 # Report
 
-`report` is a standalone C++17 program that reads the TDS snapshot, writes a CSV report, and sends mail through `curl`.
+`report` is a standalone C++17 program that reads the TDS snapshot and sends an HTML mail through `curl`.
 
 ## Config Model
 
@@ -20,6 +20,7 @@ The package is environment-neutral.
 At runtime, `--env dev|qa|prod` loads `config/report.properties` first and then overlays `config/<env>.properties`. `--config` can point at a custom properties file, but it does not replace `--env`.
 
 Packaged runs must start with `bin/report --env <env>` and normally do not need `--config`.
+Airflow scheduled runs should pass `--report-time HH:MM` so the email body uses the DAG schedule time, for example `--report-time 08:30` or `--report-time 15:30`.
 
 Vault layout:
 
@@ -82,7 +83,7 @@ To switch environment, run with another `--env` value:
 
 Windows local build is for debugging only. It is Win32/x86 only because the supplier currently provides only 32-bit `dll/lib` files.
 
-Windows local testing can connect to DRTP and generate the CSV/mail preview, but real SMTP delivery is not supported locally. Always run Windows local tests with `--dry-run`.
+Windows local testing can connect to DRTP and generate the mail preview, but real SMTP delivery is not supported locally. Always run Windows local tests with `--dry-run`.
 
 The current Windows PowerShell environment on this machine does not have `cmake` on `PATH`.
 

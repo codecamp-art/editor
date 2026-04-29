@@ -156,11 +156,7 @@
 - `smtp.client_key_type`
 - `smtp.client_key_password`
 
-### 2. CSV 生成
-
-`WriteCsvReport` 会把客户资金快照导出成 CSV 文件。
-
-### 3. 邮件正文
+### 2. 邮件正文
 
 `BuildHtmlBody` 会生成 HTML 邮件正文。
 
@@ -169,7 +165,7 @@
 - 邮件正文显示全部客户
 - 不再只截取前 10 个客户
 
-### 4. SMTP 配置生成
+### 3. SMTP 配置生成
 
 `BuildCurlConfig` 会给 `curl --config` 生成配置文件。
 
@@ -186,7 +182,7 @@
 
 - `pass = "..."`
 
-### 5. 发信和 dry-run
+### 4. 发信和 dry-run
 
 `SendMailWithCurl` 的行为分两种：
 

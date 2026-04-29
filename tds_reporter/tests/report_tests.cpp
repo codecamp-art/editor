@@ -82,7 +82,6 @@ report::AppConfig BuildTestConfig(const std::filesystem::path& output_dir)
     report::AppConfig config;
     config.env_name = "test";
     config.email_subject = "Test Client Funding and Risk Ratio Report";
-    config.attachment_name = "fund_snapshot";
     config.output_dir = output_dir.string();
     config.default_to = {"ops@example.com"};
     config.default_cc = {"cc@example.com"};
@@ -122,7 +121,9 @@ void TestParseCli()
         "10.1.1.1:7001,10.1.1.2:7002",
         "--dry-run",
         "--trade-date",
-        "20260419"
+        "20260419",
+        "--report-time",
+        "08:30"
     };
 
     const report::CliOptions options =
@@ -135,6 +136,7 @@ void TestParseCli()
     AssertTrue(options.drtp_endpoints == "10.1.1.1:7001,10.1.1.2:7002", "expected drtp endpoints override");
     AssertTrue(options.dry_run, "expected dry_run=true");
     AssertTrue(options.trade_date_override == 20260419, "expected trade date override");
+    AssertTrue(options.report_time == "08:30", "expected report time override");
 }
 
 void TestLoadConfig()
@@ -395,7 +397,7 @@ void TestVaultSecretReferenceDoesNotUseCurlCommand()
     AssertNotContains(app_source, "curl --negotiate", "Vault runtime must use C++ libcurl instead of curl CLI");
 }
 
-void TestStubClientAndCsv()
+void TestStubClient()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_output_test";
     std::filesystem::create_directories(output_dir);
@@ -413,12 +415,7 @@ void TestStubClientAndCsv()
     AssertTrue(trade_date == 20260418, "stub trade date should come from csv");
     AssertTrue(records.size() == 1, "filter should keep exactly one row");
     AssertTrue(records.front().cust_name == "Alpha Capital", "unexpected customer name");
-
-    const std::string csv_path = report::WriteCsvReport(records, config, trade_date);
-    const std::string csv_content = ReadFile(csv_path);
-    AssertContains(csv_content, "cust_no", "csv header");
-    AssertContains(csv_content, "1001", "csv row");
-    AssertContains(csv_content, "Alpha Capital", "csv customer name");
+    AssertTrue(records.front().risk_degree1 == 0.12, "stub risk ratio 1 should be parsed");
 }
 
 void TestMimeAndDryRun()
@@ -437,26 +434,41 @@ void TestMimeAndDryRun()
             2000.5,
             -8.5,
             1200.0,
-            0.08,
+            0.75,
             0.11
+        },
+        {20260418, "1003", "Gamma Futures", "FA1003", 3000.5, 0.0, 2400.0, 0.85, 0.20},
+        {
+            20260418,
+            "1004",
+            "Delta Futures",
+            "FA1004",
+            4000.5,
+            0.0,
+            3200.0,
+            1.01,
+            1.05
         }
     };
-    const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
 
     report::CliOptions cli;
     cli.to = {"dest@example.com"};
+    cli.report_time = "08:30";
     const report::MailRequest request =
-        report::BuildMailRequest(records, config, cli, 20260418, csv_path);
+        report::BuildMailRequest(records, config, cli, 20260418);
     const std::string mime = report::BuildMimeMessage(request);
 
     AssertContains(
         mime,
         "Subject: Test Client Funding and Risk Ratio Report - Market Close 20260418",
         "mime subject");
-    AssertContains(mime, "Content-Disposition: attachment;", "mime attachment");
+    AssertContains(mime, "Content-Type: text/html; charset=\"utf-8\"", "mime html content type");
+    AssertNotContains(mime, "Content-Disposition: attachment;", "mime should not include attachments");
+    AssertNotContains(mime, "Content-Type: text/csv", "mime should not include csv content");
+    AssertNotContains(mime, "multipart/mixed", "mime should not use mixed multipart without attachments");
     AssertContains(mime, ">Hello Team,</p>", "mime html greeting");
     AssertNotContains(mime, ">Test Client Funding", "mime body should not repeat the report title");
-    AssertContains(mime, "As of ", "mime summary should include report time");
+    AssertContains(mime, "As of 08:30 of T Day,", "mime summary should use supplied report time");
     AssertContains(mime, " of T Day,", "mime summary should use T Day wording");
     AssertContains(mime, "Alpha Capital", "mime html body");
     AssertContains(mime, "Beta Futures", "mime html body should contain every customer");
@@ -478,6 +490,10 @@ void TestMimeAndDryRun()
     AssertContains(mime, "white-space:nowrap", "mail table cells should avoid wrapping");
     AssertContains(mime, "background:#2f75b5", "mail table header color");
     AssertContains(mime, "background:#e2f0d9", "mail risk column color");
+    AssertContains(mime, "background:#ffd966;color:#111111;\">75.00%", "risk ratio 1 alert color");
+    AssertContains(mime, "background:#f4b183;color:#111111;\">85.00%", "risk ratio 1 margin call color");
+    AssertContains(mime, "background:#ff0000;color:#111111;\">101.00%", "risk ratio 1 final margin color");
+    AssertContains(mime, "background:#843c0c;color:#ffffff;\">105.00%", "risk ratio 2 forced liquidation color");
     AssertContains(mime, "*Risk Ratio 2", "risk ratio 2 header");
     AssertNotContains(mime, "{{", "mail template placeholders should be rendered");
     AssertNotContains(mime, "BEGIN FUNDING", "mail template block markers should be removed");
@@ -493,7 +509,7 @@ void TestMimeAndDryRun()
     AssertTrue(std::filesystem::exists(result.preview_path), "dry run preview should exist");
 }
 
-void TestDecodedVendorTextFlowsToCsvAndEmail()
+void TestDecodedVendorTextFlowsToEmail()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_gbk_output_test";
     std::filesystem::create_directories(output_dir);
@@ -503,22 +519,16 @@ void TestDecodedVendorTextFlowsToCsvAndEmail()
     const std::vector<report::CustomerFundRecord> records {
         {20260418, "1001", customer_name, "FA1001", 1000.5, 12.5, 800.0, 0.12, 0.15}
     };
-    const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
-    const std::string csv_content = ReadFile(csv_path);
 
     report::CliOptions cli;
     cli.to = {"dest@example.com"};
     const report::MailRequest request =
-        report::BuildMailRequest(records, config, cli, 20260418, csv_path);
+        report::BuildMailRequest(records, config, cli, 20260418);
     const std::string mime = report::BuildMimeMessage(request);
 
     AssertTrue(customer_name == u8"\u4E0A\u6D77\u5BA2\u6237", "GBK customer name should decode to UTF-8");
-    AssertContains(csv_content, u8"\u4E0A\u6D77\u5BA2\u6237", "csv should contain UTF-8 customer name");
     AssertContains(mime, u8"\u4E0A\u6D77\u5BA2\u6237", "email body should contain UTF-8 customer name");
-    AssertContains(
-        mime,
-        "Content-Type: text/csv; charset=\"utf-8\";",
-        "csv attachment should declare UTF-8");
+    AssertNotContains(mime, "Content-Type: text/csv", "email should not include csv attachment");
 }
 
 void TestCurlConfigWithClientCertificate()
@@ -536,12 +546,11 @@ void TestCurlConfigWithClientCertificate()
     const std::vector<report::CustomerFundRecord> records {
         {20260418, "1001", "Alpha Capital", "FA1001", 1000.5, 12.5, 800.0, 0.12, 0.15}
     };
-    const std::string csv_path = report::WriteCsvReport(records, config, 20260418);
 
     report::CliOptions cli;
     cli.to = {"dest@example.com"};
     const report::MailRequest request =
-        report::BuildMailRequest(records, config, cli, 20260418, csv_path);
+        report::BuildMailRequest(records, config, cli, 20260418);
     const std::string curl_config =
         report::BuildCurlConfig(request, config, "D:/mail/message.eml");
 
@@ -651,9 +660,9 @@ int main()
         TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv();
         TestDefaultConfigPathRejectsMissingEnv();
         TestVaultSecretReferenceDoesNotUseCurlCommand();
-        TestStubClientAndCsv();
+        TestStubClient();
         TestMimeAndDryRun();
-        TestDecodedVendorTextFlowsToCsvAndEmail();
+        TestDecodedVendorTextFlowsToEmail();
         TestCurlConfigWithClientCertificate();
         TestVendorTextDecodingAndErrorFormatting();
         TestNoMoreDataDetection();

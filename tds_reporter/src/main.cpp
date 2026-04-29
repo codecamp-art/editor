@@ -14,7 +14,7 @@ void PrintUsage()
         << "  report --env dev|qa|prod [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
         << "               [--drtp-endpoints host1:port1,host2:port2]\n"
         << "               [--cust-list 1001,1002] [--output-dir path] [--trade-date YYYYMMDD]\n"
-        << "               [--dry-run] [--stub-file path]\n\n"
+        << "               [--report-time HH:MM] [--dry-run] [--stub-file path]\n\n"
         << "Notes:\n"
         << "  --stub-file lets you debug without a local supplier TDS runtime.\n"
         << "  Windows local builds can read DRTP with win32 supplier files, but must use --dry-run.\n"
@@ -22,6 +22,7 @@ void PrintUsage()
         << "  --drtp-endpoints temporarily overrides all configured DRTP access points.\n"
         << "  All runs require --env; packaged runs auto-discover config beside the executable.\n"
         << "  --config only changes which config file is loaded; it does not select the environment.\n"
+        << "  --report-time sets the As of HH:MM text, usually from the Airflow schedule time.\n"
         << "  --dry-run writes an .eml preview instead of calling curl SMTP.\n";
 }
 
@@ -92,16 +93,15 @@ int main(int argc, char** argv)
                 {"unique_customers", std::to_string(CountUniqueCustomers(records))}
             });
 
-        const std::string report_path = report::WriteCsvReport(records, config, trade_date);
         const report::MailRequest mail_request =
-            report::BuildMailRequest(records, config, cli, trade_date, report_path);
+            report::BuildMailRequest(records, config, cli, trade_date);
         const report::SendMailResult mail_result =
             report::SendMailWithCurl(mail_request, config, cli.dry_run);
 
         const std::size_t unique_customers = CountUniqueCustomers(records);
         if (mail_result.sent)
         {
-            report::LogInfo("mail_sent", "SMTP message sent", {{"csv_report", report_path}});
+            report::LogInfo("mail_sent", "SMTP message sent");
         }
         else
         {
@@ -109,7 +109,6 @@ int main(int argc, char** argv)
                 "mail_dry_run",
                 "Dry-run mail preview generated",
                 {
-                    {"csv_report", report_path},
                     {"preview_file", mail_result.preview_path}
                 });
         }
@@ -120,7 +119,6 @@ int main(int argc, char** argv)
                 {"trade_date", std::to_string(trade_date)},
                 {"snapshot_rows", std::to_string(records.size())},
                 {"unique_customers", std::to_string(unique_customers)},
-                {"csv_report", report_path},
                 {"email_status", mail_result.sent ? "sent" : "dry-run preview generated"},
                 {"preview_file", mail_result.preview_path}
             });

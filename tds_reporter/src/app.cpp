@@ -202,6 +202,31 @@ std::string ParseLogLevelValue(const std::string& raw)
     throw std::runtime_error("invalid log.level: " + raw);
 }
 
+std::string ParseReportTimeValue(const std::string& raw)
+{
+    const std::string value = Trim(raw);
+    const bool valid_shape =
+        value.size() == 5 &&
+        std::isdigit(static_cast<unsigned char>(value[0])) != 0 &&
+        std::isdigit(static_cast<unsigned char>(value[1])) != 0 &&
+        value[2] == ':' &&
+        std::isdigit(static_cast<unsigned char>(value[3])) != 0 &&
+        std::isdigit(static_cast<unsigned char>(value[4])) != 0;
+    if (!valid_shape)
+    {
+        throw std::runtime_error("invalid --report-time; expected HH:MM");
+    }
+
+    const int hour = ParseIntValue(value.substr(0, 2), "--report-time hour");
+    const int minute = ParseIntValue(value.substr(3, 2), "--report-time minute");
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59)
+    {
+        throw std::runtime_error("invalid --report-time; expected HH:MM in 00:00-23:59");
+    }
+
+    return value;
+}
+
 std::vector<std::string> SplitDelimitedList(const std::string& raw)
 {
     std::vector<std::string> values;
@@ -346,50 +371,6 @@ std::string CurrentLocalTimeOfDay()
     std::ostringstream output;
     output << std::put_time(&time_info, "%H:%M");
     return output.str();
-}
-
-std::string FormatDouble(double value)
-{
-    std::ostringstream output;
-    output << std::fixed << std::setprecision(6) << value;
-    std::string text = output.str();
-
-    while (!text.empty() && text.back() == '0')
-    {
-        text.pop_back();
-    }
-    if (!text.empty() && text.back() == '.')
-    {
-        text.pop_back();
-    }
-    if (text.empty())
-    {
-        return "0";
-    }
-    return text;
-}
-
-std::string EscapeCsv(const std::string& value)
-{
-    if (value.find_first_of(",\"\n\r") == std::string::npos)
-    {
-        return value;
-    }
-
-    std::string escaped = "\"";
-    for (const char ch : value)
-    {
-        if (ch == '"')
-        {
-            escaped += "\"\"";
-        }
-        else
-        {
-            escaped += ch;
-        }
-    }
-    escaped += "\"";
-    return escaped;
 }
 
 std::string EscapeHtml(const std::string& value)
@@ -541,16 +522,6 @@ std::string Base64Encode(const std::string& input)
     return encoded;
 }
 
-std::string WrapBase64(const std::string& encoded)
-{
-    std::ostringstream output;
-    for (std::size_t index = 0; index < encoded.size(); index += 76)
-    {
-        output << encoded.substr(index, 76) << "\r\n";
-    }
-    return output.str();
-}
-
 std::string EncodeMimeHeader(const std::string& value)
 {
     if (IsAscii(value))
@@ -559,19 +530,6 @@ std::string EncodeMimeHeader(const std::string& value)
     }
 
     return "=?UTF-8?B?" + Base64Encode(value) + "?=";
-}
-
-std::string ReadBinaryFile(const std::string& path)
-{
-    std::ifstream input(path, std::ios::binary);
-    if (!input.is_open())
-    {
-        throw std::runtime_error("failed to open attachment: " + path);
-    }
-
-    std::ostringstream buffer;
-    buffer << input.rdbuf();
-    return buffer.str();
 }
 
 std::string QuoteForShell(const std::string& value)
@@ -1288,6 +1246,38 @@ std::string FormatPercentage(double value)
     return InsertThousandsSeparators(output.str()) + "%";
 }
 
+struct CellColors
+{
+    const char* background;
+    const char* foreground;
+};
+
+CellColors RiskRatio1Colors(double value)
+{
+    if (value > 1.00)
+    {
+        return {"#ff0000", "#111111"};
+    }
+    if (value > 0.80)
+    {
+        return {"#f4b183", "#111111"};
+    }
+    if (value > 0.70)
+    {
+        return {"#ffd966", "#111111"};
+    }
+    return {"#e2f0d9", "#111111"};
+}
+
+CellColors RiskRatio2Colors(double value)
+{
+    if (value > 1.00)
+    {
+        return {"#843c0c", "#ffffff"};
+    }
+    return {"#e2f0d9", "#111111"};
+}
+
 constexpr const char* kDefaultEmailTemplateName = "client_funding_risk_report.html";
 
 std::string ReadTextFile(const std::filesystem::path& path)
@@ -1392,6 +1382,15 @@ std::string BuildReportTitle(const AppConfig& config, int trade_date)
     return config.email_subject + " - Market Close " + std::to_string(trade_date);
 }
 
+std::string ResolveReportTime(const CliOptions& cli)
+{
+    if (!cli.report_time.empty())
+    {
+        return cli.report_time;
+    }
+    return CurrentLocalTimeOfDay();
+}
+
 std::vector<MailReportRow> BuildMailReportRows(const std::vector<CustomerFundRecord>& records)
 {
     const std::vector<CustomerFundRecord> sorted = SortRecords(records);
@@ -1432,7 +1431,11 @@ std::vector<MailReportRow> BuildMailReportRows(const std::vector<CustomerFundRec
     return rows;
 }
 
-std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const AppConfig& config, int trade_date)
+std::string BuildHtmlBody(
+    const std::vector<CustomerFundRecord>& records,
+    const AppConfig& config,
+    int trade_date,
+    const std::string& report_time)
 {
     const std::vector<MailReportRow> rows = BuildMailReportRows(records);
     double total_dyn_rights = 0.0;
@@ -1452,7 +1455,6 @@ std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const 
     }
 
     const std::string report_title = BuildReportTitle(config, trade_date);
-    const std::string report_time = CurrentLocalTimeOfDay();
     std::string summary_text;
 
     if (issue_count == 0)
@@ -1488,6 +1490,8 @@ std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const 
     std::ostringstream data_rows_html;
     for (const MailReportRow& row : rows)
     {
+        const CellColors risk_ratio1_colors = RiskRatio1Colors(row.risk_ratio1);
+        const CellColors risk_ratio2_colors = RiskRatio2Colors(row.risk_ratio2);
         data_rows_html << RenderTemplateFragment(
             data_row_template,
             {
@@ -1497,7 +1501,11 @@ std::string BuildHtmlBody(const std::vector<CustomerFundRecord>& records, const 
                 {"MTM_PNL", FormatAmount(row.mtm_pnl)},
                 {"AVAILABLE_FUNDS", FormatAmount(row.available_funds)},
                 {"RISK_RATIO_1", FormatPercentage(row.risk_ratio1)},
-                {"RISK_RATIO_2", FormatPercentage(row.risk_ratio2)}
+                {"RISK_RATIO_1_BACKGROUND", risk_ratio1_colors.background},
+                {"RISK_RATIO_1_COLOR", risk_ratio1_colors.foreground},
+                {"RISK_RATIO_2", FormatPercentage(row.risk_ratio2)},
+                {"RISK_RATIO_2_BACKGROUND", risk_ratio2_colors.background},
+                {"RISK_RATIO_2_COLOR", risk_ratio2_colors.foreground}
             });
     }
 
@@ -1635,6 +1643,11 @@ CliOptions ParseCli(int argc, char** argv)
             options.stub_file = value;
             continue;
         }
+        if (const std::string value = read_value(arg, "--report-time", index); !value.empty())
+        {
+            options.report_time = ParseReportTimeValue(value);
+            continue;
+        }
         if (const std::string value = read_value(arg, "--trade-date", index); !value.empty())
         {
             options.trade_date_override = ParseIntValue(value, "--trade-date");
@@ -1681,7 +1694,6 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.email_subject = GetRequiredValue(properties, "email.subject");
     config.email_template_path =
         ResolveConfigRelativePath(config_dir, GetValue(properties, "email.template_path"));
-    config.attachment_name = GetValue(properties, "report.attachment_name", config.attachment_name);
     config.output_dir = cli.output_dir.empty()
         ? ResolveConfigRelativePath(config_dir, GetValue(properties, "report.output_dir", config.output_dir))
         : cli.output_dir;
@@ -1742,54 +1754,11 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     return config;
 }
 
-std::string WriteCsvReport(const std::vector<CustomerFundRecord>& records, const AppConfig& config, int trade_date)
-{
-    std::filesystem::create_directories(config.output_dir);
-
-    const std::string filename =
-        config.attachment_name + "_" + config.env_name + "_" + std::to_string(trade_date) + ".csv";
-    const std::filesystem::path output_path =
-        std::filesystem::absolute(std::filesystem::path(config.output_dir) / filename);
-    std::ofstream output(output_path);
-
-    if (!output.is_open())
-    {
-        throw std::runtime_error("failed to create csv report: " + output_path.string());
-    }
-
-    output << "trade_date,cust_no,cust_name,fund_account_no,"
-           << "dyn_rights,hold_profit,avail_fund,risk_degree1,risk_degree2\n";
-
-    for (const CustomerFundRecord& record : SortRecords(records))
-    {
-        output << record.trade_date << ','
-               << EscapeCsv(record.cust_no) << ','
-               << EscapeCsv(record.cust_name) << ','
-               << EscapeCsv(record.fund_account_no) << ','
-               << FormatDouble(record.dyn_rights) << ','
-               << FormatDouble(record.hold_profit) << ','
-               << FormatDouble(record.avail_fund) << ','
-               << FormatDouble(record.risk_degree1) << ','
-               << FormatDouble(record.risk_degree2) << '\n';
-    }
-
-    LogInfo(
-        "csv_report_written",
-        "CSV report written",
-        {
-            {"trade_date", std::to_string(trade_date)},
-            {"row_count", std::to_string(records.size())},
-            {"path", output_path.string()}
-        });
-    return output_path.string();
-}
-
 MailRequest BuildMailRequest(
     const std::vector<CustomerFundRecord>& records,
     const AppConfig& config,
     const CliOptions& cli,
-    int trade_date,
-    const std::string& attachment_path)
+    int trade_date)
 {
     MailRequest request;
     request.from = config.smtp.from;
@@ -1802,18 +1771,12 @@ MailRequest BuildMailRequest(
     }
 
     request.subject = BuildReportTitle(config, trade_date);
-    request.html_body = BuildHtmlBody(records, config, trade_date);
-    request.attachment_path = attachment_path;
-    request.attachment_name = std::filesystem::path(attachment_path).filename().string();
+    request.html_body = BuildHtmlBody(records, config, trade_date, ResolveReportTime(cli));
     return request;
 }
 
 std::string BuildMimeMessage(const MailRequest& request)
 {
-    const std::string boundary = "----REPORT_BOUNDARY_" + CurrentTimestamp();
-    const std::string attachment_bytes = ReadBinaryFile(request.attachment_path);
-    const std::string encoded_attachment = WrapBase64(Base64Encode(attachment_bytes));
-
     std::ostringstream output;
     output << "From: " << request.from << "\r\n";
     output << "To: " << Join(request.to, ", ") << "\r\n";
@@ -1823,21 +1786,10 @@ std::string BuildMimeMessage(const MailRequest& request)
     }
     output << "Subject: " << EncodeMimeHeader(request.subject) << "\r\n";
     output << "MIME-Version: 1.0\r\n";
-    output << "Content-Type: multipart/mixed; boundary=\"" << boundary << "\"\r\n";
-    output << "\r\n";
-    output << "--" << boundary << "\r\n";
     output << "Content-Type: text/html; charset=\"utf-8\"\r\n";
     output << "Content-Transfer-Encoding: 8bit\r\n";
     output << "\r\n";
     output << request.html_body << "\r\n";
-    output << "\r\n";
-    output << "--" << boundary << "\r\n";
-    output << "Content-Type: text/csv; charset=\"utf-8\"; name=\"" << request.attachment_name << "\"\r\n";
-    output << "Content-Transfer-Encoding: base64\r\n";
-    output << "Content-Disposition: attachment; filename=\"" << request.attachment_name << "\"\r\n";
-    output << "\r\n";
-    output << encoded_attachment;
-    output << "--" << boundary << "--\r\n";
     return output.str();
 }
 

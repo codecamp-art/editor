@@ -69,7 +69,6 @@ struct AppConfig
     std::string env_name = "dev";
     std::string email_subject;
     std::string email_template_path;
-    std::string attachment_name = "tds_customer_funds";
     std::string output_dir = "./output";
     std::vector<std::string> default_to;
     std::vector<std::string> default_cc;
@@ -91,6 +90,7 @@ struct CliOptions
     std::vector<std::string> cust_filters;
     std::string output_dir;
     std::string stub_file;
+    std::string report_time;
     int trade_date_override = 0;
 };
 
@@ -101,8 +101,6 @@ struct MailRequest
     std::vector<std::string> cc;
     std::string subject;
     std::string html_body;
-    std::string attachment_path;
-    std::string attachment_name;
 };
 
 struct SendMailResult
@@ -127,13 +125,11 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli);
 std::vector<std::string> SplitList(const std::string& raw);
 std::string Join(const std::vector<std::string>& values, const std::string& delimiter);
 std::unique_ptr<ITdsClient> CreateClient(const AppConfig& config, const CliOptions& cli);
-std::string WriteCsvReport(const std::vector<CustomerFundRecord>& records, const AppConfig& config, int trade_date);
 MailRequest BuildMailRequest(
     const std::vector<CustomerFundRecord>& records,
     const AppConfig& config,
     const CliOptions& cli,
-    int trade_date,
-    const std::string& attachment_path);
+    int trade_date);
 std::string BuildMimeMessage(const MailRequest& request);
 std::string BuildCurlConfig(const MailRequest& request, const AppConfig& config, const std::string& message_path);
 SendMailResult SendMailWithCurl(const MailRequest& request, const AppConfig& config, bool dry_run);
