@@ -15,9 +15,98 @@ set(TDS_LINUX_DIR "${TDS_ROOT}/linux_x86_64")
 set(TDS_WIN32_LIBRARY "${TDS_WIN32_DIR}/tds_api.lib")
 set(TDS_LINUX_LIBRARY "${TDS_LINUX_DIR}/libtds_api.so")
 set(TDS_LINUX_CPACK "${TDS_LINUX_DIR}/cpack.dat")
+option(TDS_SDK_AUTO_PREPARE "Download and extract the TDS SDK from Artifactory when tds/ is incomplete" ON)
+option(TDS_SDK_FORCE "Force re-download of the TDS SDK even when tds/ already looks complete" OFF)
+set(TDS_SDK_PROPERTIES_FILE "" CACHE FILEPATH "Local tds-sdk.properties file with Artifactory download settings")
+set(TDS_SDK_URL "" CACHE STRING "Artifactory URL for tds_sdk.zip")
+set(TDS_SDK_AUTH "" CACHE STRING "Artifactory auth mode for TDS SDK downloads: token or cert")
+set(TDS_SDK_CERT_FILE "" CACHE FILEPATH "Artifactory client certificate path for certificate auth")
+set(TDS_SDK_KEY_FILE "" CACHE FILEPATH "Artifactory client key path for certificate auth")
+set(TDS_SDK_CERT_TYPE "PEM" CACHE STRING "Artifactory client certificate type passed to curl")
+set(TDS_SDK_CURL_BIN "curl" CACHE STRING "curl executable used to download tds_sdk.zip")
 set(REPORT_STAGE_DIR "${CMAKE_BINARY_DIR}/client_funding_risk_report" CACHE PATH "Directory used by the report_stage target")
 set(REPORT_PACKAGE_PATH "${CMAKE_BINARY_DIR}/client_funding_risk_report.tar.gz" CACHE FILEPATH "Output path for the staged runtime tarball")
 get_filename_component(REPORT_INSTALL_DIR_NAME "${REPORT_STAGE_DIR}" NAME)
+
+function(report_tds_sdk_full_layout_ready OUT_VAR)
+    set(_ready TRUE)
+
+    if(NOT EXISTS "${TDS_INCLUDE_DIR}/tds_api.h")
+        set(_ready FALSE)
+    endif()
+    if(NOT EXISTS "${TDS_LINUX_LIBRARY}")
+        set(_ready FALSE)
+    endif()
+    if(NOT EXISTS "${TDS_LINUX_CPACK}")
+        set(_ready FALSE)
+    endif()
+    if(NOT EXISTS "${TDS_WIN32_LIBRARY}")
+        set(_ready FALSE)
+    endif()
+    if(NOT EXISTS "${TDS_WIN32_DIR}/cpack.dat")
+        set(_ready FALSE)
+    endif()
+
+    file(GLOB _tds_win32_dlls "${TDS_WIN32_DIR}/*.dll" "${TDS_WIN32_DIR}/*.DLL")
+    if(NOT _tds_win32_dlls)
+        set(_ready FALSE)
+    endif()
+
+    set(${OUT_VAR} "${_ready}" PARENT_SCOPE)
+endfunction()
+
+if(WIN32)
+    set(TDS_SDK_PLATFORM "windows")
+elseif(UNIX)
+    set(TDS_SDK_PLATFORM "linux")
+else()
+    set(TDS_SDK_PLATFORM "unknown")
+endif()
+
+if(TDS_SDK_AUTO_PREPARE)
+    report_tds_sdk_full_layout_ready(REPORT_TDS_SDK_READY)
+    if(NOT REPORT_TDS_SDK_READY OR TDS_SDK_FORCE)
+        set(REPORT_TDS_SDK_ALLOW_MISSING_CONFIG ON)
+        if(TDS_SDK_FORCE)
+            set(REPORT_TDS_SDK_ALLOW_MISSING_CONFIG OFF)
+        endif()
+
+        set(REPORT_TDS_SDK_PREPARE_ARGS
+            "-DTDS_SDK_PROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTDS_SDK_DEST_DIR=${TDS_ROOT}"
+            "-DTDS_SDK_DOWNLOAD_DIR=${CMAKE_BINARY_DIR}/tds_sdk_download"
+            "-DTDS_SDK_EXTRACT_DIR=${CMAKE_BINARY_DIR}/tds_sdk_extract"
+            "-DTDS_SDK_PLATFORM=${TDS_SDK_PLATFORM}"
+            "-DTDS_SDK_CONTEXT=local"
+            "-DTDS_SDK_ALLOW_MISSING_CONFIG=${REPORT_TDS_SDK_ALLOW_MISSING_CONFIG}"
+            "-DTDS_SDK_FORCE=${TDS_SDK_FORCE}"
+            "-DTDS_SDK_CERT_TYPE=${TDS_SDK_CERT_TYPE}"
+            "-DTDS_SDK_CURL_BIN=${TDS_SDK_CURL_BIN}"
+        )
+
+        foreach(REPORT_TDS_SDK_OPTION IN ITEMS
+            TDS_SDK_PROPERTIES_FILE
+            TDS_SDK_URL
+            TDS_SDK_AUTH
+            TDS_SDK_CERT_FILE
+            TDS_SDK_KEY_FILE
+        )
+            if(DEFINED ${REPORT_TDS_SDK_OPTION} AND NOT "${${REPORT_TDS_SDK_OPTION}}" STREQUAL "")
+                list(APPEND REPORT_TDS_SDK_PREPARE_ARGS "-D${REPORT_TDS_SDK_OPTION}=${${REPORT_TDS_SDK_OPTION}}")
+            endif()
+        endforeach()
+
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" ${REPORT_TDS_SDK_PREPARE_ARGS}
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PrepareTdsSdk.cmake"
+            RESULT_VARIABLE REPORT_TDS_SDK_PREPARE_RESULT
+        )
+
+        if(NOT REPORT_TDS_SDK_PREPARE_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to prepare TDS SDK from Artifactory")
+        endif()
+    endif()
+endif()
 
 if(UNIX)
     find_package(CURL QUIET)
@@ -122,15 +211,15 @@ if(WIN32)
         set(REPORT_HAS_VENDOR_API ON)
         message(STATUS "Windows Win32 local build will enable live TDS calls from ${TDS_WIN32_DIR}")
     else()
-        message(STATUS "Windows Win32 local build is stub-only. Place supplier 32-bit dll/lib/cpack.dat under ${TDS_WIN32_DIR} to enable local DRTP debugging.")
+        message(STATUS "Windows Win32 local build is stub-only. Configure tds-sdk.properties with token auth to download supplier dll/lib/cpack.dat into ${TDS_WIN32_DIR} for local DRTP debugging.")
     endif()
 elseif(UNIX)
     set(TDS_INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}")
     if(NOT EXISTS "${TDS_LINUX_LIBRARY}")
-        message(FATAL_ERROR "Linux build requires ${TDS_LINUX_LIBRARY}")
+        message(FATAL_ERROR "Linux build requires ${TDS_LINUX_LIBRARY}. Configure tds-sdk.properties or run cmake -P cmake/PrepareTdsSdk.cmake before configuring.")
     endif()
     if(NOT EXISTS "${TDS_LINUX_CPACK}")
-        message(FATAL_ERROR "Linux build requires ${TDS_LINUX_CPACK}")
+        message(FATAL_ERROR "Linux build requires ${TDS_LINUX_CPACK}. Configure tds-sdk.properties or run cmake -P cmake/PrepareTdsSdk.cmake before configuring.")
     endif()
 
     get_filename_component(TDS_LIBRARY_DIR "${TDS_LINUX_LIBRARY}" DIRECTORY)

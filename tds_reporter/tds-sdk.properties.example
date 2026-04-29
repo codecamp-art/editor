@@ -1,0 +1,27 @@
+# Copy this file to either:
+#   ./tds-sdk.properties
+#   ~/.tds_reporter/tds-sdk.properties
+#
+# The local file is intentionally gitignored because it may contain credentials.
+
+tds.sdk.url=https://artifactory.example.com/artifactory/vendor/tds_sdk.zip
+tds.sdk.curlBin=curl
+
+# Windows local builds must use token authentication.
+# RHEL8 local builds may use token or certificate/key authentication.
+tds.sdk.auth=token
+
+# Option A: provide the full header when Artifactory expects a custom token header.
+# tds.sdk.authHeader=X-JFrog-Art-Api: REPLACE_WITH_TOKEN
+
+# Option B: provide a token and let the downloader build:
+# Authorization: Bearer <token>
+tds.sdk.token=REPLACE_WITH_TOKEN
+# tds.sdk.tokenHeaderName=Authorization
+# tds.sdk.tokenPrefix=Bearer
+
+# RHEL8-only certificate/key authentication example:
+# tds.sdk.auth=cert
+# tds.sdk.certFile=/path/to/artifactory-client.pem
+# tds.sdk.keyFile=/path/to/artifactory-client.key
+# tds.sdk.certType=PEM

@@ -216,7 +216,6 @@ void prepareTdsPackage(Map args) {
     mkdir -p "$TDS_PACKAGE_DOWNLOAD_DIR" "$TDS_PACKAGE_EXTRACT_DIR"
   '''
 
-  String artifactoryCurlConfigPath = secretTempPath('artifactory-curl')
   String artifactoryCertFile = pipelineParams.ARTIFACTORY_CERT_FILE?.trim() ?: ''
   String artifactoryKeyFile = pipelineParams.ARTIFACTORY_KEY_FILE?.trim() ?: ''
   if (!artifactoryCertFile) {
@@ -226,76 +225,28 @@ void prepareTdsPackage(Map args) {
     error('ARTIFACTORY_KEY_FILE is required')
   }
 
-  List<String> artifactoryCurlConfig = [
-    curlConfigOption('fail'),
-    curlConfigOption('silent'),
-    curlConfigOption('show-error'),
-    curlConfigOption('location'),
-    curlConfigOption('cert-type', pipelineParams.ARTIFACTORY_CERT_TYPE?.trim() ?: 'PEM'),
-    curlConfigOption('cert', artifactoryCertFile),
-    curlConfigOption('key', artifactoryKeyFile),
-    curlConfigOption('output', "${env.TDS_PACKAGE_DOWNLOAD_DIR}/tds_package"),
-    curlConfigOption('url', pipelineParams.TDS_PACKAGE_URL.trim())
-  ]
+  sh """#!/usr/bin/env bash
+    set +x
+    set -euo pipefail
 
-  writeSecretFile(artifactoryCurlConfigPath, artifactoryCurlConfig.join('\n') + '\n')
+    cmake \\
+      -DTDS_SDK_PROJECT_DIR=${shellQuote(env.PROJECT_DIR)} \\
+      -DTDS_SDK_DEST_DIR=${shellQuote(env.TDS_DIR)} \\
+      -DTDS_SDK_DOWNLOAD_DIR=${shellQuote(env.TDS_PACKAGE_DOWNLOAD_DIR)} \\
+      -DTDS_SDK_EXTRACT_DIR=${shellQuote(env.TDS_PACKAGE_EXTRACT_DIR)} \\
+      -DTDS_SDK_PLATFORM=linux \\
+      -DTDS_SDK_CONTEXT=jenkins \\
+      -DTDS_SDK_AUTH=cert \\
+      -DTDS_SDK_FORCE=ON \\
+      -DTDS_SDK_URL=${shellQuote(pipelineParams.TDS_PACKAGE_URL.trim())} \\
+      -DTDS_SDK_CERT_FILE=${shellQuote(artifactoryCertFile)} \\
+      -DTDS_SDK_KEY_FILE=${shellQuote(artifactoryKeyFile)} \\
+      -DTDS_SDK_CERT_TYPE=${shellQuote(pipelineParams.ARTIFACTORY_CERT_TYPE?.trim() ?: 'PEM')} \\
+      -DTDS_SDK_CURL_BIN=${shellQuote(pipelineParams.CURL_BIN?.trim() ?: 'curl')} \\
+      -P ${shellQuote("${env.PROJECT_DIR}/cmake/PrepareTdsSdk.cmake")}
 
-  try {
-    withEnv([
-      "CURL_BIN=${pipelineParams.CURL_BIN?.trim() ?: 'curl'}",
-      "TDS_PACKAGE_URL=${pipelineParams.TDS_PACKAGE_URL.trim()}",
-      "ARTIFACTORY_CERT_FILE=${artifactoryCertFile}",
-      "ARTIFACTORY_KEY_FILE=${artifactoryKeyFile}",
-      "ARTIFACTORY_CURL_CONFIG_FILE=${artifactoryCurlConfigPath}"
-    ]) {
-      sh '''#!/usr/bin/env bash
-        set +x
-        set -euo pipefail
-
-        TDS_ARCHIVE="$TDS_PACKAGE_DOWNLOAD_DIR/tds_package"
-        test -f "$ARTIFACTORY_CERT_FILE"
-        test -f "$ARTIFACTORY_KEY_FILE"
-        "$CURL_BIN" --config "$ARTIFACTORY_CURL_CONFIG_FILE"
-        rm -f "$ARTIFACTORY_CURL_CONFIG_FILE"
-
-        if tar -tzf "$TDS_ARCHIVE" >/dev/null 2>&1; then
-          tar -C "$TDS_PACKAGE_EXTRACT_DIR" -xzf "$TDS_ARCHIVE"
-        elif tar -tf "$TDS_ARCHIVE" >/dev/null 2>&1; then
-          tar -C "$TDS_PACKAGE_EXTRACT_DIR" -xf "$TDS_ARCHIVE"
-        elif unzip -tq "$TDS_ARCHIVE" >/dev/null 2>&1; then
-          unzip -q "$TDS_ARCHIVE" -d "$TDS_PACKAGE_EXTRACT_DIR"
-        else
-          echo "Unsupported TDS package format: $TDS_PACKAGE_URL" >&2
-          exit 1
-        fi
-
-        if [ -d "$TDS_PACKAGE_EXTRACT_DIR/tds" ]; then
-          TDS_SOURCE_DIR="$TDS_PACKAGE_EXTRACT_DIR/tds"
-        else
-          TDS_SOURCE_DIR="$TDS_PACKAGE_EXTRACT_DIR"
-        fi
-
-        test -f "$TDS_SOURCE_DIR/include/tds_api.h"
-        test -f "$TDS_SOURCE_DIR/linux_x86_64/libtds_api.so"
-        test -f "$TDS_SOURCE_DIR/linux_x86_64/cpack.dat"
-        test -d "$TDS_SOURCE_DIR/win32"
-
-        mkdir -p "$TDS_DIR"
-        cp -a "$TDS_SOURCE_DIR/." "$TDS_DIR/"
-
-        test -f "$TDS_DIR/include/tds_api.h"
-        test -f "$TDS_DIR/linux_x86_64/libtds_api.so"
-        test -f "$TDS_DIR/linux_x86_64/cpack.dat"
-        if [ ! -d "$TDS_DIR/win32" ]; then
-          echo "TDS package must include tds/win32 for Windows local parity" >&2
-          exit 1
-        fi
-        find "$TDS_DIR" -maxdepth 2 -type f | sort
-      '''
-    }
-  } finally {
-    deleteSecretFile(artifactoryCurlConfigPath)
-  }
+    find "\$TDS_DIR" -maxdepth 2 -type f | sort
+  """
 }
 
 void validateLocalTdsFiles() {

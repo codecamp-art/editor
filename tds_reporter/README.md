@@ -124,9 +124,9 @@ If you want to inspect the staged directory locally:
 .\build\windows-local-x86\client_funding_risk_report\bin\report.exe --env qa --dry-run --to debug@example.com
 ```
 
-## Local Vendor Files
+## Local Vendor SDK
 
-Local build inputs are prepared manually under `tds/`.
+Local and Jenkins builds consume the supplier SDK from `tds/`, but `tds/` is generated from the curated Artifactory package instead of being committed.
 
 Required layout:
 
@@ -143,14 +143,55 @@ tds/
     cpack.dat
 ```
 
+Local credential/config files:
+
+- copy `tds-sdk.properties.example` to `tds-sdk.properties` in this directory, or to `~/.tds_reporter/tds-sdk.properties`
+- `tds-sdk.properties` is gitignored and may contain local Artifactory token or certificate/key paths
+- `TDS_SDK_PROPERTIES_FILE` may point at a different properties file
+- CMake also accepts non-secret overrides such as `-DTDS_SDK_URL=...`, `-DTDS_SDK_AUTH=...`, `-DTDS_SDK_CERT_FILE=...`, and `-DTDS_SDK_KEY_FILE=...`
+
 Rules:
 
-- Windows local live/debug build reads the supplier 32-bit files from `tds/win32`
+- Windows local live/debug build downloads `tds_sdk.zip` from Artifactory with token authentication only, then reads the supplier 32-bit files from `tds/win32`
 - Windows stage/install output includes every `*.dll` and `*.dat` file under `tds/win32`
 - Windows x64 build presets are intentionally not provided
-- RHEL8 local live build requires `tds/linux_x86_64/libtds_api.so` and `tds/linux_x86_64/cpack.dat`
-- Jenkins downloads the prebuilt TDS dependency package from Artifactory into `workspace/tds`
+- RHEL8 local live build downloads `tds_sdk.zip` from Artifactory with either token or certificate/key authentication
+- Jenkins downloads the same Artifactory package into `workspace/tds` with fixed certificate/key authentication only
 - CMake does not support overriding supplier header/library paths with `-D` variables
+
+Typical local token configuration:
+
+```properties
+tds.sdk.url=https://artifactory.example.com/artifactory/vendor/tds_sdk.zip
+tds.sdk.auth=token
+tds.sdk.token=REPLACE_WITH_TOKEN
+```
+
+If Artifactory expects a custom token header, use the full header instead:
+
+```properties
+tds.sdk.url=https://artifactory.example.com/artifactory/vendor/tds_sdk.zip
+tds.sdk.auth=token
+tds.sdk.authHeader=X-JFrog-Art-Api: REPLACE_WITH_TOKEN
+```
+
+RHEL8 local certificate/key configuration:
+
+```properties
+tds.sdk.url=https://artifactory.example.com/artifactory/vendor/tds_sdk.zip
+tds.sdk.auth=cert
+tds.sdk.certFile=/path/to/artifactory-client.pem
+tds.sdk.keyFile=/path/to/artifactory-client.key
+tds.sdk.certType=PEM
+```
+
+The standalone preparation command is:
+
+```bash
+cmake -DTDS_SDK_CONTEXT=local -P cmake/PrepareTdsSdk.cmake
+```
+
+Normal CMake configure also calls the same preparation script when `tds/` is incomplete and a local properties file or environment config is available.
 
 ## Vault and Kerberos
 
@@ -180,7 +221,7 @@ The application does not read or require `kerberos_realm`, `keytab_path`, `krb5c
 
 ## RHEL8 Local
 
-After manually placing `tds/linux_x86_64/libtds_api.so` and `tds/linux_x86_64/cpack.dat`:
+After configuring Artifactory access in `tds-sdk.properties`:
 
 Install the build tools once if the machine does not already have them:
 
@@ -247,13 +288,13 @@ Fixed Jenkins integration config:
 - placeholder values beginning with `REPLACE_ME_` fail fast before Vault or Artifactory access
 - `REPORT_RUNTIME_ENV` remains a Release smoke parameter because it selects the runtime `--env`, not package download credentials
 - Vault token is kept out of Jenkins environment variables and `curl` argv; Vault HTTP login uses a temporary `curl --config` file with mode `600`
-- Artifactory download uses the fixed local certificate/key through a temporary `curl --config` file
+- Artifactory download is delegated to `cmake/PrepareTdsSdk.cmake`, which uses the fixed local certificate/key through a temporary `curl --config` file
 - the TDS package must not be password-protected; Artifactory mTLS controls download access
 
 Jenkins helper flow:
 
 1. Kerberos login to Vault through the HTTP API with curl
-2. Download the curated TDS dependency package from Artifactory using the fixed local certificate/key
+2. Download the curated TDS dependency package from Artifactory using `cmake/PrepareTdsSdk.cmake` and the fixed local certificate/key
 3. Extract it into `workspace/tds`
 4. Build, test, and stage one common runtime containing all properties files
 5. Build `client_funding_risk_report-*.tar.gz`

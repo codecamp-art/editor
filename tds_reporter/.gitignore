@@ -11,6 +11,8 @@ tds/
 # Local runtime config overrides
 config/tds_reporter.properties
 config/*.local.properties
+tds-sdk.properties
+.tds-sdk/
 
 # Local CMake and IDE user state
 CMakeUserPresets.json
