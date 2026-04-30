@@ -54,6 +54,22 @@ bin/report --env qa --drtp-endpoints 10.10.20.50:6003,10.10.20.51:6003
 
 Runtime logs are JSON lines. The same log line is written to the daily log file under `log.dir` and to standard output, so Jenkins, systemd, and the local log file see the same runtime log content.
 
+## DRTP and Email Safety Rules
+
+Execution policy by scenario:
+
+1. Any **test run** must not connect to live DRTP and must not send email.
+2. Any **Jenkins test run** must not connect to live DRTP to pull data and must not send email.
+3. **Windows local real-program runs** may connect to live DRTP to pull data, but must not send email (always keep `--dry-run`).
+4. **RHEL8 local real-program runs** may connect to live DRTP and may send email when validation requires end-to-end delivery.
+
+Recommended control mapping:
+
+- disable live DRTP pull: `--stub-file tests/data/stub_snapshot.csv`
+- disable email send: `--dry-run`
+- live DRTP pull enabled: omit `--stub-file`
+- real email send enabled: omit `--dry-run`
+
 ## Packaging Model
 
 - Windows local build is only for debugging and does not need release packaging
@@ -256,7 +272,21 @@ ctest --preset linux-rhel8-release
 cmake --build --preset linux-rhel8-release --target report_package
 mkdir -p "$PWD/install_qa"
 tar -C "$PWD/install_qa" -xzf ./build/linux-rhel8-release-make/client_funding_risk_report.tar.gz
+./install_qa/client_funding_risk_report/bin/report --env qa --stub-file ./tests/data/stub_snapshot.csv --dry-run --to qa-ops@example.com
+```
+
+RHEL8 local real-program run examples:
+
+- no email (can use live DRTP):
+
+```bash
 ./install_qa/client_funding_risk_report/bin/report --env qa --dry-run --to qa-ops@example.com
+```
+
+- full end-to-end with live DRTP and real email:
+
+```bash
+./install_qa/client_funding_risk_report/bin/report --env qa
 ```
 
 ## Jenkins Release
