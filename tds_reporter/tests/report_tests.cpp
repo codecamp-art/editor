@@ -397,6 +397,34 @@ void TestVaultSecretReferenceDoesNotUseCurlCommand()
     AssertNotContains(app_source, "curl --negotiate", "Vault runtime must use C++ libcurl instead of curl CLI");
 }
 
+
+void TestLoadConfigSkipsVaultWhenStubFileIsSet()
+{
+    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_stub_vault_bypass_test";
+    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path config_path = temp_dir / "stub.properties";
+
+    std::ofstream output(config_path);
+    output
+        << "tds.drtp_endpoints=10.0.0.1:6003\n"
+        << "tds.user=10000\n"
+        << "tds.password=vault://tds/qa#password\n"
+        << "vault.address=http://127.0.0.1:1\n"
+        << "vault.secret_engine=secret\n"
+        << "smtp.host=mail.local\n"
+        << "smtp.port=2587\n"
+        << "smtp.from=sender@example.com\n"
+        << "email.subject=QA Report\n";
+    output.close();
+
+    report::CliOptions cli;
+    cli.env = "qa";
+    cli.stub_file = (std::filesystem::path("tests") / "data" / "stub_snapshot.csv").string();
+
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
+    AssertTrue(config.tds.password.empty(), "stub mode should not resolve tds password from vault");
+}
+
 void TestStubClient()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_output_test";
@@ -660,6 +688,7 @@ int main()
         TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv();
         TestDefaultConfigPathRejectsMissingEnv();
         TestVaultSecretReferenceDoesNotUseCurlCommand();
+    TestLoadConfigSkipsVaultWhenStubFileIsSet();
         TestStubClient();
         TestMimeAndDryRun();
         TestDecodedVendorTextFlowsToEmail();
