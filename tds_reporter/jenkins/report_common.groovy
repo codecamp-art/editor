@@ -247,6 +247,20 @@ void configureCmake(Map args = [:]) {
     test -f "\$PROJECT_DIR/tds/include/tds_api.h"
     test -f "\$PROJECT_DIR/tds/linux_x86_64/libtds_api.so"
     test -f "\$PROJECT_DIR/tds/linux_x86_64/cpack.dat"
+    test -n "\$BUILD_DIR"
+    test -n "\$STAGE_DIR"
+
+    if [[ "\$BUILD_DIR" != "\$PROJECT_DIR"/build_* ]]; then
+      echo "Refusing to clean unsafe BUILD_DIR: \$BUILD_DIR" >&2
+      exit 1
+    fi
+
+    if [[ "\$STAGE_DIR" != "\$BUILD_DIR"/* ]]; then
+      echo "Refusing to configure with STAGE_DIR outside BUILD_DIR: \$STAGE_DIR" >&2
+      exit 1
+    fi
+
+    rm -rf "\$BUILD_DIR"
 
     cmake -S . -B "\$BUILD_DIR" \\
       -DCMAKE_BUILD_TYPE="\$BUILD_TYPE" \\
