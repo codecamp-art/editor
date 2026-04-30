@@ -9,9 +9,9 @@ pipeline {
 
   parameters {
     string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
-    booleanParam(name: 'RUN_LIVE_SMOKE', defaultValue: false, description: 'Run a packaged dry-run after staging')
-    string(name: 'REPORT_RUNTIME_ENV', defaultValue: 'prod', description: 'Environment overlay selected by --env for the optional live smoke')
-    string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional live smoke run')
+    booleanParam(name: 'RUN_STUB_SMOKE', defaultValue: true, description: 'Run a packaged stub dry-run after staging')
+    string(name: 'REPORT_RUNTIME_ENV', defaultValue: 'prod', description: 'Environment overlay selected by --env for the optional stub smoke')
+    string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional stub smoke run')
   }
 
   environment {
@@ -83,9 +83,9 @@ pipeline {
       }
     }
 
-    stage('Live Smoke') {
+    stage('Stub Smoke') {
       when {
-        expression { return params.RUN_LIVE_SMOKE }
+        expression { return params.RUN_STUB_SMOKE }
       }
       steps {
         script {
@@ -101,6 +101,7 @@ pipeline {
               tar -C "$SMOKE_INSTALL_DIR" -xzf "$PACKAGE_PATH"
               "$SMOKE_INSTALL_DIR/client_funding_risk_report/bin/report" \
                 --env "$REPORT_RUNTIME_ENV" \
+                --stub-file "$PROJECT_DIR/tests/data/stub_snapshot.csv" \
                 --dry-run \
                 --to "$SMOKE_TO"
             '''
