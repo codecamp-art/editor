@@ -33,7 +33,6 @@ pipeline {
           def common = load('jenkins/report_common.groovy')
           def integrationConfig = common.fixedIntegrationConfig('release')
           common.validateFixedIntegrationConfig(integrationConfig, 'release')
-          common.prepareVaultAccess(integrationConfig)
           common.prepareTdsPackage(params: integrationConfig)
         }
       }
@@ -94,12 +93,6 @@ pipeline {
           def integrationConfig = common.fixedIntegrationConfig('release')
           common.validateFixedIntegrationConfig(integrationConfig, 'release')
 
-          withEnv([
-            "CURL_BIN=${integrationConfig.CURL_BIN?.trim() ?: 'curl'}",
-            "VAULT_ADDR=${integrationConfig.VAULT_ADDR?.trim() ?: ''}",
-            "VAULT_NAMESPACE=${integrationConfig.VAULT_NAMESPACE?.trim() ?: ''}",
-            "VAULT_AUTH_PATH=${integrationConfig.VAULT_AUTH_PATH?.trim() ?: ''}"
-          ]) {
             sh '''
               set -euxo pipefail
 
@@ -111,7 +104,6 @@ pipeline {
                 --dry-run \
                 --to "$SMOKE_TO"
             '''
-          }
         }
       }
     }

@@ -67,36 +67,22 @@ String trimSlashes(String value) {
 
 Map fixedIntegrationConfig(String pipelineName) {
   // Replace these fixed values in code only; Jenkins UI should not provide them.
-  // Set optional Vault paths to '' when that material is not required.
-  Map shared = [
+  String certFile = '/jenkins/build.pem'
+  String keyFile = env.ARTIFACTORY_KEY_FILE?.trim() ?: ''
+
+  return [
     TDS_PACKAGE_URL: 'REPLACE_ME_TDS_PACKAGE_URL',
-    ARTIFACTORY_CERT_FILE: 'REPLACE_ME_ARTIFACTORY_CERT_FILE',
-    ARTIFACTORY_KEY_FILE: 'REPLACE_ME_ARTIFACTORY_KEY_FILE',
+    ARTIFACTORY_CERT_FILE: certFile,
+    // Optional when cert+key are bundled in one PEM file.
+    ARTIFACTORY_KEY_FILE: keyFile,
     CURL_BIN: 'curl'
   ]
-
-  Map pr = [
-    VAULT_ADDR: 'REPLACE_ME_PR_VAULT_ADDR',
-    VAULT_NAMESPACE: 'REPLACE_ME_PR_VAULT_NAMESPACE',
-    VAULT_AUTH_PATH: 'kerberos'
-  ]
-
-  Map release = [
-    VAULT_ADDR: 'REPLACE_ME_RELEASE_VAULT_ADDR',
-    VAULT_NAMESPACE: 'REPLACE_ME_RELEASE_VAULT_NAMESPACE',
-    VAULT_AUTH_PATH: 'kerberos'
-  ]
-
-  Map selected = pipelineName == 'release' ? release : pr
-  return shared + selected
 }
 
 void validateFixedIntegrationConfig(Map config, String pipelineName) {
   List<String> requiredKeys = [
     'TDS_PACKAGE_URL',
-    'VAULT_ADDR',
-    'ARTIFACTORY_CERT_FILE',
-    'ARTIFACTORY_KEY_FILE'
+    'ARTIFACTORY_CERT_FILE'
   ]
 
   List<String> invalidKeys = []
@@ -220,10 +206,6 @@ void prepareTdsPackage(Map args) {
   if (!artifactoryCertFile) {
     error('ARTIFACTORY_CERT_FILE is required')
   }
-  if (!artifactoryKeyFile) {
-    error('ARTIFACTORY_KEY_FILE is required')
-  }
-
   sh """#!/usr/bin/env bash
     set +x
     set -euo pipefail

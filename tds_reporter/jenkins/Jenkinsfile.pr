@@ -30,7 +30,6 @@ pipeline {
           def common = load('jenkins/report_common.groovy')
           def integrationConfig = common.fixedIntegrationConfig('pr')
           common.validateFixedIntegrationConfig(integrationConfig, 'pr')
-          common.prepareVaultAccess(integrationConfig)
           common.prepareTdsPackage(params: integrationConfig)
         }
       }
