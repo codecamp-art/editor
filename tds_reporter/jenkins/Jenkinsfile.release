@@ -7,13 +7,6 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
   }
 
-  parameters {
-    string(name: 'BUILD_TYPE', defaultValue: 'Release', description: 'CMake build type')
-    booleanParam(name: 'RUN_STUB_SMOKE', defaultValue: true, description: 'Run a packaged stub dry-run after staging')
-    string(name: 'REPORT_RUNTIME_ENV', defaultValue: 'prod', description: 'Environment overlay selected by --env for the optional stub smoke')
-    string(name: 'SMOKE_TO', defaultValue: 'qa-ops@example.com', description: 'Recipient override for the optional stub smoke run')
-  }
-
   environment {
     PROJECT_DIR = "${env.WORKSPACE}"
     BUILD_DIR = "${env.WORKSPACE}/build_release"
@@ -24,6 +17,9 @@ pipeline {
     TDS_PACKAGE_EXTRACT_DIR = "${env.WORKSPACE}/tds_package_extract"
     TDS_DIR = "${env.WORKSPACE}/tds"
     SMOKE_INSTALL_DIR = "${env.WORKSPACE}/smoke_install"
+    BUILD_TYPE = "Release"
+    RUN_STUB_SMOKE = "true"
+    REPORT_RUNTIME_ENV = "qa"
   }
 
   stages {
@@ -85,7 +81,7 @@ pipeline {
 
     stage('Stub Smoke') {
       when {
-        expression { return params.RUN_STUB_SMOKE }
+        expression { return env.RUN_STUB_SMOKE == 'true' }
       }
       steps {
         script {
@@ -102,8 +98,7 @@ pipeline {
               "$SMOKE_INSTALL_DIR/client_funding_risk_report/bin/report" \
                 --env "$REPORT_RUNTIME_ENV" \
                 --stub-file "$PROJECT_DIR/tests/data/stub_snapshot.csv" \
-                --dry-run \
-                --to "$SMOKE_TO"
+                --dry-run
             '''
         }
       }
