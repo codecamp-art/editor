@@ -1717,7 +1717,14 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     }
     config.tds.drtp_endpoints = std::move(drtp_endpoints);
     config.tds.user = GetRequiredValue(properties, "tds.user");
-    config.tds.password = ResolveTdsPassword(GetValue(properties, "tds.password"), config.vault);
+    if (!cli.stub_file.empty())
+    {
+        config.tds.password.clear();
+    }
+    else
+    {
+        config.tds.password = ResolveTdsPassword(GetValue(properties, "tds.password"), config.vault);
+    }
     config.tds.req_timeout_ms = ParseIntValue(
         GetValue(properties, "tds.req_timeout_ms", std::to_string(config.tds.req_timeout_ms)),
         "tds.req_timeout_ms");
