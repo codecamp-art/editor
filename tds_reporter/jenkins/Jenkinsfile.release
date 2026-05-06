@@ -9,14 +9,14 @@ pipeline {
 
   environment {
     PROJECT_DIR = "${env.WORKSPACE}"
-    BUILD_DIR = "${env.WORKSPACE}/build_release"
-    STAGE_DIR = "${env.WORKSPACE}/build_release/client_funding_risk_report"
+    BUILD_DIR = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}"
+    STAGE_DIR = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}/client_funding_risk_report"
     PACKAGE_NAME = "client_funding_risk_report-rhel8-${env.BUILD_NUMBER}.tar.gz"
-    PACKAGE_PATH = "${env.WORKSPACE}/build_release/${PACKAGE_NAME}"
+    PACKAGE_PATH = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}/${PACKAGE_NAME}"
     TDS_PACKAGE_DOWNLOAD_DIR = "${env.WORKSPACE}/tds_package_download"
     TDS_PACKAGE_EXTRACT_DIR = "${env.WORKSPACE}/tds_package_extract"
     TDS_DIR = "${env.WORKSPACE}/tds"
-    SMOKE_INSTALL_DIR = "${env.WORKSPACE}/smoke_install"
+    SMOKE_INSTALL_DIR = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}/smoke_install"
     BUILD_TYPE = "Release"
     RUN_STUB_SMOKE = "true"
     REPORT_RUNTIME_ENV = "qa"
@@ -57,6 +57,9 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
+          git -C "$PROJECT_DIR" rev-parse --short HEAD
+          grep -R -n '^email[.]subject=' "$PROJECT_DIR/config" || true
+          cmake --build "$BUILD_DIR" --target report_tests --parallel
           ctest --test-dir "$BUILD_DIR" --output-on-failure
         '''
       }
@@ -107,7 +110,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'build_release/client_funding_risk_report/**, build_release/*.tar.gz, output/*', allowEmptyArchive: false
+      archiveArtifacts artifacts: 'build_release/**, output/*', allowEmptyArchive: false
     }
   }
 }

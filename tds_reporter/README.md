@@ -12,7 +12,6 @@ The package is environment-neutral.
 - shared SMTP transport settings stay in `report.properties`
 - each environment file owns `smtp.from`, `email.default_to`, and `email.default_cc`; `email.subject` may be overridden per environment
 - `smtp.from` is required from the environment overlay, and `email.subject` must exist after merge (base + overlay)
-- release/CI can fail with `missing required config key: email.subject` if base `report.properties` omits it, because shared config is loaded before overlay
 - SMTP relay authentication is certificate-only; there is no SMTP username/password configuration
 - SMTP client certificate and key type are fixed to PEM; encrypted private keys are not supported
 - the shared Vault settings are `vault.address`, `vault.namespace`, `vault.secret_engine`, and `vault.secret_key`
