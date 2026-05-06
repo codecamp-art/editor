@@ -340,3 +340,8 @@ add_test(
     COMMAND report_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+set_tests_properties(
+    report_tests
+    PROPERTIES
+        ENVIRONMENT "REPORT_CONFIG_DIR=${CMAKE_CURRENT_SOURCE_DIR}/config"
+)

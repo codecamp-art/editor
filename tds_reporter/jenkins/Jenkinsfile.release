@@ -59,6 +59,7 @@ pipeline {
           set -euxo pipefail
           git -C "$PROJECT_DIR" rev-parse --short HEAD
           grep -R -n '^email[.]subject=' "$PROJECT_DIR/config" || true
+          export REPORT_CONFIG_DIR="$PROJECT_DIR/config"
           cmake --build "$BUILD_DIR" --target report_tests --parallel
           ctest --test-dir "$BUILD_DIR" --output-on-failure
         '''

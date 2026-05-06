@@ -647,6 +647,11 @@ std::filesystem::path CurrentExecutablePath()
 std::vector<std::filesystem::path> DefaultConfigRoots()
 {
     std::vector<std::filesystem::path> roots;
+    if (const char* config_dir = std::getenv("REPORT_CONFIG_DIR"); config_dir != nullptr && config_dir[0] != '\0')
+    {
+        roots.emplace_back(config_dir);
+    }
+
     const std::filesystem::path executable_path = CurrentExecutablePath();
     if (!executable_path.empty())
     {

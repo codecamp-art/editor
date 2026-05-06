@@ -50,6 +50,20 @@ void AssertThrows(Callable&& callable, const std::string& message)
     throw std::runtime_error(message);
 }
 
+template <typename Callable>
+void RunTest(const std::string& name, Callable&& callable)
+{
+    std::cout << "Running " << name << '\n';
+    try
+    {
+        callable();
+    }
+    catch (const std::exception& ex)
+    {
+        throw std::runtime_error(name + ": " + ex.what());
+    }
+}
+
 void SetEnv(const std::string& key, const std::string& value)
 {
 #ifdef _WIN32
@@ -142,6 +156,7 @@ void TestParseCli()
 void TestLoadConfig()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_test";
+    std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "test.properties";
 
@@ -186,6 +201,7 @@ void TestLoadConfig()
 void TestLoadConfigRejectsMissingCliEnv()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_file_env_test";
+    std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "test.properties";
 
@@ -358,6 +374,7 @@ void TestDefaultConfigPathRejectsMissingEnv()
 void TestVaultSecretReferenceDoesNotUseCurlCommand()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_vault_test";
+    std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "vault.properties";
 
@@ -401,6 +418,7 @@ void TestVaultSecretReferenceDoesNotUseCurlCommand()
 void TestLoadConfigSkipsVaultWhenStubFileIsSet()
 {
     const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_stub_vault_bypass_test";
+    std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir);
     const std::filesystem::path config_path = temp_dir / "stub.properties";
 
@@ -428,6 +446,7 @@ void TestLoadConfigSkipsVaultWhenStubFileIsSet()
 void TestStubClient()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_output_test";
+    std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
 
     report::CliOptions cli;
@@ -449,6 +468,7 @@ void TestStubClient()
 void TestMimeAndDryRun()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_mail_test";
+    std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
     const report::AppConfig config = BuildTestConfig(output_dir);
 
@@ -540,6 +560,7 @@ void TestMimeAndDryRun()
 void TestDecodedVendorTextFlowsToEmail()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_gbk_output_test";
+    std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
     const report::AppConfig config = BuildTestConfig(output_dir);
     const std::string customer_name = report::DecodeVendorText("\xC9\xCF\xBA\xA3\xBF\xCD\xBB\xA7");
@@ -562,6 +583,7 @@ void TestDecodedVendorTextFlowsToEmail()
 void TestCurlConfigWithClientCertificate()
 {
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_curl_test";
+    std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
     report::AppConfig config = BuildTestConfig(output_dir);
     config.smtp.host = "mta-hub.example.com.cn";
@@ -616,6 +638,7 @@ void TestVendorTextDecodingAndErrorFormatting()
         "formatted TDS error should not include maintained internal descriptions");
 
     const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_gbk_log_test";
+    std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
     report::AppConfig config = BuildTestConfig(output_dir);
     report::InitializeLogger(config);
@@ -678,24 +701,24 @@ int main()
 {
     try
     {
-        TestParseCli();
-        TestLoadConfig();
-        TestLoadConfigRejectsMissingCliEnv();
-        TestLoadConfigMergesSharedPropertiesAndEnvOverlay();
-        TestLoadConfigParsesMultipleDrtpEndpoints();
-        TestLoadConfigAppliesDrtpEndpointsCliOverride();
-        TestDefaultConfigPathUsesEnvOverlay();
-        TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv();
-        TestDefaultConfigPathRejectsMissingEnv();
-        TestVaultSecretReferenceDoesNotUseCurlCommand();
-    TestLoadConfigSkipsVaultWhenStubFileIsSet();
-        TestStubClient();
-        TestMimeAndDryRun();
-        TestDecodedVendorTextFlowsToEmail();
-        TestCurlConfigWithClientCertificate();
-        TestVendorTextDecodingAndErrorFormatting();
-        TestNoMoreDataDetection();
-        TestLoggerWritesJsonLine();
+        RunTest("TestParseCli", TestParseCli);
+        RunTest("TestLoadConfig", TestLoadConfig);
+        RunTest("TestLoadConfigRejectsMissingCliEnv", TestLoadConfigRejectsMissingCliEnv);
+        RunTest("TestLoadConfigMergesSharedPropertiesAndEnvOverlay", TestLoadConfigMergesSharedPropertiesAndEnvOverlay);
+        RunTest("TestLoadConfigParsesMultipleDrtpEndpoints", TestLoadConfigParsesMultipleDrtpEndpoints);
+        RunTest("TestLoadConfigAppliesDrtpEndpointsCliOverride", TestLoadConfigAppliesDrtpEndpointsCliOverride);
+        RunTest("TestDefaultConfigPathUsesEnvOverlay", TestDefaultConfigPathUsesEnvOverlay);
+        RunTest("TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv", TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv);
+        RunTest("TestDefaultConfigPathRejectsMissingEnv", TestDefaultConfigPathRejectsMissingEnv);
+        RunTest("TestVaultSecretReferenceDoesNotUseCurlCommand", TestVaultSecretReferenceDoesNotUseCurlCommand);
+        RunTest("TestLoadConfigSkipsVaultWhenStubFileIsSet", TestLoadConfigSkipsVaultWhenStubFileIsSet);
+        RunTest("TestStubClient", TestStubClient);
+        RunTest("TestMimeAndDryRun", TestMimeAndDryRun);
+        RunTest("TestDecodedVendorTextFlowsToEmail", TestDecodedVendorTextFlowsToEmail);
+        RunTest("TestCurlConfigWithClientCertificate", TestCurlConfigWithClientCertificate);
+        RunTest("TestVendorTextDecodingAndErrorFormatting", TestVendorTextDecodingAndErrorFormatting);
+        RunTest("TestNoMoreDataDetection", TestNoMoreDataDetection);
+        RunTest("TestLoggerWritesJsonLine", TestLoggerWritesJsonLine);
         std::cout << "All report tests passed\n";
         return 0;
     }

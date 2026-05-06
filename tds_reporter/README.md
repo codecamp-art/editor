@@ -21,6 +21,7 @@ At runtime, `--env dev|qa|prod` loads `config/report.properties` first and then 
 
 Packaged runs must start with `bin/report --env <env>` and normally do not need `--config`.
 Airflow scheduled runs should pass `--report-time HH:MM` so the email body uses the DAG schedule time, for example `--report-time 08:30` or `--report-time 15:30`.
+`REPORT_CONFIG_DIR` can point `--env` lookup at an explicit config directory; CI uses it to keep unit tests from loading stale build-directory configs.
 
 Vault layout:
 
