@@ -2,12 +2,18 @@
 #include "logging.h"
 #include "text_utils.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -71,6 +77,30 @@ void SetEnv(const std::string& key, const std::string& value)
 #else
     setenv(key.c_str(), value.c_str(), 1);
 #endif
+}
+
+int CurrentProcessId()
+{
+#ifdef _WIN32
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
+
+std::filesystem::path UniqueTempPath(const std::string& prefix)
+{
+    static int counter = 0;
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path()
+        / (prefix + "_" + std::to_string(CurrentProcessId()) + "_" + std::to_string(now) + "_" + std::to_string(counter++));
+}
+
+std::filesystem::path CreateUniqueTempDir(const std::string& prefix)
+{
+    const std::filesystem::path path = UniqueTempPath(prefix);
+    std::filesystem::create_directories(path);
+    return path;
 }
 
 class ScopedCurrentPath
@@ -155,9 +185,7 @@ void TestParseCli()
 
 void TestLoadConfig()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_config_test");
     const std::filesystem::path config_path = temp_dir / "test.properties";
 
     SetEnv("TDS_TEST_PASSWORD", "super-secret");
@@ -200,9 +228,7 @@ void TestLoadConfig()
 
 void TestLoadConfigRejectsMissingCliEnv()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_file_env_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_config_file_env_test");
     const std::filesystem::path config_path = temp_dir / "test.properties";
 
     std::ofstream output(config_path);
@@ -224,9 +250,7 @@ void TestLoadConfigRejectsMissingCliEnv()
 
 void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_overlay_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_config_overlay_test");
     const std::filesystem::path shared_path = temp_dir / "report.properties";
     const std::filesystem::path config_path = temp_dir / "qa.properties";
 
@@ -278,9 +302,7 @@ void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
 
 void TestLoadConfigParsesMultipleDrtpEndpoints()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_drtp_multi_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_config_drtp_multi_test");
     const std::filesystem::path config_path = temp_dir / "qa.properties";
 
     WriteFile(
@@ -306,9 +328,7 @@ void TestLoadConfigParsesMultipleDrtpEndpoints()
 
 void TestLoadConfigAppliesDrtpEndpointsCliOverride()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_config_drtp_endpoints_cli_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_config_drtp_endpoints_cli_test");
     const std::filesystem::path config_path = temp_dir / "qa.properties";
 
     WriteFile(
@@ -335,8 +355,7 @@ void TestLoadConfigAppliesDrtpEndpointsCliOverride()
 
 void TestDefaultConfigPathUsesEnvOverlay()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_config_env_test";
-    std::filesystem::remove_all(temp_dir);
+    const std::filesystem::path temp_dir = UniqueTempPath("report_default_config_env_test");
     std::filesystem::create_directories(temp_dir / "config");
     WriteFile(temp_dir / "config" / "report.properties", "# shared\n");
     WriteFile(temp_dir / "config" / "qa.properties", "# qa\n");
@@ -351,8 +370,7 @@ void TestDefaultConfigPathUsesEnvOverlay()
 
 void TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_default_unknown_env_test";
-    std::filesystem::remove_all(temp_dir);
+    const std::filesystem::path temp_dir = UniqueTempPath("report_default_unknown_env_test");
     std::filesystem::create_directories(temp_dir / "config");
     WriteFile(temp_dir / "config" / "report.properties", "# shared\n");
 
@@ -373,9 +391,7 @@ void TestDefaultConfigPathRejectsMissingEnv()
 
 void TestVaultSecretReferenceDoesNotUseCurlCommand()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_vault_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_vault_test");
     const std::filesystem::path config_path = temp_dir / "vault.properties";
 
     std::ofstream output(config_path);
@@ -417,9 +433,7 @@ void TestVaultSecretReferenceDoesNotUseCurlCommand()
 
 void TestLoadConfigSkipsVaultWhenStubFileIsSet()
 {
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "report_stub_vault_bypass_test";
-    std::filesystem::remove_all(temp_dir);
-    std::filesystem::create_directories(temp_dir);
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_stub_vault_bypass_test");
     const std::filesystem::path config_path = temp_dir / "stub.properties";
 
     std::ofstream output(config_path);
@@ -445,9 +459,7 @@ void TestLoadConfigSkipsVaultWhenStubFileIsSet()
 
 void TestStubClient()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_output_test";
-    std::filesystem::remove_all(output_dir);
-    std::filesystem::create_directories(output_dir);
+    const std::filesystem::path output_dir = CreateUniqueTempDir("report_output_test");
 
     report::CliOptions cli;
     cli.stub_file = (std::filesystem::path("tests") / "data" / "stub_snapshot.csv").string();
@@ -467,9 +479,7 @@ void TestStubClient()
 
 void TestMimeAndDryRun()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_mail_test";
-    std::filesystem::remove_all(output_dir);
-    std::filesystem::create_directories(output_dir);
+    const std::filesystem::path output_dir = CreateUniqueTempDir("report_mail_test");
     const report::AppConfig config = BuildTestConfig(output_dir);
 
     const std::vector<report::CustomerFundRecord> records {
@@ -559,9 +569,7 @@ void TestMimeAndDryRun()
 
 void TestDecodedVendorTextFlowsToEmail()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_gbk_output_test";
-    std::filesystem::remove_all(output_dir);
-    std::filesystem::create_directories(output_dir);
+    const std::filesystem::path output_dir = CreateUniqueTempDir("report_gbk_output_test");
     const report::AppConfig config = BuildTestConfig(output_dir);
     const std::string customer_name = report::DecodeVendorText("\xC9\xCF\xBA\xA3\xBF\xCD\xBB\xA7");
 
@@ -582,9 +590,7 @@ void TestDecodedVendorTextFlowsToEmail()
 
 void TestCurlConfigWithClientCertificate()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_curl_test";
-    std::filesystem::remove_all(output_dir);
-    std::filesystem::create_directories(output_dir);
+    const std::filesystem::path output_dir = CreateUniqueTempDir("report_curl_test");
     report::AppConfig config = BuildTestConfig(output_dir);
     config.smtp.host = "mta-hub.example.com.cn";
     config.smtp.port = 2587;
@@ -637,9 +643,7 @@ void TestVendorTextDecodingAndErrorFormatting()
         formatted.find("failed to create TDS handle") == std::string::npos,
         "formatted TDS error should not include maintained internal descriptions");
 
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_gbk_log_test";
-    std::filesystem::remove_all(output_dir);
-    std::filesystem::create_directories(output_dir);
+    const std::filesystem::path output_dir = CreateUniqueTempDir("report_gbk_log_test");
     report::AppConfig config = BuildTestConfig(output_dir);
     report::InitializeLogger(config);
     report::LogError("tds_vendor_error", formatted);
@@ -665,9 +669,7 @@ void TestNoMoreDataDetection()
 
 void TestLoggerWritesJsonLine()
 {
-    const std::filesystem::path output_dir = std::filesystem::temp_directory_path() / "report_logger_test";
-    std::filesystem::remove_all(output_dir);
-    std::filesystem::create_directories(output_dir);
+    const std::filesystem::path output_dir = CreateUniqueTempDir("report_logger_test");
 
     report::AppConfig config = BuildTestConfig(output_dir);
     report::InitializeLogger(config);
