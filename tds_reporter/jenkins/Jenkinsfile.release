@@ -9,14 +9,14 @@ pipeline {
 
   environment {
     PROJECT_DIR = "${env.WORKSPACE}"
-    BUILD_DIR = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}"
-    STAGE_DIR = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}/client_funding_risk_report"
+    BUILD_DIR = "${env.WORKSPACE}/build_release"
+    STAGE_DIR = "${env.WORKSPACE}/build_release/client_funding_risk_report"
     PACKAGE_NAME = "client_funding_risk_report-rhel8-${env.BUILD_NUMBER}.tar.gz"
-    PACKAGE_PATH = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}/${PACKAGE_NAME}"
+    PACKAGE_PATH = "${env.WORKSPACE}/build_release/${PACKAGE_NAME}"
     TDS_PACKAGE_DOWNLOAD_DIR = "${env.WORKSPACE}/tds_package_download"
     TDS_PACKAGE_EXTRACT_DIR = "${env.WORKSPACE}/tds_package_extract"
     TDS_DIR = "${env.WORKSPACE}/tds"
-    SMOKE_INSTALL_DIR = "${env.WORKSPACE}/build_release/${env.BUILD_NUMBER}/smoke_install"
+    SMOKE_INSTALL_DIR = "${env.WORKSPACE}/smoke_install"
     BUILD_TYPE = "Release"
     RUN_STUB_SMOKE = "true"
     REPORT_RUNTIME_ENV = "qa"
@@ -77,8 +77,8 @@ pipeline {
           test -f "$STAGE_DIR/config/qa.properties"
           test -f "$STAGE_DIR/config/prod.properties"
           test -f "$PACKAGE_PATH"
-          find "$STAGE_DIR/lib" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) | sort
-          test -f "$STAGE_DIR/lib/cpack.dat"
+          find "$STAGE_DIR/lib64" -maxdepth 1 -type f \\( -name '*.so' -o -name '*.so.*' -o -name '*.dat' \\) | sort
+          test -f "$STAGE_DIR/bin/cpack.dat"
         '''
       }
     }
