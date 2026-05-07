@@ -127,8 +127,8 @@ report::AppConfig BuildTestConfig(const std::filesystem::path& output_dir)
     config.env_name = "test";
     config.email_subject = "Test Client Funding and Risk Ratio Report";
     config.output_dir = output_dir.string();
-    config.default_to = {"ops@example.com"};
-    config.default_cc = {"cc@example.com"};
+    config.email_to = {"ops@example.com"};
+    config.email_cc = {"cc@example.com"};
     config.smtp.host = "localhost";
     config.smtp.port = 1025;
     config.smtp.from = "sender@example.com";
@@ -275,8 +275,8 @@ void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
         "tds.drtp_endpoints=10.10.20.30:6003\n"
         "vault.secret_path=tds/qa\n"
         "smtp.from=sender-qa@example.com\n"
-        "email.default_to=qa-ops@example.com\n"
-        "email.default_cc=qa-cc@example.com\n"
+        "email.to=qa-ops@example.com\n"
+        "email.cc=qa-cc@example.com\n"
         "email.subject=QA Report\n");
 
     report::CliOptions cli;
@@ -292,8 +292,8 @@ void TestLoadConfigMergesSharedPropertiesAndEnvOverlay()
     AssertTrue(config.smtp.host == "mail.shared", "shared properties smtp host should be applied");
     AssertTrue(config.smtp.port == 2587, "shared properties smtp port should be applied");
     AssertTrue(config.smtp.from == "sender-qa@example.com", "overlay smtp sender should be applied");
-    AssertTrue(config.default_to == std::vector<std::string>{"qa-ops@example.com"}, "overlay recipients should be applied");
-    AssertTrue(config.default_cc == std::vector<std::string>{"qa-cc@example.com"}, "overlay cc should be applied");
+    AssertTrue(config.email_to == std::vector<std::string>{"qa-ops@example.com"}, "overlay recipients should be applied");
+    AssertTrue(config.email_cc == std::vector<std::string>{"qa-cc@example.com"}, "overlay cc should be applied");
     AssertTrue(config.email_subject == "QA Report", "overlay subject should be applied");
     AssertTrue(config.vault.secret_engine == "secret", "shared vault secret engine should be applied");
     AssertTrue(config.vault.secret_key == "password", "shared vault secret key should be applied");

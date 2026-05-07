@@ -1774,8 +1774,8 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     config.output_dir = cli.output_dir.empty()
         ? ResolveConfigRelativePath(config_dir, GetValue(properties, "report.output_dir", config.output_dir))
         : cli.output_dir;
-    config.default_to = SplitList(GetValue(properties, "email.default_to"));
-    config.default_cc = SplitList(GetValue(properties, "email.default_cc"));
+    config.email_to = SplitList(GetValue(properties, "email.to"));
+    config.email_cc = SplitList(GetValue(properties, "email.cc"));
     config.log.directory = ResolveConfigRelativePath(config_dir, GetValue(properties, "log.dir", "../logs"));
     config.log.level = ParseLogLevelValue(GetValue(properties, "log.level", config.log.level));
 
@@ -1846,12 +1846,12 @@ MailRequest BuildMailRequest(
 {
     MailRequest request;
     request.from = config.smtp.from;
-    request.to = EffectiveRecipients(cli.to, config.default_to);
-    request.cc = EffectiveRecipients(cli.cc, config.default_cc);
+    request.to = EffectiveRecipients(cli.to, config.email_to);
+    request.cc = EffectiveRecipients(cli.cc, config.email_cc);
 
     if (request.to.empty())
     {
-        throw std::runtime_error("no email recipients configured; use config email.default_to or --to");
+        throw std::runtime_error("no email recipients configured; use config email.to or --to");
     }
 
     request.subject = BuildReportTitle(config, trade_date);

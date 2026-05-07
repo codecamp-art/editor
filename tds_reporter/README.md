@@ -11,7 +11,7 @@ The package is environment-neutral.
 - properties files keep direct values such as `tds.user=10000`; runtime overrides use the same property key on the command line
 - the runtime environment name is selected only by `--env`; properties files do not contain `env.name`
 - shared SMTP transport settings stay in `report.properties`
-- each environment file owns `smtp.from`, `email.default_to`, and `email.default_cc`; `email.subject` may be overridden per environment
+- each environment file owns `smtp.from`, `email.to`, and `email.cc`; `email.subject` may be overridden per environment
 - `smtp.from` is required from the environment overlay, and `email.subject` must exist after merge (base + overlay)
 - SMTP relay authentication is certificate-only; there is no SMTP username/password configuration
 - SMTP client certificate and key type are fixed to PEM; encrypted private keys are not supported

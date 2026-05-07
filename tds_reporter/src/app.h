@@ -71,8 +71,8 @@ struct AppConfig
     std::string email_subject;
     std::string email_template_path;
     std::string output_dir = "./output";
-    std::vector<std::string> default_to;
-    std::vector<std::string> default_cc;
+    std::vector<std::string> email_to;
+    std::vector<std::string> email_cc;
     TdsConnectionConfig tds;
     SmtpConfig smtp;
     LogConfig log;
