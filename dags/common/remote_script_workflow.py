@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from pathlib import Path
 
 from airflow.sdk import get_current_context, task
@@ -63,6 +64,8 @@ class RemoteScriptDefinition:
     schedule: str | None
     remote_script: str | None
     remote_command_prefix: list[str] | None
+    remote_command_prefix_base: list[str] | None = None
+    remote_command_prefix_append: list[str] | None = None
     sudo_user: str
     working_dir: str | None
     fields: dict
@@ -118,6 +121,25 @@ def merge_params_with_priority(*param_maps: dict | None) -> dict:
     return merged
 
 
+def resolve_schedule_or_now_hhmm(context: dict, timezone_name: str) -> str:
+    dag_run = context.get("dag_run")
+    logical_date = context.get("logical_date")
+
+    is_manual = bool(dag_run and getattr(dag_run, "run_type", "") == "manual")
+    if is_manual or logical_date is None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(timezone_name)).strftime("%H:%M")
+
+    return logical_date.in_timezone(timezone_name).strftime("%H:%M")
+
+
+def render_runtime_tokens(parts: list[str], context: dict, timezone_name: str) -> list[str]:
+    resolved_time = resolve_schedule_or_now_hhmm(context, timezone_name)
+    return [part.replace("{{SCHEDULE_OR_NOW_HHMM}}", resolved_time) for part in parts]
+
+
 def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
     args: list[str] = []
 
@@ -169,6 +191,10 @@ def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
 
 
 def resolve_command_prefix(definition: RemoteScriptDefinition) -> list[str]:
+    if definition.remote_command_prefix_base or definition.remote_command_prefix_append:
+        base = definition.remote_command_prefix_base or []
+        append = definition.remote_command_prefix_append or []
+        return [*base, *append]
     if definition.remote_command_prefix:
         return definition.remote_command_prefix
     if definition.remote_script:
@@ -341,9 +367,14 @@ def create_remote_script_dag(
             ]
 
             env_vars = build_env_vars_from_fields(validated, merged_fields)
+            resolved_command_prefix = render_runtime_tokens(
+                command_prefix,
+                context,
+                runtime_context["timezone"],
+            )
 
             inner_command = build_inner_command(
-                command_prefix=command_prefix,
+                command_prefix=resolved_command_prefix,
                 app_args=app_args,
                 working_dir=definition.working_dir,
                 env_vars=env_vars,
@@ -423,6 +454,14 @@ def create_remote_script_definition_variant(
         "remote_command_prefix",
         base_definition.remote_command_prefix,
     )
+    resolved_remote_command_prefix_base = env_override.get(
+        "remote_command_prefix_base",
+        base_definition.remote_command_prefix_base,
+    )
+    resolved_remote_command_prefix_append = env_override.get(
+        "remote_command_prefix_append",
+        base_definition.remote_command_prefix_append,
+    )
     resolved_trading_day_check = env_override.get(
         "trading_day_check",
         base_definition.trading_day_check,
@@ -464,6 +503,8 @@ def create_remote_script_definition_variant(
         schedule=resolved_schedule,
         remote_script=resolved_remote_script,
         remote_command_prefix=resolved_remote_command_prefix,
+        remote_command_prefix_base=resolved_remote_command_prefix_base,
+        remote_command_prefix_append=resolved_remote_command_prefix_append,
         sudo_user=resolved_sudo_user,
         working_dir=resolved_working_dir,
         fields=fields,
@@ -506,6 +547,8 @@ def build_remote_script_definition_from_config(
         schedule=base.get("schedule"),
         remote_script=base.get("remote_script"),
         remote_command_prefix=base.get("remote_command_prefix"),
+        remote_command_prefix_base=base.get("remote_command_prefix_base"),
+        remote_command_prefix_append=base.get("remote_command_prefix_append"),
         sudo_user=base["sudo_user"],
         working_dir=base.get("working_dir"),
         fields=base.get("fields") or {},

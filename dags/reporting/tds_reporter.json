@@ -1,0 +1,66 @@
+{
+  "base": {
+    "report_id": "tds_reporter",
+    "dag_id": "tds-reporter-base-not-used-directly",
+    "title": "TDS Reporter",
+    "description": "# TDS Reporter\n\nDaily reporting task for TDS reporter.",
+    "schedule": null,
+    "remote_script": null,
+    "remote_command_prefix": null,
+    "sudo_user": "reportuser_default",
+    "working_dir": "/opt/reporting/tds-reporter",
+    "fields": {
+      "email_to": {
+        "type": "string",
+        "description": "Email To recipients",
+        "cli_name": "email.to"
+      },
+      "email_cc": {
+        "type": "string",
+        "description": "Email CC recipients",
+        "cli_name": "email.cc"
+      },
+      "email_subject": {
+        "type": "string",
+        "description": "Email subject",
+        "cli_name": "email.subject"
+      },
+      "drtp_endpoint": {
+        "type": "string",
+        "description": "DRTP endpoint",
+        "cli_name": "drtp.endpoint"
+      }
+    },
+    "adhoc_rules": {},
+    "preset_params": {
+      "run_mode": "normal"
+    },
+    "command_timeout_seconds": 3600,
+    "tags": [
+      "reporting",
+      "tds",
+      "daily",
+      "ssh"
+    ],
+    "remote_command_prefix_base": [
+      "java",
+      "-jar",
+      "tds-reporter.jar"
+    ],
+    "remote_command_prefix_append": [
+      "--report-time={{SCHEDULE_OR_NOW_HHMM}}"
+    ]
+  },
+  "variants": [
+    {
+      "dag_id": "tds-reporter-daily",
+      "title_suffix": "Daily",
+      "description_suffix": "Runs twice daily at 08:30 and 15:30.",
+      "schedule": "30 8,15 * * 1-5",
+      "tags_additional": [
+        "scheduled",
+        "twice-daily"
+      ]
+    }
+  ]
+}
