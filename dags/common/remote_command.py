@@ -4,6 +4,31 @@ import shlex
 from typing import Iterable
 
 
+def normalize_command_parts(
+    parts: Iterable[str] | str | None,
+    *,
+    field_name: str = "command parts",
+) -> list[str]:
+    if parts is None:
+        return []
+
+    raw_parts = [parts] if isinstance(parts, str) else parts
+
+    normalized: list[str] = []
+    for part in raw_parts:
+        if part is None or part == "":
+            continue
+        if not isinstance(part, str):
+            raise TypeError(f"{field_name} must contain strings, got {type(part).__name__}.")
+
+        try:
+            normalized.extend(shlex.split(part))
+        except ValueError as exc:
+            raise ValueError(f"{field_name} contains invalid shell fragment: {part!r}") from exc
+
+    return normalized
+
+
 def shell_join(parts: Iterable[str]) -> str:
     return " ".join(shlex.quote(part) for part in parts if part is not None and part != "")
 

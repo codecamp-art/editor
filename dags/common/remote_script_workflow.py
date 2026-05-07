@@ -26,6 +26,7 @@ from common.field_schema import (
 from common.remote_command import (
     build_inner_command,
     build_sudo_bash_command,
+    normalize_command_parts,
     split_extra_args,
 )
 from common.ssh_utils import execute_ssh_command
@@ -63,9 +64,9 @@ class RemoteScriptDefinition:
     description: str
     schedule: str | None
     remote_script: str | None
-    remote_command_prefix: list[str] | None
-    remote_command_prefix_base: list[str] | None = None
-    remote_command_prefix_append: list[str] | None = None
+    remote_command_prefix: list[str] | str | None
+    remote_command_prefix_base: list[str] | str | None = None
+    remote_command_prefix_append: list[str] | str | None = None
     sudo_user: str
     working_dir: str | None
     fields: dict
@@ -192,11 +193,20 @@ def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
 
 def resolve_command_prefix(definition: RemoteScriptDefinition) -> list[str]:
     if definition.remote_command_prefix_base or definition.remote_command_prefix_append:
-        base = definition.remote_command_prefix_base or []
-        append = definition.remote_command_prefix_append or []
+        base = normalize_command_parts(
+            definition.remote_command_prefix_base,
+            field_name="remote_command_prefix_base",
+        )
+        append = normalize_command_parts(
+            definition.remote_command_prefix_append,
+            field_name="remote_command_prefix_append",
+        )
         return [*base, *append]
     if definition.remote_command_prefix:
-        return definition.remote_command_prefix
+        return normalize_command_parts(
+            definition.remote_command_prefix,
+            field_name="remote_command_prefix",
+        )
     if definition.remote_script:
         return [definition.remote_script]
     raise ValueError(
