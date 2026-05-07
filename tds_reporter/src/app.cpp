@@ -66,6 +66,70 @@ bool IsAscii(const std::string& value)
         [](unsigned char ch) { return ch <= 0x7F; });
 }
 
+bool IsPropertyOverrideKey(const std::string& key)
+{
+    if (key.empty() || key.find('.') == std::string::npos || key.front() == '.' || key.back() == '.')
+    {
+        return false;
+    }
+
+    return std::all_of(
+        key.begin(),
+        key.end(),
+        [](unsigned char ch) {
+            return std::isalnum(ch) != 0 || ch == '.' || ch == '_' || ch == '-';
+        });
+}
+
+bool TryReadPropertyOverride(
+    const std::string& arg,
+    int& index,
+    int argc,
+    char** argv,
+    CliOptions& options)
+{
+    std::string key_value = arg;
+    if (key_value.rfind("--", 0) == 0)
+    {
+        key_value = key_value.substr(2);
+    }
+    else if (key_value.rfind("-D", 0) == 0 && key_value.size() > 2)
+    {
+        key_value = key_value.substr(2);
+    }
+    else if (!key_value.empty() && key_value.front() == '-')
+    {
+        return false;
+    }
+
+    const std::size_t delimiter = key_value.find('=');
+    if (delimiter != std::string::npos)
+    {
+        const std::string key = Trim(key_value.substr(0, delimiter));
+        if (!IsPropertyOverrideKey(key))
+        {
+            return false;
+        }
+
+        options.property_overrides[key] = key_value.substr(delimiter + 1);
+        return true;
+    }
+
+    const std::string key = Trim(key_value);
+    if (!IsPropertyOverrideKey(key))
+    {
+        return false;
+    }
+    if (index + 1 >= argc)
+    {
+        throw std::runtime_error("missing value for property override " + key);
+    }
+
+    ++index;
+    options.property_overrides[key] = argv[index];
+    return true;
+}
+
 std::string ExpandEnvReference(const std::string& value)
 {
     if (value.size() < 4 || value[0] != '$' || value[1] != '{' || value.back() != '}')
@@ -1658,6 +1722,10 @@ CliOptions ParseCli(int argc, char** argv)
             options.trade_date_override = ParseIntValue(value, "--trade-date");
             continue;
         }
+        if (TryReadPropertyOverride(arg, index, argc, argv, options))
+        {
+            continue;
+        }
 
         throw std::runtime_error("unknown argument: " + arg);
     }
@@ -1692,7 +1760,11 @@ AppConfig LoadConfig(const std::string& path, const CliOptions& cli)
     }
 
     const std::filesystem::path config_dir = std::filesystem::absolute(path).parent_path();
-    const auto properties = ReadProperties(path);
+    auto properties = ReadProperties(path);
+    for (const auto& [key, value] : cli.property_overrides)
+    {
+        properties[key] = value;
+    }
     AppConfig config;
 
     config.env_name = cli.env;

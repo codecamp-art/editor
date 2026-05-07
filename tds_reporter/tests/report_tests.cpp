@@ -167,7 +167,10 @@ void TestParseCli()
         "--trade-date",
         "20260419",
         "--report-time",
-        "08:30"
+        "08:30",
+        "tds.user=20000",
+        "--smtp.host=mail.override",
+        "-Dlog.level=debug"
     };
 
     const report::CliOptions options =
@@ -181,6 +184,9 @@ void TestParseCli()
     AssertTrue(options.dry_run, "expected dry_run=true");
     AssertTrue(options.trade_date_override == 20260419, "expected trade date override");
     AssertTrue(options.report_time == "08:30", "expected report time override");
+    AssertTrue(options.property_overrides.at("tds.user") == "20000", "expected property override tds.user");
+    AssertTrue(options.property_overrides.at("smtp.host") == "mail.override", "expected property override smtp.host");
+    AssertTrue(options.property_overrides.at("log.level") == "debug", "expected property override log.level");
 }
 
 void TestLoadConfig()
@@ -351,6 +357,37 @@ void TestLoadConfigAppliesDrtpEndpointsCliOverride()
     AssertTrue(config.tds.drtp_endpoints[0].port == 7101, "CLI endpoint port should be parsed");
     AssertTrue(config.tds.drtp_endpoints[1].host == "192.0.2.21", "second CLI endpoint host should be parsed");
     AssertTrue(config.tds.drtp_endpoints[1].port == 7102, "second CLI endpoint port should be parsed");
+}
+
+void TestLoadConfigAppliesPropertyCliOverrides()
+{
+    const std::filesystem::path temp_dir = CreateUniqueTempDir("report_config_property_cli_test");
+    const std::filesystem::path config_path = temp_dir / "qa.properties";
+
+    WriteFile(
+        config_path,
+        "tds.drtp_endpoints=10.10.20.30:6003\n"
+        "tds.user=10000\n"
+        "tds.password=secret\n"
+        "tds.req_timeout_ms=300000\n"
+        "smtp.host=mail.local\n"
+        "smtp.port=2587\n"
+        "smtp.from=sender@example.com\n"
+        "email.subject=QA Report\n");
+
+    report::CliOptions cli;
+    cli.env = "qa";
+    cli.property_overrides["tds.user"] = "20000";
+    cli.property_overrides["tds.req_timeout_ms"] = "42";
+    cli.property_overrides["smtp.host"] = "mail.override";
+    cli.property_overrides["email.subject"] = "Override Report";
+
+    const report::AppConfig config = report::LoadConfig(config_path.string(), cli);
+
+    AssertTrue(config.tds.user == "20000", "property override should replace tds.user");
+    AssertTrue(config.tds.req_timeout_ms == 42, "property override should replace tds.req_timeout_ms");
+    AssertTrue(config.smtp.host == "mail.override", "property override should replace smtp.host");
+    AssertTrue(config.email_subject == "Override Report", "property override should replace email.subject");
 }
 
 void TestDefaultConfigPathUsesEnvOverlay()
@@ -709,6 +746,7 @@ int main()
         RunTest("TestLoadConfigMergesSharedPropertiesAndEnvOverlay", TestLoadConfigMergesSharedPropertiesAndEnvOverlay);
         RunTest("TestLoadConfigParsesMultipleDrtpEndpoints", TestLoadConfigParsesMultipleDrtpEndpoints);
         RunTest("TestLoadConfigAppliesDrtpEndpointsCliOverride", TestLoadConfigAppliesDrtpEndpointsCliOverride);
+        RunTest("TestLoadConfigAppliesPropertyCliOverrides", TestLoadConfigAppliesPropertyCliOverrides);
         RunTest("TestDefaultConfigPathUsesEnvOverlay", TestDefaultConfigPathUsesEnvOverlay);
         RunTest("TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv", TestDefaultConfigPathDoesNotFallbackToSharedPropertiesForUnknownEnv);
         RunTest("TestDefaultConfigPathRejectsMissingEnv", TestDefaultConfigPathRejectsMissingEnv);

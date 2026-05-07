@@ -14,7 +14,8 @@ void PrintUsage()
         << "  report --env dev|qa|prod [--config path] [--to a@x.com,b@y.com] [--cc c@x.com]\n"
         << "               [--drtp-endpoints host1:port1,host2:port2]\n"
         << "               [--cust-list 1001,1002] [--output-dir path] [--trade-date YYYYMMDD]\n"
-        << "               [--report-time HH:MM] [--dry-run] [--stub-file path]\n\n"
+        << "               [--report-time HH:MM] [--dry-run] [--stub-file path]\n"
+        << "               [tds.user=10000] [--smtp.host=mail.example.com] [-Dlog.level=debug]\n\n"
         << "Notes:\n"
         << "  --stub-file lets you debug without a local supplier TDS runtime.\n"
         << "  Windows local builds can read DRTP with win32 supplier files, but must use --dry-run.\n"
@@ -22,6 +23,7 @@ void PrintUsage()
         << "  --drtp-endpoints temporarily overrides all configured DRTP access points.\n"
         << "  All runs require --env; packaged runs auto-discover config beside the executable.\n"
         << "  --config only changes which config file is loaded; it does not select the environment.\n"
+        << "  key=value, --key=value, and -Dkey=value override properties after config files are merged.\n"
         << "  --report-time sets the As of HH:MM text, usually from the Airflow schedule time.\n"
         << "  --dry-run writes an .eml preview instead of calling curl SMTP.\n";
 }

@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace report {
@@ -91,6 +92,7 @@ struct CliOptions
     std::string output_dir;
     std::string stub_file;
     std::string report_time;
+    std::unordered_map<std::string, std::string> property_overrides;
     int trade_date_override = 0;
 };
 

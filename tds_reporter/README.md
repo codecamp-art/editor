@@ -8,6 +8,7 @@ The package is environment-neutral.
 
 - `config/report.properties` holds the shared defaults
 - `config/dev.properties`, `config/qa.properties`, and `config/prod.properties` only hold environment-specific overrides
+- properties files keep direct values such as `tds.user=10000`; runtime overrides use the same property key on the command line
 - the runtime environment name is selected only by `--env`; properties files do not contain `env.name`
 - shared SMTP transport settings stay in `report.properties`
 - each environment file owns `smtp.from`, `email.default_to`, and `email.default_cc`; `email.subject` may be overridden per environment
@@ -18,6 +19,11 @@ The package is environment-neutral.
 - each environment file owns only its environment-specific `vault.secret_path`
 
 At runtime, `--env dev|qa|prod` loads `config/report.properties` first and then overlays `config/<env>.properties`. `--config` can point at a custom properties file, but it does not replace `--env`.
+Command-line `key=value`, `--key=value`, and `-Dkey=value` arguments are applied after both files are merged, so temporary overrides can reuse the same property names:
+
+```bash
+bin/report --env qa tds.user=20000 --smtp.host=mta-qa.example.com -Dlog.level=debug
+```
 
 Packaged runs must start with `bin/report --env <env>` and normally do not need `--config`.
 Airflow scheduled runs should pass `--report-time HH:MM` so the email body uses the DAG schedule time, for example `--report-time 08:30` or `--report-time 15:30`.
@@ -232,7 +238,7 @@ The application does not read or require `kerberos_realm`, `keytab_path`, `krb5c
 
 `vault.auth_path` was removed. It only meant the Vault Kerberos auth mount used for login, not the secret engine or secret path. The current implementation assumes the Kerberos auth method is mounted at the standard `kerberos` path.
 
-`tds.password` can still be set directly through `TDS_PASSWORD` for local override. When it is empty and `vault.secret_path` is configured, the program reads the password from Vault using `vault.secret_engine`, `vault.secret_path`, and `vault.secret_key`.
+When `tds.password` is empty and `vault.secret_path` is configured, the program reads the password from Vault using `vault.secret_engine`, `vault.secret_path`, and `vault.secret_key`. For temporary local overrides, use the same property key in a local config file or on the command line, for example `tds.password=...`.
 
 `bin/report` does not call `vault-http.sh`, `python3`, external `curl`, or the HashiCorp Vault CLI for Vault access. Vault tokens are kept inside the process and are not written to command-line arguments, environment variables, or temp files. Vault HTTP failure messages only include libcurl errors or HTTP status, not response bodies.
 

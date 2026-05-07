@@ -136,9 +136,10 @@
 
 `LoadConfig` 会读取 `*.properties`，并支持：
 
-- `${ENV_VAR:default}`
+- 直接配置值，例如 `tds.user=10000`
+- 命令行 `key=value` 覆盖，例如 `tds.user=20000`
 
-这种环境变量占位写法。
+命令行覆盖会在 `report.properties` 和环境 overlay 合并后应用。
 
 它会把配置分别装进：
 
