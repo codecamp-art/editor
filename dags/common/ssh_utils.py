@@ -6,6 +6,24 @@ from airflow.exceptions import AirflowException
 from airflow.providers.ssh.hooks.ssh import SSHHook
 from airflow.sdk import get_current_context
 
+DEFAULT_SSH_KEEPALIVE_INTERVAL_SECONDS = 15
+
+
+def get_ssh_keepalive_interval() -> int:
+    raw_value = os.getenv("SSH_KEEPALIVE_INTERVAL")
+    if raw_value in (None, ""):
+        return DEFAULT_SSH_KEEPALIVE_INTERVAL_SECONDS
+
+    try:
+        interval = int(raw_value)
+    except ValueError as exc:
+        raise ValueError("SSH_KEEPALIVE_INTERVAL must be an integer number of seconds.") from exc
+
+    if interval < 0:
+        raise ValueError("SSH_KEEPALIVE_INTERVAL must be zero or a positive integer.")
+
+    return interval
+
 
 def build_default_ssh_hook(remote_host: str) -> SSHHook:
     username = os.getenv("SSH_USERNAME") or None
@@ -14,6 +32,7 @@ def build_default_ssh_hook(remote_host: str) -> SSHHook:
         remote_host=remote_host,
         username=username,
         password=password,
+        keepalive_interval=get_ssh_keepalive_interval(),
     )
 
 
@@ -23,10 +42,12 @@ def execute_ssh_command(
     remote_host: str,
     command: str,
     cmd_timeout: int,
+    get_pty: bool | None = None,
 ) -> str:
     context = get_current_context()
     ssh_hook = build_default_ssh_hook(remote_host)
-    get_pty = command.startswith("sudo")
+    if get_pty is None:
+        get_pty = command.startswith("sudo")
 
     with ssh_hook.get_conn() as ssh_client:
         exit_status, agg_stdout, agg_stderr = ssh_hook.exec_ssh_client_command(

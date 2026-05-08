@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from pathlib import Path
 
@@ -26,6 +27,8 @@ from common.field_schema import (
 from common.remote_command import (
     build_inner_command,
     build_sudo_bash_command,
+    build_systemd_run_command,
+    build_systemd_unit_name,
     normalize_command_parts,
     split_extra_args,
 )
@@ -56,6 +59,7 @@ def normalize_enabled_in_envs(enabled_in_envs: tuple[str, ...] | list[str] | str
 
     return tuple(str(env).strip() for env in enabled_in_envs if str(env).strip())
 
+
 @dataclass(frozen=True)
 class RemoteScriptDefinition:
     report_id: str
@@ -74,6 +78,12 @@ class RemoteScriptDefinition:
     trading_day_check: TradingDayCheckDefinition | None = None
     preset_params: dict | None = None
     command_timeout_seconds: int = 3600
+    retry_count: int = 2
+    retry_delay_seconds: int = 300
+    remote_execution_mode: str = "foreground"
+    systemd_run_scope: str = "system"
+    systemd_unit_prefix: str | None = None
+    systemd_runtime_max_seconds: int | None = None
     tags: tuple[str, ...] = ("reporting", "ssh")
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     target_host_options: tuple[str, ...] | list[str] | None = None
@@ -134,6 +144,17 @@ def resolve_schedule_or_now_hhmm(context: dict, timezone_name: str) -> str:
         return datetime.now(ZoneInfo(timezone_name)).strftime("%H:%M")
 
     return logical_date.in_timezone(timezone_name).strftime("%H:%M")
+
+
+def build_task_retry_kwargs(definition: RemoteScriptDefinition) -> dict:
+    if definition.retry_count < 0:
+        raise ValueError("retry_count must be zero or a positive integer.")
+    if definition.retry_delay_seconds < 0:
+        raise ValueError("retry_delay_seconds must be zero or a positive integer.")
+    return {
+        "retries": definition.retry_count,
+        "retry_delay": timedelta(seconds=definition.retry_delay_seconds),
+    }
 
 
 def render_runtime_tokens(parts: list[str], context: dict, timezone_name: str) -> list[str]:
@@ -347,6 +368,7 @@ def create_remote_script_dag(
 
     executor_config = build_minimal_tenant_executor_config(runtime_context)
     command_prefix = resolve_command_prefix(definition)
+    retry_kwargs = build_task_retry_kwargs(definition)
 
     @dag_decorator(
         dag_id=definition.dag_id,
@@ -390,20 +412,49 @@ def create_remote_script_dag(
                 env_vars=env_vars,
             )
 
-            command = build_sudo_bash_command(
-                sudo_user=definition.sudo_user,
-                inner_command=inner_command,
-            )
+            cmd_timeout = definition.command_timeout_seconds
+            command_get_pty: bool | None = None
+
+            if definition.remote_execution_mode == "foreground":
+                command = build_sudo_bash_command(
+                    sudo_user=definition.sudo_user,
+                    inner_command=inner_command,
+                )
+            elif definition.remote_execution_mode == "systemd_run":
+                runtime_max_seconds = (
+                    definition.systemd_runtime_max_seconds
+                    or definition.command_timeout_seconds
+                )
+                unit_name = build_systemd_unit_name(
+                    prefix=definition.systemd_unit_prefix or "reporting",
+                    dag_id=definition.dag_id,
+                    run_id=str(context["run_id"]),
+                )
+                command = build_systemd_run_command(
+                    unit_name=unit_name,
+                    sudo_user=definition.sudo_user,
+                    inner_command=inner_command,
+                    runtime_max_seconds=runtime_max_seconds,
+                    scope=definition.systemd_run_scope,
+                )
+                cmd_timeout = max(cmd_timeout, runtime_max_seconds + 300)
+                command_get_pty = False
+            else:
+                raise ValueError(
+                    "remote_execution_mode must be either 'foreground' or 'systemd_run'."
+                )
 
             return execute_ssh_command(
                 task_id="run_report__ssh",
                 remote_host=validated["target_host"],
                 command=command,
-                cmd_timeout=definition.command_timeout_seconds,
+                cmd_timeout=cmd_timeout,
+                get_pty=command_get_pty,
             )
 
         run_report_task = run_report.override(
-            executor_config=executor_config
+            executor_config=executor_config,
+            **retry_kwargs,
         )()
 
         if definition.trading_day_check is not None:
@@ -412,7 +463,8 @@ def create_remote_script_dag(
                 trading_day_check=definition.trading_day_check,
             )
             trading_day_check_result = trading_day_check_task.override(
-                executor_config=executor_config
+                executor_config=executor_config,
+                **retry_kwargs,
             )()
 
             trading_day_check_result >> run_report_task
@@ -480,6 +532,30 @@ def create_remote_script_definition_variant(
         "command_timeout_seconds",
         base_definition.command_timeout_seconds,
     )
+    resolved_retry_count = env_override.get(
+        "retry_count",
+        base_definition.retry_count,
+    )
+    resolved_retry_delay_seconds = env_override.get(
+        "retry_delay_seconds",
+        base_definition.retry_delay_seconds,
+    )
+    resolved_remote_execution_mode = env_override.get(
+        "remote_execution_mode",
+        base_definition.remote_execution_mode,
+    )
+    resolved_systemd_run_scope = env_override.get(
+        "systemd_run_scope",
+        base_definition.systemd_run_scope,
+    )
+    resolved_systemd_unit_prefix = env_override.get(
+        "systemd_unit_prefix",
+        base_definition.systemd_unit_prefix,
+    )
+    resolved_systemd_runtime_max_seconds = env_override.get(
+        "systemd_runtime_max_seconds",
+        base_definition.systemd_runtime_max_seconds,
+    )
     resolved_enabled_in_envs = env_override.get(
         "enabled_in_envs",
         variant.enabled_in_envs if variant.enabled_in_envs is not None else base_definition.enabled_in_envs,
@@ -522,6 +598,12 @@ def create_remote_script_definition_variant(
         trading_day_check=resolved_trading_day_check,
         preset_params=preset_params,
         command_timeout_seconds=resolved_timeout,
+        retry_count=int(resolved_retry_count),
+        retry_delay_seconds=int(resolved_retry_delay_seconds),
+        remote_execution_mode=resolved_remote_execution_mode,
+        systemd_run_scope=resolved_systemd_run_scope,
+        systemd_unit_prefix=resolved_systemd_unit_prefix,
+        systemd_runtime_max_seconds=resolved_systemd_runtime_max_seconds,
         tags=tags,
         enabled_in_envs=normalized_enabled_in_envs,
         target_host_options=resolved_target_host_options,
@@ -566,6 +648,16 @@ def build_remote_script_definition_from_config(
         trading_day_check=build_trading_day_check_definition(base.get("trading_day_check")),
         preset_params=base.get("preset_params"),
         command_timeout_seconds=int(base.get("command_timeout_seconds", 3600)),
+        retry_count=int(base.get("retry_count", 2)),
+        retry_delay_seconds=int(base.get("retry_delay_seconds", 300)),
+        remote_execution_mode=base.get("remote_execution_mode", "foreground"),
+        systemd_run_scope=base.get("systemd_run_scope", "system"),
+        systemd_unit_prefix=base.get("systemd_unit_prefix"),
+        systemd_runtime_max_seconds=(
+            int(base["systemd_runtime_max_seconds"])
+            if base.get("systemd_runtime_max_seconds") is not None
+            else None
+        ),
         tags=tuple(base.get("tags") or ("reporting", "ssh")),
         enabled_in_envs=tuple(base.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         target_host_options=base.get("target_host_options"),
