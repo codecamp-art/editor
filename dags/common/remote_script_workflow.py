@@ -97,6 +97,8 @@ class RemoteScriptScheduleVariant:
     title_suffix: str
     description_suffix: str = ""
     schedule: str | None = None
+    retry_count: int | None = None
+    retry_delay_seconds: int | None = None
     preset_params: dict | None = None
     fields_override: dict | None = None
     adhoc_rules_override: dict | None = None
@@ -534,11 +536,15 @@ def create_remote_script_definition_variant(
     )
     resolved_retry_count = env_override.get(
         "retry_count",
-        base_definition.retry_count,
+        variant.retry_count if variant.retry_count is not None else base_definition.retry_count,
     )
     resolved_retry_delay_seconds = env_override.get(
         "retry_delay_seconds",
-        base_definition.retry_delay_seconds,
+        (
+            variant.retry_delay_seconds
+            if variant.retry_delay_seconds is not None
+            else base_definition.retry_delay_seconds
+        ),
     )
     resolved_remote_execution_mode = env_override.get(
         "remote_execution_mode",
@@ -674,6 +680,12 @@ def build_remote_script_variant_from_config(
         title_suffix=variant["title_suffix"],
         description_suffix=variant.get("description_suffix", ""),
         schedule=variant.get("schedule"),
+        retry_count=(int(variant["retry_count"]) if variant.get("retry_count") is not None else None),
+        retry_delay_seconds=(
+            int(variant["retry_delay_seconds"])
+            if variant.get("retry_delay_seconds") is not None
+            else None
+        ),
         preset_params=variant.get("preset_params"),
         fields_override=variant.get("fields_override"),
         adhoc_rules_override=variant.get("adhoc_rules_override"),
