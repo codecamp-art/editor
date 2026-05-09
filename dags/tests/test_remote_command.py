@@ -47,6 +47,53 @@ class RemoteCommandTest(unittest.TestCase):
             "'cd /opt/reporting/tds-reporter && bin/report --env qa --report-time=08:30'",
         )
 
+    def test_build_inner_command_injects_remote_env_vars(self) -> None:
+        inner_command = build_inner_command(
+            command_prefix=["java", "-jar", "report.jar"],
+            app_args=[],
+            working_dir="/opt/reporting",
+            env_vars={
+                "KRB5CCNAME": "/tmp/krb5cc_airflow",
+                "PIP_CONF_HOME": "/opt/reporting/pip conf",
+                "JAVA_HOME": "/usr/lib/jvm/java-17",
+            },
+        )
+
+        self.assertEqual(
+            inner_command,
+            "cd /opt/reporting && KRB5CCNAME=/tmp/krb5cc_airflow "
+            "PIP_CONF_HOME='/opt/reporting/pip conf' JAVA_HOME=/usr/lib/jvm/java-17 "
+            "java -jar report.jar",
+        )
+
+    def test_build_inner_command_rejects_invalid_env_var_names(self) -> None:
+        with self.assertRaises(ValueError):
+            build_inner_command(
+                command_prefix=["java"],
+                app_args=[],
+                env_vars={"BAD-NAME": "value"},
+            )
+
+    def test_build_sudo_bash_command_supports_non_interactive_mode(self) -> None:
+        command = build_sudo_bash_command(
+            sudo_user="reportuser_qa",
+            inner_command="java -jar report.jar",
+            sudo_mode="non_interactive",
+        )
+
+        self.assertEqual(
+            command,
+            "sudo -n -H -u reportuser_qa bash -lc 'java -jar report.jar'",
+        )
+
+    def test_build_sudo_bash_command_rejects_invalid_mode(self) -> None:
+        with self.assertRaises(ValueError):
+            build_sudo_bash_command(
+                sudo_user="reportuser_qa",
+                inner_command="java -jar report.jar",
+                sudo_mode="interactive",
+            )
+
     def test_build_systemd_unit_name_sanitizes_airflow_run_id(self) -> None:
         self.assertEqual(
             build_systemd_unit_name(

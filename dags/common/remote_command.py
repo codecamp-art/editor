@@ -5,6 +5,18 @@ import shlex
 from typing import Iterable
 
 SYSTEMD_UNIT_NAME_MAX_LENGTH = 180
+ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SUPPORTED_SUDO_MODES = {"login", "non_interactive"}
+
+
+def validate_env_var_name(name: str) -> None:
+    if not ENV_VAR_NAME_RE.fullmatch(name):
+        raise ValueError(f"Invalid environment variable name: {name!r}")
+
+
+def validate_sudo_mode(sudo_mode: str) -> None:
+    if sudo_mode not in SUPPORTED_SUDO_MODES:
+        raise ValueError("sudo_mode must be either 'login' or 'non_interactive'.")
 
 
 def normalize_command_parts(
@@ -45,7 +57,14 @@ def split_extra_args(extra_args: str | None) -> list[str]:
 def build_env_exports(env_vars: dict[str, str]) -> str:
     if not env_vars:
         return ""
-    return " ".join(f"{key}={shlex.quote(str(value))}" for key, value in env_vars.items())
+
+    exports = []
+    for key, value in env_vars.items():
+        validate_env_var_name(key)
+        if value is None:
+            continue
+        exports.append(f"{key}={shlex.quote(str(value))}")
+    return " ".join(exports)
 
 
 def build_inner_command(
@@ -78,12 +97,18 @@ def build_sudo_bash_command(
     *,
     sudo_user: str,
     inner_command: str,
+    sudo_mode: str = "login",
 ) -> str:
+    validate_sudo_mode(sudo_mode)
+
+    if sudo_mode == "login":
+        sudo_parts = ["sudo", "-iu", sudo_user]
+    elif sudo_mode == "non_interactive":
+        sudo_parts = ["sudo", "-n", "-H", "-u", sudo_user]
+
     return shell_join(
         [
-            "sudo",
-            "-iu",
-            sudo_user,
+            *sudo_parts,
             "bash",
             "-lc",
             inner_command,

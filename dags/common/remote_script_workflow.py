@@ -31,6 +31,8 @@ from common.remote_command import (
     build_systemd_unit_name,
     normalize_command_parts,
     split_extra_args,
+    validate_env_var_name,
+    validate_sudo_mode,
 )
 from common.ssh_utils import execute_ssh_command
 from common.trading_calendar import TradingDayCheckDefinition
@@ -60,6 +62,39 @@ def normalize_enabled_in_envs(enabled_in_envs: tuple[str, ...] | list[str] | str
     return tuple(str(env).strip() for env in enabled_in_envs if str(env).strip())
 
 
+def normalize_remote_env_vars(
+    env_vars: dict | None,
+    *,
+    field_name: str = "remote_env_vars",
+) -> dict[str, str | None]:
+    if env_vars is None:
+        return {}
+    if not isinstance(env_vars, dict):
+        raise TypeError(f"{field_name} must be a JSON object.")
+
+    normalized: dict[str, str | None] = {}
+    for key, value in env_vars.items():
+        if not isinstance(key, str):
+            raise TypeError(f"{field_name} keys must be strings.")
+        validate_env_var_name(key)
+        normalized[key] = None if value is None else str(value)
+    return normalized
+
+
+def merge_remote_env_vars(*env_var_maps: dict | None) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for index, env_var_map in enumerate(env_var_maps):
+        for key, value in normalize_remote_env_vars(
+            env_var_map,
+            field_name=f"remote_env_vars[{index}]",
+        ).items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+    return merged
+
+
 @dataclass(frozen=True)
 class RemoteScriptDefinition:
     report_id: str
@@ -75,6 +110,8 @@ class RemoteScriptDefinition:
     working_dir: str | None
     fields: dict
     adhoc_rules: dict
+    sudo_mode: str = "login"
+    remote_env_vars: dict[str, str] | None = None
     trading_day_check: TradingDayCheckDefinition | None = None
     preset_params: dict | None = None
     command_timeout_seconds: int = 3600
@@ -99,6 +136,8 @@ class RemoteScriptScheduleVariant:
     schedule: str | None = None
     retry_count: int | None = None
     retry_delay_seconds: int | None = None
+    sudo_mode: str | None = None
+    remote_env_vars: dict | None = None
     preset_params: dict | None = None
     fields_override: dict | None = None
     adhoc_rules_override: dict | None = None
@@ -400,7 +439,10 @@ def create_remote_script_dag(
                 *split_extra_args(validated.get("extra_args")),
             ]
 
-            env_vars = build_env_vars_from_fields(validated, merged_fields)
+            env_vars = merge_remote_env_vars(
+                definition.remote_env_vars,
+                build_env_vars_from_fields(validated, merged_fields),
+            )
             resolved_command_prefix = render_runtime_tokens(
                 command_prefix,
                 context,
@@ -421,7 +463,10 @@ def create_remote_script_dag(
                 command = build_sudo_bash_command(
                     sudo_user=definition.sudo_user,
                     inner_command=inner_command,
+                    sudo_mode=definition.sudo_mode,
                 )
+                if definition.sudo_mode == "non_interactive":
+                    command_get_pty = False
             elif definition.remote_execution_mode == "systemd_run":
                 runtime_max_seconds = (
                     definition.systemd_runtime_max_seconds
@@ -512,7 +557,17 @@ def create_remote_script_definition_variant(
         variant.schedule if variant.schedule is not None else base_definition.schedule,
     )
     resolved_sudo_user = env_override.get("sudo_user", base_definition.sudo_user)
+    resolved_sudo_mode = env_override.get(
+        "sudo_mode",
+        variant.sudo_mode if variant.sudo_mode is not None else base_definition.sudo_mode,
+    )
+    validate_sudo_mode(resolved_sudo_mode)
     resolved_working_dir = env_override.get("working_dir", base_definition.working_dir)
+    resolved_remote_env_vars = merge_remote_env_vars(
+        base_definition.remote_env_vars,
+        variant.remote_env_vars,
+        env_override.get("remote_env_vars"),
+    )
     resolved_remote_script = env_override.get("remote_script", base_definition.remote_script)
     resolved_remote_command_prefix = env_override.get(
         "remote_command_prefix",
@@ -598,7 +653,9 @@ def create_remote_script_definition_variant(
         remote_command_prefix_base=resolved_remote_command_prefix_base,
         remote_command_prefix_append=resolved_remote_command_prefix_append,
         sudo_user=resolved_sudo_user,
+        sudo_mode=resolved_sudo_mode,
         working_dir=resolved_working_dir,
+        remote_env_vars=resolved_remote_env_vars,
         fields=fields,
         adhoc_rules=adhoc_rules,
         trading_day_check=resolved_trading_day_check,
@@ -637,6 +694,9 @@ def build_trading_day_check_definition(
 def build_remote_script_definition_from_config(
     base: dict,
 ) -> RemoteScriptDefinition:
+    sudo_mode = base.get("sudo_mode", "login")
+    validate_sudo_mode(sudo_mode)
+
     return RemoteScriptDefinition(
         report_id=base["report_id"],
         dag_id=base["dag_id"],
@@ -648,7 +708,9 @@ def build_remote_script_definition_from_config(
         remote_command_prefix_base=base.get("remote_command_prefix_base"),
         remote_command_prefix_append=base.get("remote_command_prefix_append"),
         sudo_user=base["sudo_user"],
+        sudo_mode=sudo_mode,
         working_dir=base.get("working_dir"),
+        remote_env_vars=merge_remote_env_vars(base.get("remote_env_vars")),
         fields=base.get("fields") or {},
         adhoc_rules=base.get("adhoc_rules") or {},
         trading_day_check=build_trading_day_check_definition(base.get("trading_day_check")),
@@ -675,6 +737,10 @@ def build_remote_script_definition_from_config(
 def build_remote_script_variant_from_config(
     variant: dict,
 ) -> RemoteScriptScheduleVariant:
+    sudo_mode = variant.get("sudo_mode")
+    if sudo_mode is not None:
+        validate_sudo_mode(sudo_mode)
+
     return RemoteScriptScheduleVariant(
         dag_id=variant["dag_id"],
         title_suffix=variant["title_suffix"],
@@ -686,6 +752,8 @@ def build_remote_script_variant_from_config(
             if variant.get("retry_delay_seconds") is not None
             else None
         ),
+        sudo_mode=sudo_mode,
+        remote_env_vars=variant.get("remote_env_vars"),
         preset_params=variant.get("preset_params"),
         fields_override=variant.get("fields_override"),
         adhoc_rules_override=variant.get("adhoc_rules_override"),
