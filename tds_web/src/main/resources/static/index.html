@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TDS Client Query</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-frame">
+    <header class="app-topbar">
+      <div class="brand-group">
+        <button class="menu-button" type="button" aria-label="Menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <div class="brand-title">TDS Reporting System</div>
+      </div>
+      <div class="user-chip" aria-label="Signed in user">
+        <span class="user-icon" aria-hidden="true"></span>
+        <span>Signed in as: <strong>DOMAIN\user (SSO/Kerberos)</strong></span>
+        <span class="chevron" aria-hidden="true"></span>
+      </div>
+    </header>
+
+    <aside class="sidebar" aria-label="Main navigation">
+      <nav class="nav-list">
+        <a class="nav-item" href="#" aria-label="Dashboard">
+          <span class="nav-icon home-icon" aria-hidden="true"></span>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item active" href="/" aria-current="page" aria-label="Client TDS Query">
+          <span class="nav-icon search-icon" aria-hidden="true"></span>
+          <span>Client TDS Query</span>
+        </a>
+        <a class="nav-item has-arrow" href="#" aria-label="Reports">
+          <span class="nav-icon report-icon" aria-hidden="true"></span>
+          <span>Reports</span>
+        </a>
+        <a class="nav-item has-arrow" href="#" aria-label="Data Management">
+          <span class="nav-icon database-icon" aria-hidden="true"></span>
+          <span>Data Management</span>
+        </a>
+        <a class="nav-item has-arrow" href="#" aria-label="Reference Data">
+          <span class="nav-icon book-icon" aria-hidden="true"></span>
+          <span>Reference Data</span>
+        </a>
+        <a class="nav-item has-arrow" href="#" aria-label="Administration">
+          <span class="nav-icon settings-icon" aria-hidden="true"></span>
+          <span>Administration</span>
+        </a>
+      </nav>
+      <button class="collapse-button" type="button">
+        <span aria-hidden="true">‹‹</span>
+        <span>Collapse</span>
+      </button>
+    </aside>
+
+    <main class="content">
+      <div class="page-heading">
+        <h1>Client TDS Query</h1>
+        <p>Client Funding and Risk Ratio Report</p>
+      </div>
+
+      <section class="panel query-panel" aria-label="Client query">
+        <form id="searchForm" class="query-form">
+          <div class="client-field">
+            <label for="clientQuery">Client ID / 客户号</label>
+            <div class="combo-wrap">
+              <input
+                id="clientQuery"
+                name="clientQuery"
+                autocomplete="off"
+                placeholder="Client ID or Name"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="candidateList">
+              <div id="candidateSection" class="candidate-popover" hidden>
+                <div id="candidateList" class="candidate-list" role="listbox"></div>
+              </div>
+            </div>
+          </div>
+          <div class="query-actions">
+            <button id="queryButton" class="primary-button" type="submit">
+              <span class="button-icon search-icon-light" aria-hidden="true"></span>
+              <span>Query</span>
+            </button>
+            <button id="resetButton" class="secondary-button" type="button">
+              <span class="button-icon reset-icon" aria-hidden="true"></span>
+              <span>Reset</span>
+            </button>
+            <button id="copyButton" class="secondary-button" type="button" disabled>
+              <span class="button-icon copy-icon" aria-hidden="true"></span>
+              <span>Copy</span>
+            </button>
+          </div>
+        </form>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <section id="summaryCard" class="panel result-card" aria-label="Client summary" hidden>
+        <div class="section-title">
+          <span class="section-icon summary-icon" aria-hidden="true"></span>
+          <h2>Client Summary</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table summary-table">
+            <thead>
+              <tr>
+                <th>Client ID / 客户号</th>
+                <th>Currency</th>
+                <th>Margin Available</th>
+                <th>Total Equity</th>
+                <th>Risk Ratio (%)</th>
+              </tr>
+            </thead>
+            <tbody id="summaryBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="positionsCard" class="panel result-card" aria-label="Positions" hidden>
+        <div class="section-title">
+          <span class="section-icon positions-icon" aria-hidden="true"></span>
+          <h2>Positions</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table positions-table">
+            <thead>
+              <tr>
+                <th>Positions</th>
+                <th>Total Long</th>
+                <th>Total Short</th>
+                <th>Intraday Long</th>
+                <th>Intraday Short</th>
+              </tr>
+            </thead>
+            <tbody id="positionsBody"></tbody>
+          </table>
+          <div class="table-footer">
+            <span id="positionCount">Showing 0 to 0 of 0 entries</span>
+            <div class="pagination" aria-hidden="true">
+              <button type="button" disabled>‹</button>
+              <button type="button" class="page-active">1</button>
+              <button type="button" disabled>›</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

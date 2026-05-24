@@ -1,0 +1,71 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.example'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+def nativeBuildDir = layout.buildDirectory.dir('native')
+def tdsSdkRootProvider = providers.gradleProperty('tdsSdkRoot').orElse('../tds')
+def isLinux = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('linux')
+
+tasks.register('verifyNativeSdk') {
+    group = 'verification'
+    description = 'Verify Linux TDS SDK files required by the native adapter.'
+
+    doLast {
+        def root = file(tdsSdkRootProvider.get())
+        def required = [
+            'include/tds_api.h',
+            'include/tds_api_define.h',
+            'include/tds_api_struct_type.h',
+            'linux_x86_64/libtds_api.so',
+            'linux_x86_64/cpack.dat'
+        ]
+        def missing = required.findAll { !new File(root, it).isFile() }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Missing TDS SDK file(s) under ${root}: ${missing.join(', ')}")
+        }
+    }
+}
+
+tasks.register('configureNativeAdapter', Exec) {
+    group = 'build'
+    description = 'Configure the Linux native TDS adapter with CMake.'
+    onlyIf { isLinux }
+    dependsOn tasks.named('verifyNativeSdk')
+    commandLine 'cmake',
+        '-S', layout.projectDirectory.dir('src/native').asFile.absolutePath,
+        '-B', nativeBuildDir.get().asFile.absolutePath,
+        "-DTDS_SDK_ROOT=${file(tdsSdkRootProvider.get()).absolutePath}",
+        "-DCMAKE_BUILD_TYPE=Release"
+}
+
+tasks.register('buildNativeAdapter', Exec) {
+    group = 'build'
+    description = 'Build the Linux native TDS adapter.'
+    onlyIf { isLinux }
+    dependsOn tasks.named('configureNativeAdapter')
+    commandLine 'cmake', '--build', nativeBuildDir.get().asFile.absolutePath, '--parallel'
+}

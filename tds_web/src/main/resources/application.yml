@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: tds-client-query-web
+
+app:
+  security:
+    enabled: true
+
+tds:
+  mode: stub
+  sdk-root: ../tds
+  native-adapter:
+    executable: build/native/tds_adapter
+  drtp-endpoints:
+    - host: 127.0.0.1
+      port: 6003
+  user: ${TDS_USER:10000}
+  password: ${TDS_PASSWORD:}
+  req-timeout-ms: 300000
+  log-level: 2000
+  klg-enable: false
+  function-no: 20100
