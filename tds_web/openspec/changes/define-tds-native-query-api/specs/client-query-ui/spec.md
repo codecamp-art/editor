@@ -1,5 +1,12 @@
 ## ADDED Requirements
 
+### Requirement: Reporting System Navigation Shell
+The page SHALL use the reporting-system layout from the provided reference image, including a top bar, signed-in user display, sidebar navigation, and active `Client TDS Query` navigation item.
+
+#### Scenario: Page shell is visible
+- **WHEN** an authenticated user opens the client query page
+- **THEN** the page shows the `TDS Reporting System` top bar, signed-in user display, sidebar navigation, and active `Client TDS Query` item
+
 ### Requirement: Client Lookup Page
 The system SHALL provide a web page where an authenticated Windows domain user can input a client search term, select one client by client ID or name, and submit a client TDS detail query.
 

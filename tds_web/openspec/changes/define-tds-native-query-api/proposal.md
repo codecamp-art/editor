@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- Define a web page where a Windows domain user can input a client search term, select a client by ID or name, and view the same data structure shown in `docs/product/client_data_snapshot.png`.
+- Define a web page with the provided reporting-system style, including top navigation and sidebar, where a Windows domain user can input a client search term, select a client by ID or name, and view the same data structure shown in `docs/product/client_data_snapshot.png`.
 - Define a copy-to-Excel capability that preserves the table-like structure from the displayed result.
 - Define a backend capability for querying TDS-backed client summary and positions through application APIs.
 - Define how the native TDS adapter should initialize sessions, register DRTP nodes, authenticate, request snapshots, iterate records, decode vendor text, close handles, and clean up.

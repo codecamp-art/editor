@@ -68,6 +68,10 @@
 
    The product snapshot is effectively one worksheet-shaped result: a summary header row, one summary data row, a blank separator row, a positions header row, then position data rows. The UI can use different visual styling, but the DOM should preserve a tabular structure and provide a copy action that writes tab-separated and HTML table clipboard content so pasting into Excel keeps the same rows and columns.
 
+9. Use the reporting-system shell from the updated reference image.
+
+   The first screen should include a blue top bar, signed-in user affordance, left navigation sidebar, active `Client TDS Query` item, query panel, and separate result cards for client summary and positions.
+
 ## Risks / Trade-offs
 
 - Vendor API process-global lifecycle may not be thread-safe -> serialize native session initialization/query/cleanup initially, then introduce pooling only after concurrency tests.

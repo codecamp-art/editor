@@ -13,10 +13,13 @@ class StaticUiAssetTest {
         String html = read("static/index.html");
         String js = read("static/app.js");
 
-        assertThat(html).contains("clientQuery", "candidateList", "resultTable", "copyButton");
+        assertThat(html).contains("TDS Reporting System", "Dashboard", "Client TDS Query", "DOMAIN\\user");
+        assertThat(html).contains("clientQuery", "candidateList", "summaryCard", "positionsCard", "copyButton");
+        assertThat(html).contains("Query", "Reset", "Client Summary", "Positions");
         assertThat(js).contains("buildClipboardRows", "rowsToTsv", "ClipboardItem");
         assertThat(js).contains("Client ID", "Currency", "Margin Available", "Total Equity", "Risk Ratio (%)");
         assertThat(js).contains("Positions", "Total Long", "Total Short", "Intraday Long", "Intraday Short");
+        assertThat(js).contains("selectedClient", "candidate-option", "setSelectedClient");
         assertThat(js).contains("/api/tds/clients?query=", "/api/tds/clients/");
     }
 

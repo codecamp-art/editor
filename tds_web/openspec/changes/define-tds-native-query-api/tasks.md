@@ -38,6 +38,7 @@
 - [x] 5.4 Render the result using the snapshot structure: summary block, blank separator row, and positions block.
 - [x] 5.5 Add an Excel-compatible copy action for the displayed result.
 - [x] 5.6 Handle empty input, loading, empty result, and error states.
+- [x] 5.7 Add reporting-system top bar and sidebar navigation shell.
 
 ## 6. Verification
 

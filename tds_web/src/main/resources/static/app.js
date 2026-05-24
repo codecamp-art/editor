@@ -1,13 +1,21 @@
 (function () {
   const searchForm = document.getElementById('searchForm');
   const clientQuery = document.getElementById('clientQuery');
+  const queryButton = document.getElementById('queryButton');
+  const resetButton = document.getElementById('resetButton');
   const status = document.getElementById('status');
   const candidateSection = document.getElementById('candidateSection');
   const candidateList = document.getElementById('candidateList');
-  const resultTable = document.getElementById('resultTable');
-  const resultBody = document.getElementById('resultBody');
+  const summaryCard = document.getElementById('summaryCard');
+  const positionsCard = document.getElementById('positionsCard');
+  const summaryBody = document.getElementById('summaryBody');
+  const positionsBody = document.getElementById('positionsBody');
+  const positionCount = document.getElementById('positionCount');
   const copyButton = document.getElementById('copyButton');
+
   let currentResult = null;
+  let selectedClient = null;
+  let searchTimer = null;
 
   function setStatus(message) {
     status.textContent = message || '';
@@ -23,11 +31,10 @@
 
   function formatRatio(value) {
     const number = Number(value || 0) * 100;
-    const formatted = number.toLocaleString('en-US', {
+    return number.toLocaleString('en-US', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2
     });
-    return formatted;
   }
 
   function buildClipboardRows(result) {
@@ -77,26 +84,112 @@
     return `<table>${body}</table>`;
   }
 
+  function hideCandidates() {
+    candidateSection.hidden = true;
+    clientQuery.setAttribute('aria-expanded', 'false');
+  }
+
+  function clearResult() {
+    currentResult = null;
+    summaryBody.replaceChildren();
+    positionsBody.replaceChildren();
+    summaryCard.hidden = true;
+    positionsCard.hidden = true;
+    copyButton.disabled = true;
+    positionCount.textContent = 'Showing 0 to 0 of 0 entries';
+  }
+
+  function resetPage() {
+    clientQuery.value = '';
+    selectedClient = null;
+    hideCandidates();
+    candidateList.replaceChildren();
+    clearResult();
+    setStatus('');
+    clientQuery.focus();
+  }
+
+  function setSelectedClient(candidate) {
+    selectedClient = candidate;
+    clientQuery.value = `${candidate.clientId} ${candidate.clientName || ''}`.trim();
+    hideCandidates();
+    setStatus('');
+  }
+
+  function renderCandidates(candidates) {
+    candidateList.replaceChildren();
+    if (!candidates.length) {
+      hideCandidates();
+      setStatus('No matching clients');
+      return;
+    }
+
+    candidates.forEach((candidate, index) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = `candidate-option${index === 0 ? ' selected' : ''}`;
+      option.setAttribute('role', 'option');
+      option.dataset.clientId = candidate.clientId;
+
+      const id = document.createElement('span');
+      id.className = 'candidate-id';
+      id.textContent = candidate.clientId;
+      const name = document.createElement('span');
+      name.className = 'candidate-name';
+      name.textContent = candidate.clientName || '';
+      option.append(id, name);
+
+      option.addEventListener('click', () => setSelectedClient(candidate));
+      candidateList.appendChild(option);
+    });
+
+    candidateSection.hidden = false;
+    clientQuery.setAttribute('aria-expanded', 'true');
+    setStatus(`${candidates.length} match${candidates.length === 1 ? '' : 'es'}`);
+  }
+
   function renderResult(result) {
     currentResult = result;
-    const rows = buildClipboardRows(result);
-    resultBody.replaceChildren();
-    rows.forEach((row, rowIndex) => {
-      const tr = document.createElement('tr');
-      if (rowIndex === 2) {
-        tr.className = 'separator';
-      }
-      row.forEach((cell, columnIndex) => {
-        const element = document.createElement(rowIndex === 0 || rowIndex === 3 ? 'th' : 'td');
-        element.textContent = cell;
-        if (rowIndex !== 0 && rowIndex !== 3 && columnIndex > 0) {
-          element.className = 'number';
-        }
-        tr.appendChild(element);
-      });
-      resultBody.appendChild(tr);
+    const summary = result.summary;
+    summaryBody.replaceChildren();
+    positionsBody.replaceChildren();
+
+    const summaryRow = document.createElement('tr');
+    [
+      summary.clientId || result.clientId || '',
+      summary.currency || '',
+      formatAmount(summary.marginAvailable),
+      formatAmount(summary.totalEquity),
+      formatRatio(summary.riskRatio)
+    ].forEach((value) => {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      summaryRow.appendChild(cell);
     });
-    resultTable.hidden = false;
+    summaryBody.appendChild(summaryRow);
+
+    (result.positions || []).forEach((position) => {
+      const row = document.createElement('tr');
+      [
+        position.position || '',
+        String(position.totalLong || 0),
+        String(position.totalShort || 0),
+        String(position.intradayLong || 0),
+        String(position.intradayShort || 0)
+      ].forEach((value) => {
+        const cell = document.createElement('td');
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+      positionsBody.appendChild(row);
+    });
+
+    const total = (result.positions || []).length;
+    positionCount.textContent = total
+      ? `Showing 1 to ${total} of ${total} entries`
+      : 'Showing 0 to 0 of 0 entries';
+    summaryCard.hidden = false;
+    positionsCard.hidden = false;
     copyButton.disabled = false;
   }
 
@@ -115,32 +208,17 @@
     return response.json();
   }
 
-  function renderCandidates(candidates) {
-    candidateList.replaceChildren();
-    if (!candidates.length) {
-      candidateSection.hidden = true;
-      setStatus('No matching clients');
-      return;
-    }
-
-    candidates.forEach((candidate) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'candidate-button';
-      button.textContent = `${candidate.clientId} ${candidate.clientName || ''}`.trim();
-      button.addEventListener('click', () => queryClient(candidate.clientId));
-      candidateList.appendChild(button);
-    });
-    candidateSection.hidden = false;
-    setStatus(`${candidates.length} match${candidates.length === 1 ? '' : 'es'}`);
-  }
-
   async function searchClients(query) {
+    const normalized = query.trim();
+    if (!normalized) {
+      hideCandidates();
+      return [];
+    }
+    selectedClient = null;
     setStatus('Searching');
-    candidateSection.hidden = true;
-    copyButton.disabled = true;
-    const candidates = await fetchJson(`/api/tds/clients?query=${encodeURIComponent(query)}`);
+    const candidates = await fetchJson(`/api/tds/clients?query=${encodeURIComponent(normalized)}`);
     renderCandidates(candidates);
+    return candidates;
   }
 
   async function queryClient(clientId) {
@@ -170,19 +248,66 @@
     setStatus('Copied');
   }
 
-  searchForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
+  function scheduleLookup() {
+    window.clearTimeout(searchTimer);
     const query = clientQuery.value.trim();
-    if (!query) {
-      setStatus('Client is required');
+    selectedClient = null;
+    if (query.length < 2) {
+      hideCandidates();
+      setStatus('');
       return;
     }
+    searchTimer = window.setTimeout(async () => {
+      try {
+        await searchClients(query);
+      } catch (error) {
+        setStatus(error.message);
+      }
+    }, 250);
+  }
+
+  searchForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
     try {
-      await searchClients(query);
+      if (selectedClient) {
+        await queryClient(selectedClient.clientId);
+        return;
+      }
+      const query = clientQuery.value.trim();
+      if (!query) {
+        setStatus('Client is required');
+        return;
+      }
+      const candidates = await searchClients(query);
+      if (candidates.length === 1) {
+        setSelectedClient(candidates[0]);
+        await queryClient(candidates[0].clientId);
+      }
     } catch (error) {
       setStatus(error.message);
     }
   });
+
+  clientQuery.addEventListener('input', scheduleLookup);
+
+  clientQuery.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+    const firstOption = candidateList.querySelector('.candidate-option');
+    if (!selectedClient && firstOption && !candidateSection.hidden) {
+      event.preventDefault();
+      firstOption.click();
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!candidateSection.contains(event.target) && event.target !== clientQuery) {
+      hideCandidates();
+    }
+  });
+
+  resetButton.addEventListener('click', resetPage);
 
   copyButton.addEventListener('click', async () => {
     try {
