@@ -1,0 +1,6 @@
+tds:
+  mode: native
+  drtp-endpoints:
+    - host: REPLACE_ME_PROD_DRTP_HOST
+      port: 6003
+  password: ${TDS_PASSWORD:}
