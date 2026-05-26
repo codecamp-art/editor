@@ -13,7 +13,8 @@ class StaticUiAssetTest {
         String html = read("static/index.html");
         String js = read("static/app.js");
 
-        assertThat(html).contains("TDS Reporting System", "Dashboard", "Client TDS Query", "IP whitelist");
+        assertThat(html).contains("TDS Reporting System", "Client TDS Query", "IP whitelist");
+        assertThat(html).doesNotContain("Dashboard", "Reports", "Data Management", "Reference Data", "Administration", "Collapse");
         assertThat(html).contains("clientQuery", "candidateList", "summaryCard", "positionsCard", "copyButton");
         assertThat(html).contains("Query", "Reset", "Client Summary", "Positions");
         assertThat(js).contains("buildClipboardRows", "rowsToTsv", "ClipboardItem");

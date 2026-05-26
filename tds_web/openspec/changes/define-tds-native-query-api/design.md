@@ -70,7 +70,7 @@
 
 9. Use the reporting-system shell from the updated reference image.
 
-   The first screen should include a blue top bar, signed-in user affordance, left navigation sidebar, active `Client TDS Query` item, query panel, and separate result cards for client summary and positions.
+   The first screen should include a blue top bar, signed-in user affordance, left navigation sidebar with only the functional `Client TDS Query` item, query panel, and separate result cards for client summary and positions.
 
 ## Risks / Trade-offs
 
