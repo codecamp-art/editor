@@ -9,7 +9,7 @@
 - Linux/RHEL8 is the production build target and links `tds/linux_x86_64/libtds_api.so`; Windows local diagnostics require Win32/x86 because the vendor SDK supplies 32-bit `.lib` and `.dll` files.
 - SDK download and extraction are handled by CMake through `cmake/PrepareTdsSdk.cmake`, with local token auth and Jenkins certificate/key auth.
 
-`tds_web` has no application code yet. The project direction is Java 21, Spring Boot, Gradle, Linux deployment, Kerberos/SPNEGO browser SSO, and a small native adapter rather than direct vendor API use from application logic.
+`tds_web` has no application code yet. The project direction is Java 21, Spring Boot, Gradle, Linux deployment, IP whitelist access control, and a small native adapter rather than direct vendor API use from application logic.
 
 ## Goals / Non-Goals
 
@@ -24,7 +24,7 @@
 - Do not implement Spring Boot, JNI/JNA, C++ adapter code, or frontend screens in this proposal step.
 - Do not migrate the email report, SMTP, or report HTML generation logic into `tds_web`.
 - Do not require the initial UI to match the screenshot styling exactly; the data structure must match.
-- Do not design complex entitlement management beyond requiring authenticated access.
+- Do not design complex entitlement management beyond requiring IP-whitelisted access.
 - Do not treat Windows as a production deployment target.
 
 ## Decisions
@@ -78,5 +78,5 @@
 - Native crashes can take down the JVM if JNI/JNA runs in-process -> keep the adapter boundary narrow and consider an out-of-process adapter if stability testing shows native crash risk.
 - `tds_reporter` currently omits `currency_code` from its internal model -> `tds_web` must not copy that omission because the web result requires currency.
 - Position mapping is inferred from vendor headers, not proven in reporter production logic -> add stub tests and live dry-run smoke validation before enabling production use.
-- Vault and Kerberos configuration differ between batch and web runtime -> keep secret values out of logs and command lines, and validate service-account credential cache behavior on RHEL8.
+- Network allowlist and Vault configuration differ between batch and web runtime -> keep secret values out of logs and command lines, and validate the deployed client IP ranges on RHEL8.
 - Browser clipboard behavior can vary by environment -> provide an explicit copy button and automated tests for the generated clipboard payload, with normal text selection as a fallback.

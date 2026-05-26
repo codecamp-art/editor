@@ -1,10 +1,10 @@
 ## Why
 
-`tds_web` needs a clear contract for a Kerberos-authenticated web page where users can query client data from the vendor TDS runtime and copy the result into Excel. `tds_reporter` already proves the native login, DRTP registration, trade-date lookup, customer fund snapshot, SDK preparation, and Linux packaging path; this change captures only the parts needed by the web project and adds the page/API shape required by the product snapshot.
+`tds_web` needs a clear contract for an IP-whitelisted web page where users can query client data from the vendor TDS runtime and copy the result into Excel. `tds_reporter` already proves the native login, DRTP registration, trade-date lookup, customer fund snapshot, SDK preparation, and Linux packaging path; this change captures only the parts needed by the web project and adds the page/API shape required by the product snapshot.
 
 ## What Changes
 
-- Define a web page with the provided reporting-system style, including top navigation and sidebar, where a Windows domain user can input a client search term, select a client by ID or name, and view the same data structure shown in `docs/product/client_data_snapshot.png`.
+- Define a web page with the provided reporting-system style, including top navigation and sidebar, where a user from an allowed client IP can input a client search term, select a client by ID or name, and view the same data structure shown in `docs/product/client_data_snapshot.png`.
 - Define a copy-to-Excel capability that preserves the table-like structure from the displayed result.
 - Define a backend capability for querying TDS-backed client summary and positions through application APIs.
 - Define how the native TDS adapter should initialize sessions, register DRTP nodes, authenticate, request snapshots, iterate records, decode vendor text, close handles, and clean up.

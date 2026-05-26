@@ -27,12 +27,12 @@
 - [x] 4.1 Implement `GET /api/tds/clients?query={term}` for client lookup by ID or name.
 - [x] 4.2 Implement `GET /api/tds/clients/{clientId}` with optional `tradeDate` for selected client detail.
 - [x] 4.3 Validate lookup query, client ID, and trade date request inputs.
-- [x] 4.4 Require authenticated user context before client lookup or native TDS access.
+- [x] 4.4 Require IP-whitelisted access before client lookup or native TDS access.
 - [x] 4.5 Return sanitized errors without passwords, Vault tokens, or raw secrets.
 
 ## 5. Client Query UI
 
-- [x] 5.1 Implement the authenticated client lookup page with client ID or name search input.
+- [x] 5.1 Implement the IP-whitelisted client lookup page with client ID or name search input.
 - [x] 5.2 Render selectable client candidates with client ID and client name.
 - [x] 5.3 Query selected client details using the selected candidate's client ID.
 - [x] 5.4 Render the result using the snapshot structure: summary block, blank separator row, and positions block.
@@ -43,7 +43,7 @@
 ## 6. Verification
 
 - [x] 6.1 Add unit tests for summary and position aggregation.
-- [x] 6.2 Add API tests for client lookup, successful detail query, invalid input, unauthenticated access, and native failure mapping.
+- [x] 6.2 Add API tests for client lookup, successful detail query, invalid input, IP whitelist rejection, and native failure mapping.
 - [x] 6.3 Add UI tests for client search/selection, result rendering, and Excel-compatible copy payload.
 - [x] 6.4 Add stub-mode integration test that does not load the vendor runtime.
 - [x] 6.5 Add Linux build/package verification for native runtime files.

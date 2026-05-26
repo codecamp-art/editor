@@ -46,6 +46,7 @@ The adapter executable is expected at `build/native/tds_adapter` unless `tds.nat
 
 Set profile-specific values outside source code:
 
+- `app.security.allowed-ip-ranges`, the CIDR/IP allowlist for clients permitted to open the page and API
 - `tds.drtp-endpoints`
 - `tds.user`
 - `tds.password`, usually through environment or Vault integration
@@ -68,6 +69,17 @@ Before enabling native mode for users:
 6. Query the client detail page.
 7. Copy the result and paste into Excel to verify the row and column structure.
 
-## Authentication
+## IP Whitelist Access
 
-The first implementation enforces an authenticated Spring Security context. Production Kerberos/SPNEGO wiring should be configured for the deployment environment before exposing the service to users.
+The web app enforces `app.security.allowed-ip-ranges` before serving the page or API. Entries may be exact IPs or CIDR ranges, for example:
+
+```yaml
+app:
+  security:
+    enabled: true
+    allowed-ip-ranges:
+      - 10.20.30.0/24
+      - 192.168.10.15
+```
+
+The filter uses the request remote address seen by the application server. If the service is deployed behind a reverse proxy or load balancer, configure that layer so the application receives the real client IP before relying on the allowlist.

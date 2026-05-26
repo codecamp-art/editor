@@ -1,29 +1,29 @@
 ## ADDED Requirements
 
 ### Requirement: Client Lookup API
-The system SHALL expose a backend API for authenticated users to search client candidates by client ID or client name. The initial endpoint SHALL be `GET /api/tds/clients?query={term}` and each candidate SHALL include `clientId` and `clientName`.
+The system SHALL expose a backend API for requests from allowed client IPs to search client candidates by client ID or client name. The initial endpoint SHALL be `GET /api/tds/clients?query={term}` and each candidate SHALL include `clientId` and `clientName`.
 
 #### Scenario: Search clients by ID
-- **WHEN** an authenticated user searches with query `1001`
+- **WHEN** a request from an allowed client IP searches with query `1001`
 - **THEN** the system returns matching client candidates whose client ID or client name matches the query
 
 #### Scenario: Search clients by name
-- **WHEN** an authenticated user searches with a client name fragment
+- **WHEN** a request from an allowed client IP searches with a client name fragment
 - **THEN** the system returns matching client candidates with both `clientId` and `clientName`
 
 #### Scenario: Empty lookup query is rejected
-- **WHEN** an authenticated user calls the client lookup API with an empty query
+- **WHEN** a request from an allowed client IP calls the client lookup API with an empty query
 - **THEN** the system returns a validation error and does not call the native TDS detail query path
 
-### Requirement: Authenticated Client Query API
-The system SHALL expose a backend API for authenticated users to query one selected TDS client by client ID. The initial endpoint SHALL be `GET /api/tds/clients/{clientId}` with an optional `tradeDate` query parameter in `YYYYMMDD` format.
+### Requirement: IP-Whitelisted Client Query API
+The system SHALL expose a backend API for requests from allowed client IPs to query one selected TDS client by client ID. The initial endpoint SHALL be `GET /api/tds/clients/{clientId}` with an optional `tradeDate` query parameter in `YYYYMMDD` format.
 
-#### Scenario: Authenticated user queries a client
-- **WHEN** an authenticated user calls `GET /api/tds/clients/1001`
+#### Scenario: Allowed client IP queries a client
+- **WHEN** a request from an allowed client IP calls `GET /api/tds/clients/1001`
 - **THEN** the system returns a client query response containing a client summary and a positions array
 
-#### Scenario: Unauthenticated request is rejected
-- **WHEN** a request reaches the client query API without an authenticated user context
+#### Scenario: Request outside IP whitelist is rejected
+- **WHEN** a request reaches the client query API from an IP address outside the configured whitelist
 - **THEN** the system rejects the request before calling the native TDS adapter
 
 ### Requirement: TDS Session Lifecycle

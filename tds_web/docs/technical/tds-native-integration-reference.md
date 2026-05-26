@@ -6,7 +6,7 @@ This document keeps only the TDS details needed for the initial `tds_web` projec
 
 `tds_web` needs:
 
-- A Kerberos/SSO web page for Windows domain users.
+- An IP-whitelisted web page for permitted network clients.
 - A client ID or name search input.
 - A selectable list of matching client candidates.
 - A result table matching the data structure in `docs/product/client_data_snapshot.png`.
@@ -219,7 +219,7 @@ Stub mode should:
 - Position field mapping and aggregation.
 - TDS error sanitization.
 - API success and validation failures.
-- SSO/authenticated access boundary.
+- IP whitelist access boundary.
 - UI rendering in the snapshot structure.
 - Copy-to-Excel payload format.
 - Stub mode without loading the vendor runtime.
