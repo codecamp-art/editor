@@ -58,7 +58,7 @@
 
 6. Externalize all runtime configuration.
 
-   DEV/QA/PROD must provide DRTP endpoints, TDS user, password or Vault location, request timeout, TDS log level, KLG flag, and function number outside source code. The web project should keep the same base-plus-environment overlay idea from `tds_reporter`, adapted to Spring configuration.
+   DEV/QA/PROD must provide DRTP endpoints, TDS user, Vault location, request timeout, TDS log level, KLG flag, and function number outside source code. The web project should keep the same base-plus-environment overlay idea from `tds_reporter`, adapted to Spring configuration. The TDS password is not configured in YAML; native mode reads it from Vault using Kerberos login and KV v2.
 
 7. Preserve Linux release as the production path.
 

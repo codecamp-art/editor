@@ -18,8 +18,9 @@ public class TdsProperties {
     private NativeAdapter nativeAdapter = new NativeAdapter();
     @Valid
     private List<DrtpEndpoint> drtpEndpoints = new ArrayList<>();
+    @Valid
+    private Vault vault = new Vault();
     private String user = "10000";
-    private String password = "";
     private int reqTimeoutMs = 300000;
     private int logLevel = 2000;
     private boolean klgEnable = false;
@@ -62,20 +63,20 @@ public class TdsProperties {
         this.drtpEndpoints = drtpEndpoints;
     }
 
+    public Vault getVault() {
+        return vault;
+    }
+
+    public void setVault(Vault vault) {
+        this.vault = vault;
+    }
+
     public String getUser() {
         return user;
     }
 
     public void setUser(String user) {
         this.user = user;
-    }
-
-    public String getPassword() {
-        return password;
-    }
-
-    public void setPassword(String password) {
-        this.password = password;
     }
 
     public int getReqTimeoutMs() {
@@ -127,6 +128,74 @@ public class TdsProperties {
 
         public void setExecutable(String executable) {
             this.executable = executable;
+        }
+    }
+
+    public static class Vault {
+        private String address = "";
+        private String namespace = "";
+        private String secretEngine = "";
+        private String secretPath = "";
+        private String secretKey = "password";
+        @Min(1)
+        private int connectTimeoutMs = 15000;
+        @Min(1)
+        private int readTimeoutMs = 60000;
+
+        public String getAddress() {
+            return address;
+        }
+
+        public void setAddress(String address) {
+            this.address = address;
+        }
+
+        public String getNamespace() {
+            return namespace;
+        }
+
+        public void setNamespace(String namespace) {
+            this.namespace = namespace;
+        }
+
+        public String getSecretEngine() {
+            return secretEngine;
+        }
+
+        public void setSecretEngine(String secretEngine) {
+            this.secretEngine = secretEngine;
+        }
+
+        public String getSecretPath() {
+            return secretPath;
+        }
+
+        public void setSecretPath(String secretPath) {
+            this.secretPath = secretPath;
+        }
+
+        public String getSecretKey() {
+            return secretKey;
+        }
+
+        public void setSecretKey(String secretKey) {
+            this.secretKey = secretKey;
+        }
+
+        public int getConnectTimeoutMs() {
+            return connectTimeoutMs;
+        }
+
+        public void setConnectTimeoutMs(int connectTimeoutMs) {
+            this.connectTimeoutMs = connectTimeoutMs;
+        }
+
+        public int getReadTimeoutMs() {
+            return readTimeoutMs;
+        }
+
+        public void setReadTimeoutMs(int readTimeoutMs) {
+            this.readTimeoutMs = readTimeoutMs;
         }
     }
 

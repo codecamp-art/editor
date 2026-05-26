@@ -49,11 +49,17 @@ Set profile-specific values outside source code:
 - `app.security.allowed-ip-ranges`, the CIDR/IP allowlist for clients permitted to open the page and API
 - `tds.drtp-endpoints`
 - `tds.user`
-- `tds.password`, usually through environment or Vault integration
+- `tds.vault.address` or `VAULT_ADDR`
+- `tds.vault.namespace` or `VAULT_NAMESPACE`, if the Vault deployment requires a namespace
+- `tds.vault.secret-engine` or `VAULT_SECRET_ENGINE`
+- `tds.vault.secret-path` or `VAULT_SECRET_PATH`
+- `tds.vault.secret-key` or `VAULT_SECRET_KEY`, defaulting to `password`
 - `tds.req-timeout-ms`
 - `tds.log-level`
 - `tds.klg-enable`
 - `tds.function-no`
+
+Do not configure `tds.password` in YAML. Native mode reads the TDS password from Vault by calling `POST /v1/auth/kerberos/login`, then `GET /v1/<secret-engine>/data/<secret-path>` and reading the configured secret key. The runtime user must already have a valid Kerberos TGT, for example through `kinit` or the deployment host's ticket refresh process.
 
 Do not commit real DRTP endpoints, TDS passwords, Vault tokens, certificates, or private keys.
 

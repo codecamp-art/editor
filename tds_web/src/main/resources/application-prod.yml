@@ -3,4 +3,5 @@ tds:
   drtp-endpoints:
     - host: REPLACE_ME_PROD_DRTP_HOST
       port: 6003
-  password: ${TDS_PASSWORD:}
+  vault:
+    secret-path: ${VAULT_SECRET_PATH:REPLACE_ME_PROD_SECRET_PATH}

@@ -18,7 +18,14 @@ tds:
     - host: 127.0.0.1
       port: 6003
   user: ${TDS_USER:10000}
-  password: ${TDS_PASSWORD:}
+  vault:
+    address: ${VAULT_ADDR:}
+    namespace: ${VAULT_NAMESPACE:}
+    secret-engine: ${VAULT_SECRET_ENGINE:}
+    secret-path: ${VAULT_SECRET_PATH:}
+    secret-key: ${VAULT_SECRET_KEY:password}
+    connect-timeout-ms: 15000
+    read-timeout-ms: 60000
   req-timeout-ms: 300000
   log-level: 2000
   klg-enable: false

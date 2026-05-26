@@ -29,6 +29,7 @@
 - [x] 4.3 Validate lookup query, client ID, and trade date request inputs.
 - [x] 4.4 Require IP-whitelisted access before client lookup or native TDS access.
 - [x] 4.5 Return sanitized errors without passwords, Vault tokens, or raw secrets.
+- [x] 4.6 Resolve the native TDS password from Vault instead of YAML configuration.
 
 ## 5. Client Query UI
 

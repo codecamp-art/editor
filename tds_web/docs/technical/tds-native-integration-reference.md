@@ -189,13 +189,17 @@ Externalize these values per DEV/QA/PROD:
 |---|---|
 | `tds.drtp_endpoints` | DRTP `host:port` list |
 | `tds.user` | TDS login user |
-| `tds.password` or Vault config | TDS login password source |
+| `tds.vault.address` / `VAULT_ADDR` | Vault base URL |
+| `tds.vault.namespace` / `VAULT_NAMESPACE` | Optional Vault namespace |
+| `tds.vault.secret-engine` / `VAULT_SECRET_ENGINE` | Vault KV v2 secret engine |
+| `tds.vault.secret-path` / `VAULT_SECRET_PATH` | Vault secret path containing the TDS password |
+| `tds.vault.secret-key` / `VAULT_SECRET_KEY` | Secret field name, default `password` |
 | `tds.req_timeout_ms` | Native request timeout |
 | `tds.log_level` | Vendor log level |
 | `tds.klg_enable` | Vendor KLG output flag |
 | `tds.function_no` | Vendor function number |
 
-Do not commit secrets. Do not log passwords, Vault tokens, or raw secret values.
+Do not configure `tds.password` in YAML. Native mode reads the TDS password from Vault using Kerberos login and Vault KV v2. Do not commit secrets. Do not log passwords, Vault tokens, or raw secret values.
 
 ## Text and Error Handling
 
