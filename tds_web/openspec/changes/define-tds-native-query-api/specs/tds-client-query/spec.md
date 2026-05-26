@@ -1,29 +1,29 @@
 ## ADDED Requirements
 
 ### Requirement: Client Lookup API
-The system SHALL expose a backend API for authenticated users to search client candidates by client ID or client name. The initial endpoint SHALL be `GET /api/tds/clients?query={term}` and each candidate SHALL include `clientId` and `clientName`.
+The system SHALL expose a backend API for requests from allowed client IPs to search client candidates by client ID or client name. The initial endpoint SHALL be `GET /api/tds/clients?query={term}` and each candidate SHALL include `clientId` and `clientName`.
 
 #### Scenario: Search clients by ID
-- **WHEN** an authenticated user searches with query `1001`
+- **WHEN** a request from an allowed client IP searches with query `1001`
 - **THEN** the system returns matching client candidates whose client ID or client name matches the query
 
 #### Scenario: Search clients by name
-- **WHEN** an authenticated user searches with a client name fragment
+- **WHEN** a request from an allowed client IP searches with a client name fragment
 - **THEN** the system returns matching client candidates with both `clientId` and `clientName`
 
 #### Scenario: Empty lookup query is rejected
-- **WHEN** an authenticated user calls the client lookup API with an empty query
+- **WHEN** a request from an allowed client IP calls the client lookup API with an empty query
 - **THEN** the system returns a validation error and does not call the native TDS detail query path
 
-### Requirement: Authenticated Client Query API
-The system SHALL expose a backend API for authenticated users to query one selected TDS client by client ID. The initial endpoint SHALL be `GET /api/tds/clients/{clientId}` with an optional `tradeDate` query parameter in `YYYYMMDD` format.
+### Requirement: IP-Whitelisted Client Query API
+The system SHALL expose a backend API for requests from allowed client IPs to query one selected TDS client by client ID. The initial endpoint SHALL be `GET /api/tds/clients/{clientId}` with an optional `tradeDate` query parameter in `YYYYMMDD` format.
 
-#### Scenario: Authenticated user queries a client
-- **WHEN** an authenticated user calls `GET /api/tds/clients/1001`
+#### Scenario: Allowed client IP queries a client
+- **WHEN** a request from an allowed client IP calls `GET /api/tds/clients/1001`
 - **THEN** the system returns a client query response containing a client summary and a positions array
 
-#### Scenario: Unauthenticated request is rejected
-- **WHEN** a request reaches the client query API without an authenticated user context
+#### Scenario: Request outside IP whitelist is rejected
+- **WHEN** a request reaches the client query API from an IP address outside the configured whitelist
 - **THEN** the system rejects the request before calling the native TDS adapter
 
 ### Requirement: TDS Session Lifecycle
@@ -93,11 +93,12 @@ The adapter SHALL convert vendor GB18030/GBK text to UTF-8 before returning name
 - **THEN** the API response exposes the operation name and decoded error message but does not expose configured secrets
 
 ### Requirement: Runtime Configuration
-The system SHALL support DEV, QA, and PROD runtime configuration for DRTP endpoints, TDS user, TDS password or Vault secret location, request timeout, TDS log level, KLG enablement, and function number. These values MUST be externalized and MUST NOT be hard-coded into source code.
+The system SHALL support DEV, QA, and PROD runtime configuration for DRTP endpoints, TDS user, Vault secret location, request timeout, TDS log level, KLG enablement, and function number. The TDS password MUST be read from Vault in native mode and MUST NOT be configured directly in YAML. These values MUST be externalized and MUST NOT be hard-coded into source code.
 
 #### Scenario: Environment config selects DRTP endpoints
 - **WHEN** the service starts with the QA environment selected
 - **THEN** the adapter uses the QA DRTP endpoint list and does not use DEV or PROD endpoints
+- **AND** native mode resolves the TDS password from Vault using the configured KV v2 secret path and key
 
 ### Requirement: Native Build and Package Inputs
 The build SHALL consume the vendor SDK from a curated package containing `tds/include/tds_api.h`, `tds/linux_x86_64/libtds_api.so`, `tds/linux_x86_64/cpack.dat`, and optional Windows diagnostic files under `tds/win32`. Linux deployment packages SHALL include the native adapter, `libtds_api.so`, and `cpack.dat`.
@@ -109,6 +110,20 @@ The build SHALL consume the vendor SDK from a curated package containing `tds/in
 #### Scenario: Missing Linux vendor files fail the build
 - **WHEN** the Linux build cannot find `tds_api.h`, `libtds_api.so`, or `cpack.dat`
 - **THEN** the build fails with an actionable error before packaging
+
+#### Scenario: Windows local debug adapter uses Win32 vendor files
+- **WHEN** a developer builds the native adapter on Windows for local debugging
+- **THEN** the build uses the Win32/x86 vendor `tds_api.lib`, requires a runtime `.dll` and `cpack.dat` under `tds/win32`, and emits `tds_adapter.exe` with the runtime files copied next to it
+
+#### Scenario: Jenkins prepares SDK from Artifactory
+- **WHEN** the Jenkins pipeline starts a native build
+- **THEN** it downloads the curated TDS SDK package from the configured Artifactory URL using certificate authentication before validating and building the adapter
+
+#### Scenario: Jenkins separates PR and release builds
+- **WHEN** Jenkins runs the PR pipeline
+- **THEN** it validates the SDK, builds the native adapter, runs tests, builds the boot jar, and can run a stub-mode smoke test
+- **WHEN** Jenkins runs the release pipeline
+- **THEN** it performs the same validation path and stages an RHEL8 release package for archiving
 
 ### Requirement: Stub Query Mode
 The system SHALL provide a deterministic stub implementation for backend tests and local development that does not connect to live DRTP and does not require vendor secrets.

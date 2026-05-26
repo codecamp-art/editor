@@ -12,7 +12,7 @@ It provides a web UI for users to query client-related TDS data using a backend 
 - Native integration: C/C++ vendor headers and Linux `.so` libraries.
 - Prefer a small native adapter layer instead of exposing vendor API directly to application code.
 - Frontend: React or simple server-rendered UI, depending on project decision.
-- Authentication: Kerberos/SPNEGO SSO for Windows domain users opening the web page.
+- Authentication: IP whitelist access for users opening the web page.
 - Deployment target: Linux server.
 - Configuration must support DEV/QA/PROD.
 

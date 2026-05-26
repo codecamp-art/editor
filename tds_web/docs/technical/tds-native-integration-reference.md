@@ -6,7 +6,7 @@ This document keeps only the TDS details needed for the initial `tds_web` projec
 
 `tds_web` needs:
 
-- A Kerberos/SSO web page for Windows domain users.
+- An IP-whitelisted web page for permitted network clients.
 - A client ID or name search input.
 - A selectable list of matching client candidates.
 - A result table matching the data structure in `docs/product/client_data_snapshot.png`.
@@ -179,7 +179,9 @@ Production target:
 - Native adapter linked to the Linux `.so`.
 - Package must include `libtds_api.so` and `cpack.dat`.
 
-Windows files are for local diagnostics only, not production deployment.
+Windows files are for local diagnostics only, not production deployment. A Windows local debug build must use a Win32/x86 CMake generator because the vendor SDK provides 32-bit `tds_api.lib`/`tds_api.dll` files under `tds/win32`. The build copies `tds_api.dll` and `cpack.dat` next to `tds_adapter.exe`.
+
+SDK preparation follows the same model as `tds_reporter`: `cmake/PrepareTdsSdk.cmake` downloads the curated Artifactory package and extracts it into the configured TDS SDK root. Local Windows debug downloads use token authentication. Jenkins/RHEL8 downloads use certificate authentication and validate both `tds/linux_x86_64` and `tds/win32`.
 
 ## Configuration
 
@@ -189,13 +191,17 @@ Externalize these values per DEV/QA/PROD:
 |---|---|
 | `tds.drtp_endpoints` | DRTP `host:port` list |
 | `tds.user` | TDS login user |
-| `tds.password` or Vault config | TDS login password source |
+| `tds.vault.address` / `VAULT_ADDR` | Vault base URL |
+| `tds.vault.namespace` / `VAULT_NAMESPACE` | Optional Vault namespace |
+| `tds.vault.secret-engine` / `VAULT_SECRET_ENGINE` | Vault KV v2 secret engine |
+| `tds.vault.secret-path` / `VAULT_SECRET_PATH` | Vault secret path containing the TDS password |
+| `tds.vault.secret-key` / `VAULT_SECRET_KEY` | Secret field name, default `password` |
 | `tds.req_timeout_ms` | Native request timeout |
 | `tds.log_level` | Vendor log level |
 | `tds.klg_enable` | Vendor KLG output flag |
 | `tds.function_no` | Vendor function number |
 
-Do not commit secrets. Do not log passwords, Vault tokens, or raw secret values.
+Do not configure `tds.password` in YAML. Native mode reads the TDS password from Vault using Kerberos login and Vault KV v2. Do not commit secrets. Do not log passwords, Vault tokens, or raw secret values.
 
 ## Text and Error Handling
 
@@ -219,7 +225,7 @@ Stub mode should:
 - Position field mapping and aggregation.
 - TDS error sanitization.
 - API success and validation failures.
-- SSO/authenticated access boundary.
+- IP whitelist access boundary.
 - UI rendering in the snapshot structure.
 - Copy-to-Excel payload format.
 - Stub mode without loading the vendor runtime.

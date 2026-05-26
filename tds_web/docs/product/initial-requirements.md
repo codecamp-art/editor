@@ -10,7 +10,7 @@ The vendor provides:
 
 The system should provide a web UI where users can query client-related TDS data.
 
-Users are Windows domain users. They should be able to open the web page directly and be authenticated by Kerberos/SSO without entering username and password again.
+Users should be able to open the web page directly from permitted network locations. Access is controlled by an IP whitelist.
 
 The user should be able to input or select a client ID or Name and query the client's data.
 

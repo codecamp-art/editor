@@ -20,11 +20,18 @@ public class NativeProcessTdsQueryClient implements TdsQueryClient {
     private final TdsProperties properties;
     private final TdsRecordMapper mapper;
     private final ObjectMapper objectMapper;
+    private final TdsPasswordProvider passwordProvider;
 
-    public NativeProcessTdsQueryClient(TdsProperties properties, TdsRecordMapper mapper, ObjectMapper objectMapper) {
+    public NativeProcessTdsQueryClient(
+        TdsProperties properties,
+        TdsRecordMapper mapper,
+        ObjectMapper objectMapper,
+        TdsPasswordProvider passwordProvider
+    ) {
         this.properties = properties;
         this.mapper = mapper;
         this.objectMapper = objectMapper;
+        this.passwordProvider = passwordProvider;
     }
 
     @Override
@@ -70,7 +77,7 @@ public class NativeProcessTdsQueryClient implements TdsQueryClient {
         command.addAll(List.of(args));
 
         ProcessBuilder builder = new ProcessBuilder(command);
-        builder.environment().put("TDS_WEB_TDS_PASSWORD", properties.getPassword());
+        builder.environment().put("TDS_WEB_TDS_PASSWORD", passwordProvider.getPassword());
         try {
             Process process = builder.start();
             boolean finished = process.waitFor(PROCESS_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
