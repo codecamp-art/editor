@@ -64,6 +64,8 @@
 
    Production packages must include the Java service, native adapter, vendor `libtds_api.so`, `cpack.dat`, and environment config. Windows support is limited to local diagnostics and must not be required for production.
 
+   Windows local diagnostics use a Win32/x86 adapter build linked to `tds/win32/tds_api.lib`; the adapter output directory must also contain the vendor `.dll` and `cpack.dat`. Jenkins prepares the same curated SDK package before native builds by downloading it from Artifactory using certificate/key authentication.
+
 8. Render the first UI as a copy-friendly table.
 
    The product snapshot is effectively one worksheet-shaped result: a summary header row, one summary data row, a blank separator row, a positions header row, then position data rows. The UI can use different visual styling, but the DOM should preserve a tabular structure and provide a copy action that writes tab-separated and HTML table clipboard content so pasting into Excel keeps the same rows and columns.

@@ -24,6 +24,10 @@ tds/
   linux_x86_64/
     libtds_api.so
     cpack.dat
+  win32/
+    tds_api.lib
+    tds_api.dll
+    cpack.dat
 ```
 
 Validate the layout:
@@ -31,6 +35,38 @@ Validate the layout:
 ```bash
 gradle verifyNativeSdk -PtdsSdkRoot=/path/to/tds
 ```
+
+Validate the full curated package layout, including Windows local debug files:
+
+```bash
+gradle verifyFullTdsSdk -PtdsSdkRoot=/path/to/tds
+```
+
+## SDK Download From Artifactory
+
+Local and Jenkins builds can prepare `tds.sdk-root` from the curated Artifactory package with `cmake/PrepareTdsSdk.cmake`. The package must contain `tds/include`, `tds/linux_x86_64`, and `tds/win32`.
+
+Windows local debug downloads use token authentication:
+
+```powershell
+cd D:\Codes\local\Test\tds_web
+Copy-Item .\tds.properties.example .\tds.properties
+# Edit tds.properties with tds.sdk.url and token values.
+.\gradlew.bat prepareTdsSdk -PtdsSdkRoot=..\tds
+```
+
+RHEL8/Jenkins downloads use Artifactory certificate authentication:
+
+```bash
+./gradlew prepareTdsSdk \
+  -PtdsSdkRoot="$WORKSPACE/tds" \
+  -PtdsSdkUrl="https://artifactory.example.com/artifactory/vendor/tds_sdk.zip" \
+  -PtdsSdkAuth=cert \
+  -PtdsSdkCertFile=/jenkins/build.pem \
+  -PtdsSdkKeyFile=/jenkins/build.key
+```
+
+Jenkins should normally call `jenkins/tds_web_common.groovy`, which fixes the package URL and certificate paths in code rather than Jenkins UI parameters.
 
 ## Native Adapter Build
 
@@ -41,6 +77,28 @@ gradle buildNativeAdapter -PtdsSdkRoot=/path/to/tds
 ```
 
 The adapter executable is expected at `build/native/tds_adapter` unless `tds.native-adapter.executable` is overridden.
+
+Build the Windows local debug adapter with a Win32/x86 CMake generator and the vendor files under `tds/win32`:
+
+```powershell
+cd D:\Codes\local\Test\tds_web
+.\gradlew.bat buildNativeAdapter `
+  -PtdsSdkRoot=..\tds `
+  -PnativeBuildType=Debug `
+  -PnativeCmakePlatform=Win32
+```
+
+The Windows adapter executable is expected at `build\native\tds_adapter.exe`, with `tds_api.dll` and `cpack.dat` copied next to it. The web app can be started against the Windows adapter for local debugging:
+
+```powershell
+java -jar .\build\libs\tds-client-query-web-0.1.0-SNAPSHOT.jar `
+  --server.port=18080 `
+  --app.security.enabled=false `
+  --tds.mode=native `
+  --tds.native-adapter.executable=build\native\tds_adapter.exe
+```
+
+Native mode still reads the TDS password from Vault; configure `VAULT_ADDR`, `VAULT_SECRET_ENGINE`, `VAULT_SECRET_PATH`, and `VAULT_SECRET_KEY` before starting the web app.
 
 ## Runtime Configuration
 

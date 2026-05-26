@@ -49,3 +49,5 @@
 - [x] 6.4 Add stub-mode integration test that does not load the vendor runtime.
 - [x] 6.5 Add Linux build/package verification for native runtime files.
 - [x] 6.6 Document operational runbook entries for SDK preparation, configuration, and smoke testing.
+- [x] 6.7 Add Windows Win32/x86 local debug build support for the native adapter.
+- [x] 6.8 Add Jenkins Artifactory certificate-auth SDK preparation support.

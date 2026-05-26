@@ -120,7 +120,7 @@ public class TdsProperties {
     }
 
     public static class NativeAdapter {
-        private String executable = "build/native/tds_adapter";
+        private String executable = defaultNativeAdapterExecutable();
 
         public Path getExecutable() {
             return Path.of(executable);
@@ -128,6 +128,14 @@ public class TdsProperties {
 
         public void setExecutable(String executable) {
             this.executable = executable;
+        }
+
+        private static String defaultNativeAdapterExecutable() {
+            String osName = System.getProperty("os.name", "").toLowerCase();
+            if (osName.contains("windows")) {
+                return "build/native/tds_adapter.exe";
+            }
+            return "build/native/tds_adapter";
         }
     }
 

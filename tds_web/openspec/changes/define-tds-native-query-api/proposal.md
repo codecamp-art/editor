@@ -9,6 +9,7 @@
 - Define a backend capability for querying TDS-backed client summary and positions through application APIs.
 - Define how the native TDS adapter should initialize sessions, register DRTP nodes, authenticate, request snapshots, iterate records, decode vendor text, close handles, and clean up.
 - Define compile, packaging, and runtime requirements for Linux deployment and Windows local diagnostics.
+- Define Windows Win32/x86 native adapter debug builds and Jenkins Artifactory certificate-auth TDS SDK preparation.
 - Define which customer fields are already proven by `tds_reporter` and which position fields require a new native mapping from the vendor `TDS_TABLE_ID_CUST_HOLD` table.
 - Keep email/report generation out of scope for `tds_web`.
 

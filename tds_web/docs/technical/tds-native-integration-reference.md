@@ -179,7 +179,9 @@ Production target:
 - Native adapter linked to the Linux `.so`.
 - Package must include `libtds_api.so` and `cpack.dat`.
 
-Windows files are for local diagnostics only, not production deployment.
+Windows files are for local diagnostics only, not production deployment. A Windows local debug build must use a Win32/x86 CMake generator because the vendor SDK provides 32-bit `tds_api.lib`/`tds_api.dll` files under `tds/win32`. The build copies `tds_api.dll` and `cpack.dat` next to `tds_adapter.exe`.
+
+SDK preparation follows the same model as `tds_reporter`: `cmake/PrepareTdsSdk.cmake` downloads the curated Artifactory package and extracts it into the configured TDS SDK root. Local Windows debug downloads use token authentication. Jenkins/RHEL8 downloads use certificate authentication and validate both `tds/linux_x86_64` and `tds/win32`.
 
 ## Configuration
 

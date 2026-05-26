@@ -1,11 +1,9 @@
 #include "tds_api.h"
 
 #include <algorithm>
-#include <cerrno>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
-#include <iconv.h>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -15,6 +13,14 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <cerrno>
+#include <iconv.h>
+#endif
 
 namespace {
 
@@ -77,6 +83,60 @@ std::string convert_to_utf8(const std::string& input, const char* encoding) {
         return "";
     }
 
+#ifdef _WIN32
+    unsigned int code_page = 936;
+    if (std::strcmp(encoding, "GB18030") == 0) {
+        code_page = 54936;
+    }
+    const int wide_length = MultiByteToWideChar(
+        code_page,
+        MB_ERR_INVALID_CHARS,
+        input.data(),
+        static_cast<int>(input.size()),
+        nullptr,
+        0);
+    if (wide_length <= 0) {
+        return "";
+    }
+
+    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+    if (MultiByteToWideChar(
+            code_page,
+            MB_ERR_INVALID_CHARS,
+            input.data(),
+            static_cast<int>(input.size()),
+            wide.data(),
+            wide_length) <= 0) {
+        return "";
+    }
+
+    const int utf8_length = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wide.data(),
+        wide_length,
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (utf8_length <= 0) {
+        return "";
+    }
+
+    std::string output(static_cast<std::size_t>(utf8_length), '\0');
+    if (WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            wide.data(),
+            wide_length,
+            output.data(),
+            utf8_length,
+            nullptr,
+            nullptr) <= 0) {
+        return "";
+    }
+    return output;
+#else
     iconv_t converter = iconv_open("UTF-8", encoding);
     if (converter == reinterpret_cast<iconv_t>(-1)) {
         return "";
@@ -111,6 +171,7 @@ std::string convert_to_utf8(const std::string& input, const char* encoding) {
 
     iconv_close(converter);
     return std::string(output.data(), static_cast<std::size_t>(output_buffer - output.data()));
+#endif
 }
 
 bool is_ascii(const std::string& value) {

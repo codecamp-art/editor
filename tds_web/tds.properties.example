@@ -1,0 +1,12 @@
+# Copy to tds.properties for local SDK preparation. Do not commit real secrets.
+
+tds.sdk.url=https://artifactory.example.com/artifactory/vendor/tds_sdk.zip
+
+# Windows local downloads use token authentication.
+# tds.sdk.auth=token
+# tds.sdk.token=REPLACE_ME_TOKEN
+
+# RHEL8 local builds may also use certificate/key authentication.
+# tds.sdk.auth=cert
+# tds.sdk.certFile=/path/to/artifactory-client.pem
+# tds.sdk.keyFile=/path/to/artifactory-client.key

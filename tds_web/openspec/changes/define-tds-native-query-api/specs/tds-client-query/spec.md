@@ -111,6 +111,14 @@ The build SHALL consume the vendor SDK from a curated package containing `tds/in
 - **WHEN** the Linux build cannot find `tds_api.h`, `libtds_api.so`, or `cpack.dat`
 - **THEN** the build fails with an actionable error before packaging
 
+#### Scenario: Windows local debug adapter uses Win32 vendor files
+- **WHEN** a developer builds the native adapter on Windows for local debugging
+- **THEN** the build uses the Win32/x86 vendor `tds_api.lib`, requires a runtime `.dll` and `cpack.dat` under `tds/win32`, and emits `tds_adapter.exe` with the runtime files copied next to it
+
+#### Scenario: Jenkins prepares SDK from Artifactory
+- **WHEN** the Jenkins pipeline starts a native build
+- **THEN** it downloads the curated TDS SDK package from the configured Artifactory URL using certificate authentication before validating and building the adapter
+
 ### Requirement: Stub Query Mode
 The system SHALL provide a deterministic stub implementation for backend tests and local development that does not connect to live DRTP and does not require vendor secrets.
 

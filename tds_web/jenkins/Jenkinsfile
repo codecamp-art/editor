@@ -1,0 +1,46 @@
+def common
+def integrationConfig
+
+pipeline {
+  agent { label 'rhel8' }
+
+  options {
+    timestamps()
+  }
+
+  environment {
+    PROJECT_DIR = "${env.WORKSPACE}/tds_web"
+    TDS_DIR = "${env.WORKSPACE}/tds"
+    TDS_PACKAGE_DOWNLOAD_DIR = "${env.WORKSPACE}/.tds-sdk/download"
+    TDS_PACKAGE_EXTRACT_DIR = "${env.WORKSPACE}/.tds-sdk/extract"
+  }
+
+  stages {
+    stage('Load Pipeline Helpers') {
+      steps {
+        script {
+          common = load "${env.PROJECT_DIR}/jenkins/tds_web_common.groovy"
+          integrationConfig = common.fixedIntegrationConfig('tds_web')
+          common.validateFixedIntegrationConfig(integrationConfig, 'tds_web')
+        }
+      }
+    }
+
+    stage('Prepare TDS SDK') {
+      steps {
+        script {
+          common.prepareTdsPackage(params: integrationConfig)
+          common.validateTdsPackage()
+        }
+      }
+    }
+
+    stage('Build') {
+      steps {
+        script {
+          common.buildTdsWeb()
+        }
+      }
+    }
+  }
+}
