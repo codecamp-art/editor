@@ -66,7 +66,12 @@ RHEL8/Jenkins downloads use Artifactory certificate authentication:
   -PtdsSdkKeyFile=/jenkins/build.key
 ```
 
-Jenkins should normally call `jenkins/tds_web_common.groovy`, which fixes the package URL and certificate paths in code rather than Jenkins UI parameters.
+Jenkins uses separate PR and release pipelines:
+
+- `jenkins/Jenkinsfile.pr` prepares the TDS SDK, validates/builds the native adapter, runs tests, builds the boot jar, and optionally runs a stub-mode HTTP smoke test.
+- `jenkins/Jenkinsfile.release` prepares the same TDS SDK, runs the same validation/build path, stages the RHEL8 runtime package, and archives `tds-client-query-web-rhel8-<build>.tar.gz`.
+
+Both pipelines call `jenkins/tds_web_common.groovy`, which fixes the Artifactory package URL and certificate paths in code rather than Jenkins UI parameters.
 
 ## Native Adapter Build
 

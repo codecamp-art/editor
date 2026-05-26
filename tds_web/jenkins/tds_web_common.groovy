@@ -1,5 +1,3 @@
-import java.util.UUID
-
 String shellQuote(String value) {
   return "'" + (value ?: '').replace("'", "'\"'\"'") + "'"
 }
@@ -104,7 +102,70 @@ void buildTdsWeb(Map args = [:]) {
   sh '''#!/usr/bin/env bash
 set -euxo pipefail
 cd "$PROJECT_DIR"
-./gradlew --no-daemon verifyFullTdsSdk buildNativeAdapter bootJar -PtdsSdkRoot="$TDS_DIR"
+./gradlew --no-daemon test verifyFullTdsSdk buildNativeAdapter bootJar -PtdsSdkRoot="$TDS_DIR"
+'''
+}
+
+void stageReleasePackage() {
+  sh '''#!/usr/bin/env bash
+set -euxo pipefail
+cd "$PROJECT_DIR"
+
+rm -rf "$STAGE_DIR"
+mkdir -p "$STAGE_DIR/bin" "$STAGE_DIR/lib" "$STAGE_DIR/config"
+
+JAR_PATH="$(find "$PROJECT_DIR/build/libs" -maxdepth 1 -name 'tds-client-query-web-*.jar' -type f | sort | head -n 1)"
+test -n "$JAR_PATH"
+test -f "$PROJECT_DIR/build/native/tds_adapter"
+test -f "$TDS_DIR/linux_x86_64/libtds_api.so"
+test -f "$TDS_DIR/linux_x86_64/cpack.dat"
+
+cp "$JAR_PATH" "$STAGE_DIR/bin/tds-client-query-web.jar"
+cp "$PROJECT_DIR/build/native/tds_adapter" "$STAGE_DIR/bin/tds_adapter"
+cp "$TDS_DIR/linux_x86_64/libtds_api.so" "$STAGE_DIR/lib/libtds_api.so"
+cp "$TDS_DIR/linux_x86_64/cpack.dat" "$STAGE_DIR/bin/cpack.dat"
+cp "$PROJECT_DIR"/src/main/resources/application*.yml "$STAGE_DIR/config/"
+
+tar -C "$(dirname "$STAGE_DIR")" -czf "$PACKAGE_PATH" "$(basename "$STAGE_DIR")"
+test -f "$PACKAGE_PATH"
+'''
+}
+
+void runStubSmoke() {
+  sh '''#!/usr/bin/env bash
+set -euxo pipefail
+cd "$PROJECT_DIR"
+
+JAR_PATH="$(find "$PROJECT_DIR/build/libs" -maxdepth 1 -name 'tds-client-query-web-*.jar' -type f | sort | head -n 1)"
+test -n "$JAR_PATH"
+
+SMOKE_PORT="${SMOKE_PORT:-$((18080 + (${BUILD_NUMBER:-0} % 1000)))}"
+SMOKE_LOG="$PROJECT_DIR/build/stub-smoke.log"
+SMOKE_RESPONSE="$PROJECT_DIR/build/stub-smoke-response.json"
+
+java -jar "$JAR_PATH" \
+  --server.port="$SMOKE_PORT" \
+  --app.security.enabled=false \
+  --tds.mode=stub \
+  > "$SMOKE_LOG" 2>&1 &
+APP_PID="$!"
+
+cleanup() {
+  kill "$APP_PID" 2>/dev/null || true
+  wait "$APP_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+for attempt in $(seq 1 60); do
+  if curl -fsS "http://127.0.0.1:$SMOKE_PORT/api/tds/clients?query=Alpha" > "$SMOKE_RESPONSE"; then
+    grep -q '"clientId":"1001"' "$SMOKE_RESPONSE"
+    exit 0
+  fi
+  sleep 1
+done
+
+cat "$SMOKE_LOG"
+exit 1
 '''
 }
 

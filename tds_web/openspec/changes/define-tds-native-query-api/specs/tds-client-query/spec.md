@@ -119,6 +119,12 @@ The build SHALL consume the vendor SDK from a curated package containing `tds/in
 - **WHEN** the Jenkins pipeline starts a native build
 - **THEN** it downloads the curated TDS SDK package from the configured Artifactory URL using certificate authentication before validating and building the adapter
 
+#### Scenario: Jenkins separates PR and release builds
+- **WHEN** Jenkins runs the PR pipeline
+- **THEN** it validates the SDK, builds the native adapter, runs tests, builds the boot jar, and can run a stub-mode smoke test
+- **WHEN** Jenkins runs the release pipeline
+- **THEN** it performs the same validation path and stages an RHEL8 release package for archiving
+
 ### Requirement: Stub Query Mode
 The system SHALL provide a deterministic stub implementation for backend tests and local development that does not connect to live DRTP and does not require vendor secrets.
 

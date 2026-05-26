@@ -34,6 +34,19 @@ class NativeBuildAssetTest {
         assertThat(groovy).contains("TDS_PACKAGE_URL", "ARTIFACTORY_CERT_FILE", "ARTIFACTORY_KEY_FILE");
         assertThat(groovy).contains("-DTDS_SDK_CONTEXT=jenkins", "-DTDS_SDK_AUTH=cert");
         assertThat(groovy).contains("cmake/PrepareTdsSdk.cmake");
+        assertThat(groovy).contains("stageReleasePackage", "runStubSmoke");
+    }
+
+    @Test
+    void jenkinsUsesSeparatePrAndReleasePipelines() throws IOException {
+        String pr = read("jenkins/Jenkinsfile.pr");
+        String release = read("jenkins/Jenkinsfile.release");
+
+        assertThat(Files.exists(Path.of("jenkins/Jenkinsfile"))).isFalse();
+        assertThat(pr).contains("fixedIntegrationConfig('pr')", "Build And Test", "Stub Smoke");
+        assertThat(pr).doesNotContain("Stage Release");
+        assertThat(release).contains("fixedIntegrationConfig('release')", "Stage Release", "stageReleasePackage");
+        assertThat(release).contains("tds-client-query-web-rhel8-${env.BUILD_NUMBER}.tar.gz");
     }
 
     private static String read(String relativePath) throws IOException {
