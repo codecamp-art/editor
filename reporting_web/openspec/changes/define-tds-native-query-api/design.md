@@ -58,7 +58,7 @@
 
 6. Externalize all runtime configuration.
 
-   DEV/QA/PROD must provide DRTP endpoints, TDS user, Vault location, request timeout, TDS log level, KLG flag, and function number outside source code. The web project should keep the same base-plus-environment overlay idea from `tds_reporter`, adapted to Spring configuration. The TDS password is not configured in YAML; native mode reads it from Vault using Kerberos login and KV v2.
+   DEV/QA/PROD must provide DRTP endpoints, TDS user, Vault location, request timeout, TDS log level, KLG flag, and function number outside source code. The web project should keep the same base-plus-environment overlay idea from `tds_reporter`, adapted to Spring configuration. Native mode reads the TDS password from Vault using Kerberos login and KV v2 by default. Windows local native debugging may explicitly set `tds.password-source=local-config` and read `tds.local-password` from an ignored local config file; this bypass must not be used by QA/PROD or Jenkins release runtime.
 
 7. Preserve Linux release as the production path.
 
@@ -80,5 +80,5 @@
 - Native crashes can take down the JVM if JNI/JNA runs in-process -> keep the adapter boundary narrow and consider an out-of-process adapter if stability testing shows native crash risk.
 - `tds_reporter` currently omits `currency_code` from its internal model -> `reporting_web` must not copy that omission because the web result requires currency.
 - Position mapping is inferred from vendor headers, not proven in reporter production logic -> add stub tests and live dry-run smoke validation before enabling production use.
-- Network allowlist and Vault configuration differ between batch and web runtime -> keep secret values out of logs and command lines, and validate the deployed client IP ranges on RHEL8.
+- Network allowlist and Vault/local debug password configuration differ between batch and web runtime -> keep secret values out of logs and command lines, ignore local password config files, and validate the deployed client IP ranges on RHEL8.
 - Browser clipboard behavior can vary by environment -> provide an explicit copy button and automated tests for the generated clipboard payload, with normal text selection as a fallback.

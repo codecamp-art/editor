@@ -2,6 +2,7 @@ package com.example.tdsweb.config;
 
 import com.example.tdsweb.tds.NativeProcessTdsQueryClient;
 import com.example.tdsweb.tds.NativeSdkValidator;
+import com.example.tdsweb.tds.LocalConfigTdsPasswordProvider;
 import com.example.tdsweb.tds.StubTdsQueryClient;
 import com.example.tdsweb.tds.TdsPasswordProvider;
 import com.example.tdsweb.tds.TdsQueryClient;
@@ -34,7 +35,13 @@ public class TdsClientConfiguration {
     @Bean
     @ConditionalOnProperty(name = "tds.mode", havingValue = "native")
     TdsPasswordProvider tdsPasswordProvider(TdsProperties properties, ObjectMapper objectMapper) {
-        return new VaultTdsPasswordProvider(properties, objectMapper);
+        return switch (properties.getPasswordSource()) {
+            case VAULT -> new VaultTdsPasswordProvider(properties, objectMapper);
+            case LOCAL_CONFIG -> {
+                requireWindowsForLocalConfigPassword();
+                yield new LocalConfigTdsPasswordProvider(properties);
+            }
+        };
     }
 
     @Bean
@@ -48,5 +55,12 @@ public class TdsClientConfiguration {
     ) {
         validator.validate();
         return new NativeProcessTdsQueryClient(properties, mapper, objectMapper, passwordProvider);
+    }
+
+    private static void requireWindowsForLocalConfigPassword() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        if (!osName.contains("windows")) {
+            throw new IllegalStateException("tds.password-source=local-config is only supported for Windows local debug runs");
+        }
     }
 }

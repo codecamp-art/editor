@@ -36,6 +36,8 @@ build/
 
 ### Vendor Binaries ###
 reporting_web/tds/
+reporting_web/config/application-local*.yml
+reporting_web/config/application-local*.yaml
 tds/win32/
 tds/**/*.dll
 tds/**/*.lib

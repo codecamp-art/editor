@@ -93,12 +93,17 @@ The adapter SHALL convert vendor GB18030/GBK text to UTF-8 before returning name
 - **THEN** the API response exposes the operation name and decoded error message but does not expose configured secrets
 
 ### Requirement: Runtime Configuration
-The system SHALL support DEV, QA, and PROD runtime configuration for DRTP endpoints, TDS user, Vault secret location, request timeout, TDS log level, KLG enablement, and function number. The TDS password MUST be read from Vault in native mode and MUST NOT be configured directly in YAML. These values MUST be externalized and MUST NOT be hard-coded into source code.
+The system SHALL support DEV, QA, and PROD runtime configuration for DRTP endpoints, TDS user, Vault secret location, request timeout, TDS log level, KLG enablement, and function number. The TDS password MUST be read from Vault in native mode by default and MUST NOT be configured as `tds.password` in YAML. Windows local native debugging MAY explicitly set `tds.password-source=local-config` and read `tds.local-password` from an ignored local config file. These values MUST be externalized and MUST NOT be hard-coded into source code.
 
 #### Scenario: Environment config selects DRTP endpoints
 - **WHEN** the service starts with the QA environment selected
 - **THEN** the adapter uses the QA DRTP endpoint list and does not use DEV or PROD endpoints
 - **AND** native mode resolves the TDS password from Vault using the configured KV v2 secret path and key
+
+#### Scenario: Windows local native debug uses local password config
+- **WHEN** a developer starts native mode on Windows with `tds.password-source=local-config`
+- **THEN** the adapter reads the TDS password from `tds.local-password` instead of Vault
+- **AND** the local password config file is ignored by git
 
 ### Requirement: Native Build and Package Inputs
 The build SHALL consume the vendor SDK from a curated package containing `tds/include/tds_api.h`, `tds/linux_x86_64/libtds_api.so`, `tds/linux_x86_64/cpack.dat`, and optional Windows diagnostic files under `tds/win32`. Local Windows and RHEL8 builds SHALL read manually placed SDK files from `tds.sdk-root`, defaulting to `reporting_web/tds`, and SHALL NOT download those files from Artifactory. Linux deployment packages SHALL include the native adapter, `libtds_api.so`, and `cpack.dat`.

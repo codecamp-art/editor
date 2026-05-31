@@ -193,6 +193,8 @@ Externalize these values per DEV/QA/PROD:
 |---|---|
 | `tds.drtp_endpoints` | DRTP `host:port` list |
 | `tds.user` | TDS login user |
+| `tds.password-source` | `vault` by default; `local-config` only for Windows local native debugging |
+| `tds.local-password` | Direct TDS password for ignored Windows local debug config only |
 | `tds.vault.address` / `VAULT_ADDR` | Vault base URL |
 | `tds.vault.namespace` / `VAULT_NAMESPACE` | Optional Vault namespace |
 | `tds.vault.secret-engine` / `VAULT_SECRET_ENGINE` | Vault KV v2 secret engine |
@@ -203,7 +205,7 @@ Externalize these values per DEV/QA/PROD:
 | `tds.klg_enable` | Vendor KLG output flag |
 | `tds.function_no` | Vendor function number |
 
-Do not configure `tds.password` in YAML. Native mode reads the TDS password from Vault using Kerberos login and Vault KV v2. Do not commit secrets. Do not log passwords, Vault tokens, or raw secret values.
+Do not configure `tds.password` in YAML. Native mode reads the TDS password from Vault using Kerberos login and Vault KV v2 by default. For Windows local native debugging only, `tds.password-source=local-config` may read `tds.local-password` from an ignored local config file such as `config/application-local-windows.yml`. Do not commit secrets. Do not log passwords, Vault tokens, or raw secret values.
 
 ## Text and Error Handling
 

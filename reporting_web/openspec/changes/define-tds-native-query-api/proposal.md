@@ -28,4 +28,4 @@
 - Affects the first web UI for client lookup, result display, and copy-to-Excel behavior.
 - Introduces an API contract for the exact data blocks in the product snapshot: client summary and positions.
 - Requires the vendor TDS SDK package layout used by `tds_reporter`: headers under `tds/include`, Linux library under `tds/linux_x86_64`, and Windows `.dll`/`.lib` diagnostic files under `tds/win32`.
-- Requires externalized DEV/QA/PROD configuration for DRTP endpoints, TDS user, Vault password lookup, request timeout, log level, KLG flag, and function number.
+- Requires externalized DEV/QA/PROD configuration for DRTP endpoints, TDS user, Vault password lookup, request timeout, log level, KLG flag, and function number; Windows local native debugging may use an ignored local password config override.

@@ -13,6 +13,8 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "tds")
 public class TdsProperties {
     private Mode mode = Mode.STUB;
+    private PasswordSource passwordSource = PasswordSource.VAULT;
+    private String localPassword = "";
     private String sdkRoot = "tds";
     @Valid
     private NativeAdapter nativeAdapter = new NativeAdapter();
@@ -31,12 +33,33 @@ public class TdsProperties {
         NATIVE
     }
 
+    public enum PasswordSource {
+        VAULT,
+        LOCAL_CONFIG
+    }
+
     public Mode getMode() {
         return mode;
     }
 
     public void setMode(Mode mode) {
         this.mode = mode;
+    }
+
+    public PasswordSource getPasswordSource() {
+        return passwordSource;
+    }
+
+    public void setPasswordSource(PasswordSource passwordSource) {
+        this.passwordSource = passwordSource;
+    }
+
+    public String getLocalPassword() {
+        return localPassword;
+    }
+
+    public void setLocalPassword(String localPassword) {
+        this.localPassword = localPassword;
     }
 
     public Path getSdkRoot() {

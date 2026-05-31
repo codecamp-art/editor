@@ -77,15 +77,78 @@ cd D:\Codes\local\Test\reporting_web
 
 The Windows adapter executable is expected at `build\native\tds_adapter.exe`, with `tds_api.dll` and `cpack.dat` copied next to it. The web app can be started against the Windows adapter for local debugging:
 
+## Windows Local Native Real Environment
+
+Use this path only for local Windows debugging against a real DRTP/TDS environment. QA/PROD and Jenkins release runtime must keep using Vault-backed passwords.
+
+Prerequisites:
+
+- JDK 21 is available on `PATH`.
+- CMake is available on `PATH`.
+- Visual Studio Build Tools or Visual Studio with MSVC x86 tools is installed.
+- The local machine can reach the target DRTP host and port.
+- Vendor SDK files are manually placed under `D:\Codes\local\Test\reporting_web\tds`.
+
+Validate the Windows SDK files:
+
 ```powershell
-java -jar .\build\libs\tds-client-query-web-0.1.0-SNAPSHOT.jar `
-  --server.port=18080 `
-  --app.security.enabled=false `
-  --tds.mode=native `
-  --tds.native-adapter.executable=build\native\tds_adapter.exe
+cd D:\Codes\local\Test\reporting_web
+.\gradlew.bat verifyNativeSdk -PtdsSdkRoot=tds
 ```
 
-Native mode still reads the TDS password from Vault; configure `VAULT_ADDR`, `VAULT_SECRET_ENGINE`, `VAULT_SECRET_PATH`, and `VAULT_SECRET_KEY` before starting the web app.
+Build the Win32/x86 debug adapter:
+
+```powershell
+.\gradlew.bat buildNativeAdapter `
+  -PtdsSdkRoot=tds `
+  -PnativeBuildType=Debug `
+  -PnativeCmakeGenerator="Visual Studio 17 2022" `
+  -PnativeCmakePlatform=Win32
+```
+
+Build the Spring Boot jar:
+
+```powershell
+.\gradlew.bat bootJar
+```
+
+Create a local-only config file at `D:\Codes\local\Test\reporting_web\config\application-local-windows.yml`. This path is ignored by git.
+
+```yaml
+server:
+  port: 18080
+
+app:
+  security:
+    enabled: false
+
+tds:
+  mode: native
+  sdk-root: tds
+  password-source: local-config
+  local-password: "REPLACE_WITH_TDS_PASSWORD"
+  native-adapter:
+    executable: build/native/tds_adapter.exe
+  drtp-endpoints:
+    - host: REPLACE_WITH_REAL_DRTP_HOST
+      port: 6003
+  user: REPLACE_WITH_TDS_USER
+  req-timeout-ms: 300000
+  log-level: 2000
+  klg-enable: false
+  function-no: 20100
+```
+
+If the password contains YAML-sensitive characters, keep it quoted. Do not commit this file.
+
+Start the web app with the local config:
+
+```powershell
+java -jar .\build\libs\tds-client-query-web-0.1.0-SNAPSHOT.jar `
+  --spring.config.additional-location=file:./config/application-local-windows.yml
+```
+
+Open `http://localhost:18080/`, search a known real client by ID or name, then query the selected client detail.
 
 ## Runtime Configuration
 
@@ -94,6 +157,8 @@ Set profile-specific values outside source code:
 - `app.security.allowed-ip-ranges`, the CIDR/IP allowlist for clients permitted to open the page and API
 - `tds.drtp-endpoints`
 - `tds.user`
+- `tds.password-source`, defaulting to `vault`; use `local-config` only for Windows local native debug
+- `tds.local-password`, only in ignored local Windows debug config when `tds.password-source=local-config`
 - `tds.vault.address` or `VAULT_ADDR`
 - `tds.vault.namespace` or `VAULT_NAMESPACE`, if the Vault deployment requires a namespace
 - `tds.vault.secret-engine` or `VAULT_SECRET_ENGINE`
@@ -104,7 +169,7 @@ Set profile-specific values outside source code:
 - `tds.klg-enable`
 - `tds.function-no`
 
-Do not configure `tds.password` in YAML. Native mode reads the TDS password from Vault by calling `POST /v1/auth/kerberos/login`, then `GET /v1/<secret-engine>/data/<secret-path>` and reading the configured secret key. The runtime user must already have a valid Kerberos TGT, for example through `kinit` or the deployment host's ticket refresh process.
+Do not configure `tds.password` in YAML. By default, native mode reads the TDS password from Vault by calling `POST /v1/auth/kerberos/login`, then `GET /v1/<secret-engine>/data/<secret-path>` and reading the configured secret key. The runtime user must already have a valid Kerberos TGT, for example through `kinit` or the deployment host's ticket refresh process. The only direct password exception is ignored Windows local debug config with `tds.password-source=local-config` and `tds.local-password`.
 
 Do not commit real DRTP endpoints, TDS passwords, Vault tokens, certificates, or private keys.
 

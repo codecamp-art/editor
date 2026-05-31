@@ -53,3 +53,4 @@
 - [x] 6.8 Add Jenkins Artifactory certificate-auth SDK preparation support.
 - [x] 6.9 Split Jenkins into separate PR and release pipelines.
 - [x] 6.10 Restrict Artifactory SDK download to Jenkins PR/release and require manual local SDK placement.
+- [x] 6.11 Add Windows local native debug password-source override and runbook steps.
