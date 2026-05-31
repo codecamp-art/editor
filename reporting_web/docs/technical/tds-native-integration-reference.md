@@ -181,7 +181,9 @@ Production target:
 
 Windows files are for local diagnostics only, not production deployment. A Windows local debug build must use a Win32/x86 CMake generator because the vendor SDK provides 32-bit `tds_api.lib`/`tds_api.dll` files under `tds/win32`. The build copies `tds_api.dll` and `cpack.dat` next to `tds_adapter.exe`.
 
-SDK preparation follows the same model as `tds_reporter`: `cmake/PrepareTdsSdk.cmake` downloads the curated Artifactory package and extracts it into the configured TDS SDK root. Local Windows debug downloads use token authentication. Jenkins/RHEL8 downloads use certificate authentication and validate both `tds/linux_x86_64` and `tds/win32`.
+Local Windows and RHEL8 builds do not download SDK files. Developers manually place the curated vendor files under `tds.sdk-root`, which defaults to `tds` inside `reporting_web`.
+
+Only Jenkins PR and release pipelines download the curated SDK package from Artifactory. Jenkins invokes `cmake/PrepareTdsSdk.cmake` with `TDS_SDK_CONTEXT=jenkins`, certificate authentication, and validation for both `tds/linux_x86_64` and `tds/win32`.
 
 ## Configuration
 

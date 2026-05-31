@@ -13,7 +13,7 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "tds")
 public class TdsProperties {
     private Mode mode = Mode.STUB;
-    private String sdkRoot = "../tds";
+    private String sdkRoot = "tds";
     @Valid
     private NativeAdapter nativeAdapter = new NativeAdapter();
     @Valid

@@ -7,7 +7,7 @@
 - Session cleanup calls `TdsApi_reqLogout` and `TdsApi_finalize`.
 - Vendor text and error messages are decoded from GB18030/GBK to UTF-8 before application use.
 - Linux/RHEL8 is the production build target and links `tds/linux_x86_64/libtds_api.so`; Windows local diagnostics require Win32/x86 because the vendor SDK supplies 32-bit `.lib` and `.dll` files.
-- SDK download and extraction are handled by CMake through `cmake/PrepareTdsSdk.cmake`, with local token auth and Jenkins certificate/key auth.
+- Local Windows and RHEL8 builds read manually placed SDK files from `tds.sdk-root`, defaulting to `reporting_web/tds`; SDK download and extraction are Jenkins-only through `cmake/PrepareTdsSdk.cmake` with certificate/key auth.
 
 `reporting_web` has no application code yet. The project direction is Java 21, Spring Boot, Gradle, Linux deployment, IP whitelist access control, and a small native adapter rather than direct vendor API use from application logic.
 
@@ -64,7 +64,7 @@
 
    Production packages must include the Java service, native adapter, vendor `libtds_api.so`, `cpack.dat`, and environment config. Windows support is limited to local diagnostics and must not be required for production.
 
-   Windows local diagnostics use a Win32/x86 adapter build linked to `tds/win32/tds_api.lib`; the adapter output directory must also contain the vendor `.dll` and `cpack.dat`. Jenkins prepares the same curated SDK package before native builds by downloading it from Artifactory using certificate/key authentication.
+   Windows local diagnostics use a Win32/x86 adapter build linked to `tds/win32/tds_api.lib`; the adapter output directory must also contain the vendor `.dll` and `cpack.dat`. Local Windows and RHEL8 builds require developers to place those files manually under `reporting_web/tds` by default. Jenkins PR and release pipelines prepare the same curated SDK package before native builds by downloading it from Artifactory using certificate/key authentication.
 
 8. Render the first UI as a copy-friendly table.
 

@@ -101,7 +101,7 @@ The system SHALL support DEV, QA, and PROD runtime configuration for DRTP endpoi
 - **AND** native mode resolves the TDS password from Vault using the configured KV v2 secret path and key
 
 ### Requirement: Native Build and Package Inputs
-The build SHALL consume the vendor SDK from a curated package containing `tds/include/tds_api.h`, `tds/linux_x86_64/libtds_api.so`, `tds/linux_x86_64/cpack.dat`, and optional Windows diagnostic files under `tds/win32`. Linux deployment packages SHALL include the native adapter, `libtds_api.so`, and `cpack.dat`.
+The build SHALL consume the vendor SDK from a curated package containing `tds/include/tds_api.h`, `tds/linux_x86_64/libtds_api.so`, `tds/linux_x86_64/cpack.dat`, and optional Windows diagnostic files under `tds/win32`. Local Windows and RHEL8 builds SHALL read manually placed SDK files from `tds.sdk-root`, defaulting to `reporting_web/tds`, and SHALL NOT download those files from Artifactory. Linux deployment packages SHALL include the native adapter, `libtds_api.so`, and `cpack.dat`.
 
 #### Scenario: Linux package contains native runtime files
 - **WHEN** the production package is built
@@ -115,8 +115,12 @@ The build SHALL consume the vendor SDK from a curated package containing `tds/in
 - **WHEN** a developer builds the native adapter on Windows for local debugging
 - **THEN** the build uses the Win32/x86 vendor `tds_api.lib`, requires a runtime `.dll` and `cpack.dat` under `tds/win32`, and emits `tds_adapter.exe` with the runtime files copied next to it
 
-#### Scenario: Jenkins prepares SDK from Artifactory
-- **WHEN** the Jenkins pipeline starts a native build
+#### Scenario: Local native builds use manually prepared SDK
+- **WHEN** a developer builds locally on Windows or RHEL8
+- **THEN** the build reads TDS headers, library/runtime files, and `cpack.dat` from `tds.sdk-root`, defaulting to `reporting_web/tds`, and does not download them from Artifactory
+
+#### Scenario: Jenkins PR and release prepare SDK from Artifactory
+- **WHEN** a Jenkins PR or release pipeline starts a native build
 - **THEN** it downloads the curated TDS SDK package from the configured Artifactory URL using certificate authentication before validating and building the adapter
 
 #### Scenario: Jenkins separates PR and release builds

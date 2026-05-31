@@ -35,6 +35,7 @@ build/
 .vscode/
 
 ### Vendor Binaries ###
+reporting_web/tds/
 tds/win32/
 tds/**/*.dll
 tds/**/*.lib

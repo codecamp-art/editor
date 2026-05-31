@@ -25,66 +25,17 @@ tasks.named('test') {
 }
 
 def nativeBuildDir = layout.buildDirectory.dir('native')
-def tdsSdkRootProvider = providers.gradleProperty('tdsSdkRoot').orElse('../tds')
+def tdsSdkRootProvider = providers.gradleProperty('tdsSdkRoot').orElse('tds')
 def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
 def isLinux = osName.contains('linux')
 def isWindows = osName.contains('windows')
 def nativeBuildTypeProvider = providers.gradleProperty('nativeBuildType').orElse(isWindows ? 'Debug' : 'Release')
 def nativeCmakeGeneratorProvider = providers.gradleProperty('nativeCmakeGenerator')
 def nativeCmakePlatformProvider = providers.gradleProperty('nativeCmakePlatform')
-def tdsSdkDownloadDir = layout.buildDirectory.dir('tds_sdk_download')
-def tdsSdkExtractDir = layout.buildDirectory.dir('tds_sdk_extract')
-def hasTdsSdkPrepareConfig = {
-    providers.gradleProperty('tdsSdkUrl').isPresent() ||
-        providers.gradleProperty('tdsSdkPropertiesFile').isPresent() ||
-        providers.gradleProperty('tdsSdkForce').map { it.equalsIgnoreCase('true') || it.equalsIgnoreCase('on') }.orElse(false).get() ||
-        providers.environmentVariable('TDS_SDK_URL').isPresent() ||
-        providers.environmentVariable('TDS_SDK_PROPERTIES_FILE').isPresent() ||
-        layout.projectDirectory.file('tds.properties').asFile.isFile()
-}
-
-tasks.register('prepareTdsSdk', Exec) {
-    group = 'build setup'
-    description = 'Download and extract the curated TDS SDK package from Artifactory when configured.'
-    onlyIf { hasTdsSdkPrepareConfig() }
-
-    doFirst {
-        def args = [
-            'cmake',
-            "-DTDS_SDK_PROJECT_DIR=${layout.projectDirectory.asFile.absolutePath}",
-            "-DTDS_SDK_DEST_DIR=${file(tdsSdkRootProvider.get()).absolutePath}",
-            "-DTDS_SDK_DOWNLOAD_DIR=${tdsSdkDownloadDir.get().asFile.absolutePath}",
-            "-DTDS_SDK_EXTRACT_DIR=${tdsSdkExtractDir.get().asFile.absolutePath}",
-            "-DTDS_SDK_PLATFORM=${isWindows ? 'windows' : 'linux'}",
-            '-DTDS_SDK_CONTEXT=local',
-            '-DTDS_SDK_ALLOW_MISSING_CONFIG=ON',
-            '-P',
-            layout.projectDirectory.file('cmake/PrepareTdsSdk.cmake').asFile.absolutePath
-        ]
-
-        [
-            tdsSdkPropertiesFile: 'TDS_SDK_PROPERTIES_FILE',
-            tdsSdkUrl: 'TDS_SDK_URL',
-            tdsSdkAuth: 'TDS_SDK_AUTH',
-            tdsSdkCertFile: 'TDS_SDK_CERT_FILE',
-            tdsSdkKeyFile: 'TDS_SDK_KEY_FILE',
-            tdsSdkCurlBin: 'TDS_SDK_CURL_BIN',
-            tdsSdkForce: 'TDS_SDK_FORCE'
-        ].each { gradleProperty, cmakeName ->
-            def value = providers.gradleProperty(gradleProperty).orNull
-            if (value != null && !value.isBlank()) {
-                args.add(args.size() - 2, "-D${cmakeName}=${value}")
-            }
-        }
-
-        commandLine args
-    }
-}
 
 tasks.register('verifyFullTdsSdk') {
     group = 'verification'
-    description = 'Verify the full curated TDS SDK layout for Linux and Windows local diagnostics.'
-    dependsOn tasks.named('prepareTdsSdk')
+    description = 'Verify the manually prepared full TDS SDK layout for Linux and Windows local diagnostics.'
 
     doLast {
         def root = file(tdsSdkRootProvider.get())
@@ -113,8 +64,7 @@ tasks.register('verifyFullTdsSdk') {
 
 tasks.register('verifyNativeSdk') {
     group = 'verification'
-    description = 'Verify platform-specific TDS SDK files required by the native adapter.'
-    dependsOn tasks.named('prepareTdsSdk')
+    description = 'Verify manually prepared platform-specific TDS SDK files required by the native adapter.'
 
     doLast {
         def root = file(tdsSdkRootProvider.get())

@@ -18,13 +18,24 @@ class NativeBuildAssetTest {
     }
 
     @Test
-    void gradleBuildCanPrepareSdkAndBuildWindowsDebugNativeAdapter() throws IOException {
+    void gradleBuildUsesManuallyPreparedSdkForLocalNativeBuilds() throws IOException {
         String gradle = read("build.gradle");
 
-        assertThat(gradle).contains("prepareTdsSdk", "verifyFullTdsSdk", "nativeBuildType");
+        assertThat(gradle).contains("orElse('tds')");
+        assertThat(gradle).contains("verifyFullTdsSdk", "verifyNativeSdk", "nativeBuildType");
         assertThat(gradle).contains("nativeCmakeGenerator", "nativeCmakePlatform");
-        assertThat(gradle).contains("Debug", "TDS_SDK_AUTH", "TDS_SDK_CERT_FILE", "TDS_SDK_KEY_FILE");
+        assertThat(gradle).contains("Debug");
         assertThat(gradle).contains("buildNativeAdapter", "--config");
+        assertThat(gradle).doesNotContain("prepareTdsSdk", "TDS_SDK_AUTH", "TDS_SDK_URL", "tdsSdkUrl");
+        assertThat(Files.exists(Path.of("tds.properties.example"))).isFalse();
+    }
+
+    @Test
+    void tdsSdkDownloadScriptIsJenkinsOnly() throws IOException {
+        String prepare = read("cmake/PrepareTdsSdk.cmake");
+
+        assertThat(prepare).contains("TDS SDK download is Jenkins-only", "TDS_SDK_CONTEXT");
+        assertThat(prepare).contains("_context STREQUAL \"jenkins\"");
     }
 
     @Test

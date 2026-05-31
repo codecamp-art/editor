@@ -12,7 +12,7 @@ If Gradle is not installed locally, use an installed Gradle distribution or a pr
 
 ## Native SDK Layout
 
-Linux native mode expects the prepared vendor SDK at `tds.sdk-root`, defaulting to `../tds`:
+Local Windows and RHEL8 native builds do not download vendor SDK files. Place the TDS headers, libraries, runtime files, and `cpack.dat` manually under `tds.sdk-root`. The Gradle default is `tds` inside `reporting_web`, which is `D:\Codes\local\Test\reporting_web\tds` in this workspace:
 
 ```text
 tds/
@@ -33,38 +33,20 @@ tds/
 Validate the layout:
 
 ```bash
-gradle verifyNativeSdk -PtdsSdkRoot=/path/to/tds
+gradle verifyNativeSdk -PtdsSdkRoot=tds
 ```
 
 Validate the full curated package layout, including Windows local debug files:
 
 ```bash
-gradle verifyFullTdsSdk -PtdsSdkRoot=/path/to/tds
+gradle verifyFullTdsSdk -PtdsSdkRoot=tds
 ```
 
-## SDK Download From Artifactory
+## Jenkins SDK Download From Artifactory
 
-Local and Jenkins builds can prepare `tds.sdk-root` from the curated Artifactory package with `cmake/PrepareTdsSdk.cmake`. The package must contain `tds/include`, `tds/linux_x86_64`, and `tds/win32`.
+Only Jenkins PR and release pipelines download the curated SDK package from Artifactory. Local Windows and RHEL8 builds must use the manually prepared `tds.sdk-root` directory described above.
 
-Windows local debug downloads use token authentication:
-
-```powershell
-cd D:\Codes\local\Test\reporting_web
-Copy-Item .\tds.properties.example .\tds.properties
-# Edit tds.properties with tds.sdk.url and token values.
-.\gradlew.bat prepareTdsSdk -PtdsSdkRoot=..\tds
-```
-
-RHEL8/Jenkins downloads use Artifactory certificate authentication:
-
-```bash
-./gradlew prepareTdsSdk \
-  -PtdsSdkRoot="$WORKSPACE/tds" \
-  -PtdsSdkUrl="https://artifactory.example.com/artifactory/vendor/tds_sdk.zip" \
-  -PtdsSdkAuth=cert \
-  -PtdsSdkCertFile=/jenkins/build.pem \
-  -PtdsSdkKeyFile=/jenkins/build.key
-```
+Jenkins downloads use `cmake/PrepareTdsSdk.cmake` with `TDS_SDK_CONTEXT=jenkins` and certificate authentication. The downloaded package must contain `tds/include`, `tds/linux_x86_64`, and `tds/win32`.
 
 Jenkins uses separate PR and release pipelines:
 
@@ -78,7 +60,7 @@ Both pipelines call `jenkins/reporting_web_common.groovy`, which fixes the Artif
 Build the Linux native adapter on RHEL8/Linux:
 
 ```bash
-gradle buildNativeAdapter -PtdsSdkRoot=/path/to/tds
+gradle buildNativeAdapter -PtdsSdkRoot=tds
 ```
 
 The adapter executable is expected at `build/native/tds_adapter` unless `tds.native-adapter.executable` is overridden.
@@ -88,7 +70,7 @@ Build the Windows local debug adapter with a Win32/x86 CMake generator and the v
 ```powershell
 cd D:\Codes\local\Test\reporting_web
 .\gradlew.bat buildNativeAdapter `
-  -PtdsSdkRoot=..\tds `
+  -PtdsSdkRoot=tds `
   -PnativeBuildType=Debug `
   -PnativeCmakePlatform=Win32
 ```

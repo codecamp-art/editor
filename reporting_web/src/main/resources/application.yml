@@ -11,7 +11,7 @@ app:
 
 tds:
   mode: stub
-  sdk-root: ../tds
+  sdk-root: tds
   native-adapter:
     executable: build/native/tds_adapter
   drtp-endpoints:

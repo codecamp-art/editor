@@ -70,7 +70,6 @@ cmake \\
   -DTDS_SDK_DEST_DIR=${shellQuote(env.TDS_DIR)} \\
   -DTDS_SDK_DOWNLOAD_DIR=${shellQuote(env.TDS_PACKAGE_DOWNLOAD_DIR)} \\
   -DTDS_SDK_EXTRACT_DIR=${shellQuote(env.TDS_PACKAGE_EXTRACT_DIR)} \\
-  -DTDS_SDK_PLATFORM=linux \\
   -DTDS_SDK_CONTEXT=jenkins \\
   -DTDS_SDK_AUTH=cert \\
   -DTDS_SDK_FORCE=ON \\
