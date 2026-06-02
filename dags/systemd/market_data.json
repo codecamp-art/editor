@@ -1,0 +1,47 @@
+{
+  "workflow_id": "market_data",
+  "title": "Market Data",
+  "description": "# Market Data Start/Stop\n\nThis workflow controls market data services.",
+  "schedules": {
+    "start": "30 6 * * 1-5",
+    "stop": "30 18 * * 1-5"
+  },
+  "fields": {},
+  "command_timeout_seconds": 1800,
+  "tags": ["remote-workflow", "systemd", "market-data", "ssh"],
+  "tasks": [
+    {
+      "task_id": "mds_collector",
+      "type": "systemd",
+      "host_group": "mds",
+      "login_user": "mduser{env_suffix}",
+      "systemd": {
+        "platform": "rhel8",
+        "scope": "user",
+        "service_name": "mds-collector.service"
+      }
+    },
+    {
+      "task_id": "mds_gateway",
+      "type": "systemd",
+      "host_group": "gateway",
+      "login_user": "mduser{env_suffix}",
+      "depends_on": ["mds_collector"],
+      "systemd": {
+        "platform": "rhel7",
+        "scope": "system",
+        "service_name": "mds-gateway.service"
+      }
+    }
+  ],
+  "upstream_dags": {
+    "start": [],
+    "stop": [
+      {
+        "dag_id": "trading-platform-stop",
+        "task_id": "end",
+        "enabled_in_envs": ["qa", "prod", "dr"]
+      }
+    ]
+  }
+}

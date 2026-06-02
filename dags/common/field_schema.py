@@ -27,17 +27,30 @@ COMMON_FIELDS = {
 
 
 SYSTEMD_CONTROL_FIELDS = {
-    "target_mode": {
+    "control_action": {
         "type": "enum",
-        "default": "workflow",
-        "values": ["workflow", "single_process"],
-        "description": "Run the full workflow or a single process only",
+        "default": "default",
+        "values": ["default", "start", "stop", "status"],
+        "description": "default runs the DAG's native action; status checks state only",
         "include_in_cli": False,
     },
-    "target_process": {
+    "target_scope": {
+        "type": "enum",
+        "default": "workflow",
+        "values": ["workflow", "task_group", "task"],
+        "description": "Run the full workflow, one task group, or one task only",
+        "include_in_cli": False,
+    },
+    "target_task": {
         "type": "string",
         "default": "",
-        "description": "Required when target_mode is single_process",
+        "description": "Required when target_scope is task",
+        "include_in_cli": False,
+    },
+    "target_task_group": {
+        "type": "string",
+        "default": "",
+        "description": "Required when target_scope is task_group",
         "include_in_cli": False,
     },
 }

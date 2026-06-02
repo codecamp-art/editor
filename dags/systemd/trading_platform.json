@@ -1,0 +1,86 @@
+{
+  "workflow_id": "trading_platform",
+  "title": "Trading Platform",
+  "description": "# Trading Platform Start/Stop\n\nThis workflow controls trading platform services and scripts across remote Linux and Windows servers.",
+  "schedules": {
+    "start": "0 7 * * 1-5",
+    "stop": "0 19 * * 1-5"
+  },
+  "fields": {},
+  "command_timeout_seconds": 1800,
+  "tags": ["remote-workflow", "systemd", "trading-platform", "ssh"],
+  "tasks": [
+    {
+      "task_id": "gateway",
+      "type": "systemd",
+      "host_group": "gateway",
+      "login_user": "gwuser{env_suffix}",
+      "systemd": {
+        "platform": "rhel7",
+        "scope": "system",
+        "service_name": "gateway.service"
+      }
+    },
+    {
+      "task_id": "mds",
+      "type": "systemd",
+      "host_group": "mds",
+      "login_user": "mdsuser{env_suffix}",
+      "depends_on": ["gateway"],
+      "systemd": {
+        "platform": "rhel8",
+        "scope": "user",
+        "service_name": "mds.service"
+      }
+    }
+  ],
+  "task_groups": [
+    {
+      "group_id": "application_stack",
+      "tooltip": "Primary and secondary application services",
+      "depends_on": ["mds"],
+      "tasks": [
+        {
+          "task_id": "app_primary",
+          "type": "systemd",
+          "host_group": "app_primary",
+          "login_user": "appuser{env_suffix}",
+          "systemd": {
+            "platform": "rhel8",
+            "scope": "user",
+            "service_name": "app-primary.service"
+          }
+        },
+        {
+          "task_id": "app_secondary",
+          "type": "systemd",
+          "host_group": "app_secondary",
+          "login_user": "appuser{env_suffix}",
+          "depends_on": ["app_primary"],
+          "enabled_in_envs": ["qa", "prod"],
+          "optional": true,
+          "systemd": {
+            "platform": "rhel8",
+            "scope": "user",
+            "service_name": "app-secondary.service"
+          }
+        }
+      ]
+    }
+  ],
+  "upstream_dags": {
+    "start": [
+      {
+        "dag_id": "market-data-start",
+        "task_id": "end",
+        "enabled_in_envs": ["qa", "prod", "dr"]
+      },
+      {
+        "dag_id": "reference-data-start",
+        "task_id": "end",
+        "enabled_in_envs": ["prod"]
+      }
+    ],
+    "stop": []
+  }
+}

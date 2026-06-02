@@ -1,68 +1,8 @@
-from common.systemd_workflow import (
-    ExternalDagDependency,
-    SystemdProcessSpec,
-    SystemdWorkflowDefinition,
-)
+from pathlib import Path
+
+from common.systemd_workflow import load_systemd_workflow_definition_from_json
 
 
-TRADING_PLATFORM_WORKFLOW = SystemdWorkflowDefinition(
-    workflow_id="trading_platform",
-    title="Trading Platform",
-    description="""
-# Trading Platform Start/Stop
-
-This workflow controls trading platform related systemd services across remote RHEL7/8 servers.
-""".strip(),
-    schedule_start="0 7 * * 1-5",
-    schedule_stop="0 19 * * 1-5",
-    fields={},
-    processes=(
-        SystemdProcessSpec(
-            process_id="gateway",
-            service_name="gateway.service",
-            service_user="gwuser",
-            host_group="gateway",
-            platform="rhel7",
-        ),
-        SystemdProcessSpec(
-            process_id="mds",
-            service_name="mds.service",
-            service_user="mdsuser",
-            host_group="mds",
-            platform="rhel8",
-            start_after=("gateway",),
-        ),
-        SystemdProcessSpec(
-            process_id="app_primary",
-            service_name="app-primary.service",
-            service_user="appuser",
-            host_group="app_primary",
-            platform="rhel8",
-            start_after=("mds",),
-        ),
-        SystemdProcessSpec(
-            process_id="app_secondary",
-            service_name="app-secondary.service",
-            service_user="appuser",
-            host_group="app_secondary",
-            platform="rhel8",
-            start_after=("app_primary",),
-            enabled_in_envs=("qa", "prod"),
-        ),
-    ),
-    upstream_dags_for_start=(
-        ExternalDagDependency(
-            dag_id="market-data-start",
-            task_id="end",
-            enabled_in_envs=("qa", "prod", "dr"),
-        ),
-        ExternalDagDependency(
-            dag_id="reference-data-start",
-            task_id="end",
-            enabled_in_envs=("prod",),
-        ),
-    ),
-    upstream_dags_for_stop=(),
-    tags=("systemd", "trading-platform", "ssh"),
-    command_timeout_seconds=1800,
+TRADING_PLATFORM_WORKFLOW = load_systemd_workflow_definition_from_json(
+    Path(__file__).with_suffix(".json")
 )

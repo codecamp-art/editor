@@ -14,17 +14,22 @@ DEFAULT_RUNTIME_ENV_FILE = Path(__file__).resolve().parents[1] / "configs" / "ru
 
 def build_runtime_context(
     *,
+    owner: str | None = None,
     config_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ) -> dict:
     runtime_cfg = load_runtime_env_config(config_file)
 
-    if not runtime_cfg.get("owner"):
-        raise ValueError("Missing required config key: owner")
+    resolved_owner = (
+        runtime_cfg.get("owner")
+        or owner
+        or runtime_cfg.get("kerberos_principal")
+        or "airflow"
+    )
     if not runtime_cfg.get("namespace"):
         raise ValueError("Missing required config key: namespace")
 
     return {
-        "owner": runtime_cfg["owner"],
+        "owner": resolved_owner,
         "namespace": runtime_cfg["namespace"],
         "kerberos_principal": runtime_cfg["kerberos_principal"],
         "kerberos_realm": runtime_cfg["kerberos_realm"],

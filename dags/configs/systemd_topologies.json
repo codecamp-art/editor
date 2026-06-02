@@ -1,5 +1,6 @@
 {
   "dev": {
+    "env_suffix": "_dev",
     "host_groups": {
       "gateway": ["dev-gw-01.company.net"],
       "mds": ["dev-mds-01.company.net"],
@@ -8,6 +9,7 @@
     }
   },
   "qa": {
+    "env_suffix": "_qa",
     "host_groups": {
       "gateway": ["qa-gw-01.company.net", "qa-gw-02.company.net"],
       "mds": ["qa-mds-01.company.net"],
@@ -16,6 +18,7 @@
     }
   },
   "prod": {
+    "env_suffix": "",
     "host_groups": {
       "gateway": ["prod-gw-01.company.net", "prod-gw-02.company.net"],
       "mds": ["prod-mds-01.company.net", "prod-mds-02.company.net"],
@@ -24,6 +27,7 @@
     }
   },
   "dr": {
+    "env_suffix": "_dr",
     "host_groups": {
       "gateway": ["dr-gw-01.company.net"],
       "mds": ["dr-mds-01.company.net"],
