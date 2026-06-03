@@ -15,10 +15,12 @@
       "host_groups": {
         "mds": {
           "login_user": "mduser_dev",
+          "type": "systemd",
           "hosts": ["dev-mds-01.company.net"]
         },
         "gateway": {
           "login_user": "mdgateway_dev",
+          "type": "systemd",
           "hosts": ["dev-gw-01.company.net"]
         }
       }
@@ -28,10 +30,12 @@
       "host_groups": {
         "mds": {
           "login_user": "mduser_qa",
+          "type": "systemd",
           "hosts": ["qa-mds-01.company.net"]
         },
         "gateway": {
           "login_user": "mdgateway_qa",
+          "type": "systemd",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         }
       }
@@ -41,10 +45,12 @@
       "host_groups": {
         "mds": {
           "login_user": "mduser",
+          "type": "systemd",
           "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
         },
         "gateway": {
           "login_user": "mdgateway",
+          "type": "systemd",
           "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
         }
       }
@@ -54,6 +60,7 @@
       "host_groups": {
         "mds": {
           "login_user": "mduser_dr",
+          "type": "systemd",
           "hosts": ["dr-mds-01.company.net"]
         }
       }
@@ -62,7 +69,6 @@
   "tasks": [
     {
       "task_id": "mds_collector",
-      "type": "systemd",
       "host_group": "mds",
       "systemd": {
         "platform": "rhel8",
@@ -72,7 +78,6 @@
     },
     {
       "task_id": "mds_gateway",
-      "type": "systemd",
       "host_group": "gateway",
       "depends_on": ["mds_collector"],
       "systemd": {

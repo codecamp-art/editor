@@ -4,10 +4,19 @@
   "title": "Example Platform",
   "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates a complete self-contained system workflow config.",
   "owner": "example_owner",
-  "schedules": {
-    "start": "0 6 * * 1-5",
-    "stop": "0 20 * * 1-5"
-  },
+  "schedule_pairs": [
+    {
+      "pair_id": "business_day",
+      "start": "0 6 * * 1-5",
+      "stop": "0 20 * * 1-5"
+    },
+    {
+      "pair_id": "saturday_dr_test",
+      "start": "0 8 * * 6",
+      "stop": "0 12 * * 6",
+      "enabled_in_envs": ["dr"]
+    }
+  ],
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "example"],
   "fields": {},
@@ -17,14 +26,29 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser_dev",
+          "type": "systemd",
+          "platform": "rhel7",
+          "scope": "system",
+          "service_name": "gateway-dev.service",
           "hosts": ["dev-gw-01.company.net"]
         },
         "pricing": {
           "login_user": "pricing_dev",
+          "type": "systemd",
+          "platform": "rhel8",
+          "scope": "user",
+          "service_name": "pricing-dev.service",
           "hosts": ["dev-pricing-01.company.net"]
         },
         "risk": {
           "login_user": "risk_dev",
+          "type": "linux_script",
+          "working_dir": "/opt/risk/dev/current",
+          "commands": {
+            "start": "./bin/risk-control start --env dev",
+            "stop": "./bin/risk-control stop --env dev",
+            "status": "./bin/risk-control status --env dev"
+          },
           "hosts": ["dev-risk-01.company.net"]
         }
       }
@@ -34,17 +58,39 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser_qa",
+          "type": "systemd",
+          "platform": "rhel7",
+          "scope": "system",
+          "service_name": "gateway-qa.service",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         },
         "pricing": {
           "login_user": "pricing_qa",
+          "type": "systemd",
+          "platform": "rhel8",
+          "scope": "user",
+          "service_name": "pricing-qa.service",
           "hosts": ["qa-pricing-01.company.net"]
         },
         "risk": {
           "login_user": "risk_qa",
+          "type": "linux_script",
+          "working_dir": "/opt/risk/qa/current",
+          "commands": {
+            "start": "./bin/risk-control start --env qa",
+            "stop": "./bin/risk-control stop --env qa",
+            "status": "./bin/risk-control status --env qa"
+          },
           "hosts": ["qa-risk-01.company.net"]
         },
         "windows_adapter": {
+          "type": "windows_script",
+          "working_dir": "D:\\Apps\\AdapterQa",
+          "commands": {
+            "start": ".\\adapter.ps1 -Action Start -Env qa",
+            "stop": ".\\adapter.ps1 -Action Stop -Env qa",
+            "status": ".\\adapter.ps1 -Action Status -Env qa"
+          },
           "hosts": ["qa-win-adapter-01.company.net"]
         }
       }
@@ -54,24 +100,56 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser",
+          "type": "systemd",
+          "platform": "rhel7",
+          "scope": "system",
+          "service_name": "gateway.service",
           "hosts": [
             {"host": "prod-gw-01.company.net", "login_user": "gwuser_primary"},
-            {"host": "prod-gw-02.company.net", "login_user": "gwuser_secondary"}
+            {
+              "host": "prod-gw-02.company.net",
+              "login_user": "gwuser_secondary",
+              "platform": "rhel8",
+              "scope": "system",
+              "service_name": "gateway-secondary.service"
+            }
           ]
         },
         "pricing": {
           "login_user": "pricing",
+          "type": "systemd",
+          "platform": "rhel8",
+          "scope": "user",
+          "service_name": "pricing-prod.service",
           "hosts": ["prod-pricing-01.company.net", "prod-pricing-02.company.net"]
         },
         "risk": {
           "login_user": "risk",
+          "type": "linux_script",
+          "working_dir": "/opt/risk/prod/current",
+          "commands": {
+            "start": "./bin/risk-control start --env prod",
+            "stop": "./bin/risk-control stop --env prod",
+            "status": "./bin/risk-control status --env prod"
+          },
           "hosts": ["prod-risk-01.company.net"]
         },
         "backup": {
           "login_user": "backup",
+          "type": "systemd",
+          "platform": "rhel8",
+          "scope": "system",
+          "service_name": "ha-backup.service",
           "hosts": ["prod-backup-01.company.net"]
         },
         "windows_adapter": {
+          "type": "windows_script",
+          "working_dir": "D:\\Apps\\Adapter",
+          "commands": {
+            "start": ".\\adapter.ps1 -Action Start -Env prod",
+            "stop": ".\\adapter.ps1 -Action Stop -Env prod",
+            "status": ".\\adapter.ps1 -Action Status -Env prod"
+          },
           "hosts": ["prod-win-adapter-01.company.net"]
         }
       }
@@ -81,18 +159,37 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser_dr",
+          "type": "systemd",
+          "platform": "rhel7",
+          "scope": "system",
+          "service_name": "gateway-dr.service",
           "hosts": ["dr-gw-01.company.net"]
         },
         "pricing": {
           "login_user": "pricing_dr",
+          "type": "systemd",
+          "platform": "rhel8",
+          "scope": "user",
+          "service_name": "pricing-dr.service",
           "hosts": ["dr-pricing-01.company.net"]
         },
         "risk": {
           "login_user": "risk_dr",
+          "type": "linux_script",
+          "working_dir": "/opt/risk/dr/current",
+          "commands": {
+            "start": "./bin/risk-control start --env dr",
+            "stop": "./bin/risk-control stop --env dr",
+            "status": "./bin/risk-control status --env dr"
+          },
           "hosts": ["dr-risk-01.company.net"]
         },
         "backup": {
           "login_user": "backup_dr",
+          "type": "systemd",
+          "platform": "rhel8",
+          "scope": "system",
+          "service_name": "ha-backup-dr.service",
           "hosts": ["dr-backup-01.company.net"]
         }
       }
@@ -101,13 +198,7 @@
   "tasks": [
     {
       "task_id": "gateway_rhel7",
-      "type": "systemd",
-      "host_group": "gateway",
-      "systemd": {
-        "platform": "rhel7",
-        "scope": "system",
-        "service_name": "gateway.service"
-      }
+      "host_group": "gateway"
     }
   ],
   "task_groups": [
@@ -118,47 +209,21 @@
       "tasks": [
         {
           "task_id": "pricing_rhel8",
-          "type": "systemd",
-          "host_group": "pricing",
-          "systemd": {
-            "platform": "rhel8",
-            "scope": "user",
-            "service_name": "pricing.service"
-          },
-          "env_overrides": {
-            "prod": {
-              "systemd": {
-                "service_name": "pricing-prod.service"
-              }
-            }
-          }
+          "host_group": "pricing"
         },
         {
           "task_id": "risk_linux_script",
-          "type": "linux_script",
           "host_group": "risk",
-          "working_dir": "/opt/risk/current",
           "depends_on": ["pricing_rhel8"],
           "remote_env_vars": {
             "APP_ENV": "{env}",
             "APP_LOC": "{loc}"
-          },
-          "commands": {
-            "start": "./bin/risk-control start --env {env}",
-            "stop": "./bin/risk-control stop --env {env}",
-            "status": "./bin/risk-control status --env {env}"
           }
         },
         {
           "task_id": "ha_backup",
-          "type": "systemd",
           "host_group": "backup",
-          "depends_on": ["risk_linux_script"],
-          "systemd": {
-            "platform": "rhel8",
-            "scope": "system",
-            "service_name": "ha-backup.service"
-          }
+          "depends_on": ["risk_linux_script"]
         }
       ]
     },
@@ -169,17 +234,10 @@
       "tasks": [
         {
           "task_id": "windows_adapter",
-          "type": "windows_script",
           "host_group": "windows_adapter",
           "windows_shell": "powershell",
-          "working_dir": "D:\\Apps\\Adapter",
           "remote_env_vars": {
             "APP_ENV": "{env}"
-          },
-          "commands": {
-            "start": ".\\adapter.ps1 -Action Start -Env $env:APP_ENV",
-            "stop": ".\\adapter.ps1 -Action Stop -Env $env:APP_ENV",
-            "status": ".\\adapter.ps1 -Action Status -Env $env:APP_ENV"
           }
         }
       ]

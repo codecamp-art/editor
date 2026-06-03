@@ -15,14 +15,17 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser_dev",
+          "type": "systemd",
           "hosts": ["dev-gw-01.company.net"]
         },
         "mds": {
           "login_user": "mdsuser_dev",
+          "type": "systemd",
           "hosts": ["dev-mds-01.company.net"]
         },
         "app_primary": {
           "login_user": "appuser_dev",
+          "type": "systemd",
           "hosts": ["dev-app-01.company.net"]
         }
       }
@@ -32,18 +35,22 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser_qa",
+          "type": "systemd",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         },
         "mds": {
           "login_user": "mdsuser_qa",
+          "type": "systemd",
           "hosts": ["qa-mds-01.company.net"]
         },
         "app_primary": {
           "login_user": "appuser_qa",
+          "type": "systemd",
           "hosts": ["qa-app-01.company.net"]
         },
         "app_secondary": {
           "login_user": "appuser_qa",
+          "type": "systemd",
           "hosts": ["qa-app-02.company.net"]
         }
       }
@@ -53,18 +60,22 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser",
+          "type": "systemd",
           "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
         },
         "mds": {
           "login_user": "mdsuser",
+          "type": "systemd",
           "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
         },
         "app_primary": {
           "login_user": "appuser",
+          "type": "systemd",
           "hosts": ["prod-app-01.company.net"]
         },
         "app_secondary": {
           "login_user": "appuser_backup",
+          "type": "systemd",
           "hosts": ["prod-app-02.company.net"]
         }
       }
@@ -74,14 +85,17 @@
       "host_groups": {
         "gateway": {
           "login_user": "gwuser_dr",
+          "type": "systemd",
           "hosts": ["dr-gw-01.company.net"]
         },
         "mds": {
           "login_user": "mdsuser_dr",
+          "type": "systemd",
           "hosts": ["dr-mds-01.company.net"]
         },
         "app_primary": {
           "login_user": "appuser_dr",
+          "type": "systemd",
           "hosts": ["dr-app-01.company.net"]
         }
       }
@@ -90,7 +104,6 @@
   "tasks": [
     {
       "task_id": "gateway",
-      "type": "systemd",
       "host_group": "gateway",
       "systemd": {
         "platform": "rhel7",
@@ -100,7 +113,6 @@
     },
     {
       "task_id": "mds",
-      "type": "systemd",
       "host_group": "mds",
       "depends_on": ["gateway"],
       "systemd": {
@@ -118,7 +130,6 @@
       "tasks": [
         {
           "task_id": "app_primary",
-          "type": "systemd",
           "host_group": "app_primary",
           "systemd": {
             "platform": "rhel8",
@@ -128,7 +139,6 @@
         },
         {
           "task_id": "app_secondary",
-          "type": "systemd",
           "host_group": "app_secondary",
           "depends_on": ["app_primary"],
           "enabled_in_envs": ["qa", "prod"],

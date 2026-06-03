@@ -70,6 +70,7 @@ class HostTarget:
     ssh_username_env_var: str = "SSH_USERNAME"
     ssh_password_env_var: str = "SSH_PASSWORD"
     enable_kerberos: bool | None = None
+    task_overrides: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -112,17 +113,29 @@ class WorkflowTaskGroupSpec:
 
 
 @dataclass(frozen=True)
+class WorkflowSchedulePair:
+    pair_id: str
+    start: str | list[str] | tuple[str, ...] | None = None
+    stop: str | list[str] | tuple[str, ...] | None = None
+    dag_id_prefix: str | None = None
+    start_dag_id: str | None = None
+    stop_dag_id: str | None = None
+    enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
+
+
+@dataclass(frozen=True)
 class SystemdWorkflowDefinition:
     workflow_id: str
     title: str
     description: str
-    schedule_start: str | None
-    schedule_stop: str | None
+    schedule_start: str | list[str] | tuple[str, ...] | None
+    schedule_stop: str | list[str] | tuple[str, ...] | None
     fields: dict
     tasks: tuple[WorkflowTaskSpec, ...] = ()
     task_groups: tuple[WorkflowTaskGroupSpec, ...] = ()
     upstream_dags_for_start: tuple[ExternalDagDependency, ...] = ()
     upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
+    schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
     environments: dict[str, Any] | None = None
     tags: tuple[str, ...] = ("systemd", "ssh")
     owner: str | None = None
@@ -147,6 +160,18 @@ def normalize_string_tuple(value: tuple[str, ...] | list[str] | str | None) -> t
         stripped = value.strip()
         return (stripped,) if stripped else ()
     return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def normalize_schedule_value(value: Any) -> str | tuple[str, ...] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, (list, tuple)):
+        schedules = tuple(str(item).strip() for item in value if str(item).strip())
+        return schedules or None
+    raise TypeError("Schedule value must be a string, list of strings, or null.")
 
 
 def deep_merge_dicts(*items: dict | None) -> dict:
@@ -207,6 +232,68 @@ def resolve_topology_for_env(workflow: SystemdWorkflowDefinition, current_env: s
     if not isinstance(topology, dict):
         raise TypeError(f"Workflow environment '{current_env}' topology must be a JSON object.")
     return topology
+
+
+def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    if not config:
+        return overrides
+
+    systemd_overrides = dict(config.get("systemd") or {})
+    for key in ("platform", "scope", "service_name"):
+        if key in config:
+            systemd_overrides[key] = config[key]
+
+    if "platform" in config:
+        overrides["platform"] = config["platform"]
+    if systemd_overrides:
+        overrides["systemd"] = systemd_overrides
+
+    for key in (
+        "task_type",
+        "type",
+        "commands",
+        "working_dir",
+        "remote_env_vars",
+        "sudo_mode",
+        "command_timeout_seconds",
+        "windows_shell",
+    ):
+        if key in config:
+            overrides[key] = config[key]
+
+    return overrides
+
+
+def apply_task_runtime_overrides(
+    task_spec: WorkflowTaskSpec,
+    overrides: dict[str, Any] | None,
+    tokens: dict[str, str] | None = None,
+) -> WorkflowTaskSpec:
+    if not overrides:
+        return task_spec
+
+    rendered = render_template_value(overrides, tokens or {})
+    merged_systemd = deep_merge_dicts(task_spec.systemd, rendered.get("systemd"))
+    merged_commands = deep_merge_dicts(task_spec.commands, rendered.get("commands"))
+    merged_env_vars = deep_merge_dicts(task_spec.remote_env_vars, rendered.get("remote_env_vars"))
+
+    return replace(
+        task_spec,
+        task_type=rendered.get("task_type", rendered.get("type", task_spec.task_type)),
+        platform=rendered.get("platform", task_spec.platform),
+        systemd=merged_systemd or None,
+        commands=merged_commands or None,
+        working_dir=rendered.get("working_dir", task_spec.working_dir),
+        remote_env_vars=merged_env_vars or None,
+        sudo_mode=rendered.get("sudo_mode", task_spec.sudo_mode),
+        command_timeout_seconds=(
+            int(rendered["command_timeout_seconds"])
+            if rendered.get("command_timeout_seconds") is not None
+            else task_spec.command_timeout_seconds
+        ),
+        windows_shell=rendered.get("windows_shell", task_spec.windows_shell),
+    )
 
 
 def build_systemd_airflow_fields(
@@ -432,6 +519,10 @@ def resolve_hosts_for_task(
         "enable_kerberos",
         task_spec.enable_kerberos,
     )
+    default_task_overrides = render_template_value(
+        extract_task_runtime_overrides(host_group_defaults),
+        group_tokens,
+    )
 
     targets: list[HostTarget] = []
     for entry in host_entries:
@@ -445,6 +536,7 @@ def resolve_hosts_for_task(
                     ssh_username_env_var=default_ssh_username_env_var,
                     ssh_password_env_var=default_ssh_password_env_var,
                     enable_kerberos=default_enable_kerberos,
+                    task_overrides=default_task_overrides,
                 )
             )
             continue
@@ -466,6 +558,10 @@ def resolve_hosts_for_task(
         host = entry.get("host") or entry.get("hostname")
         if not host:
             raise ValueError(f"Host object in '{task_spec.host_group}' must define host.")
+        task_overrides = render_template_value(
+            deep_merge_dicts(default_task_overrides, extract_task_runtime_overrides(entry)),
+            entry_tokens,
+        )
 
         targets.append(
             HostTarget(
@@ -491,13 +587,18 @@ def resolve_hosts_for_task(
                     default_ssh_password_env_var,
                 ),
                 enable_kerberos=entry.get("enable_kerberos", default_enable_kerberos),
+                task_overrides=task_overrides,
             )
         )
 
     return tuple(targets)
 
 
-def validate_task_spec(task_spec: WorkflowTaskSpec) -> None:
+def validate_task_spec(
+    task_spec: WorkflowTaskSpec,
+    *,
+    require_runtime_config: bool = True,
+) -> None:
     if task_spec.task_type not in SUPPORTED_TASK_TYPES:
         raise ValueError(
             f"Task '{task_spec.task_id}' has unsupported task_type '{task_spec.task_type}'."
@@ -509,7 +610,11 @@ def validate_task_spec(task_spec: WorkflowTaskSpec) -> None:
         systemd_cfg = task_spec.systemd or {}
         platform = systemd_cfg.get("platform", task_spec.platform)
         scope = systemd_cfg.get("scope", "system")
-        if platform not in SUPPORTED_SYSTEMD_PLATFORMS:
+        if platform not in SUPPORTED_SYSTEMD_PLATFORMS and (
+            require_runtime_config
+            or "platform" in systemd_cfg
+            or task_spec.platform != "linux"
+        ):
             raise ValueError(
                 f"Task '{task_spec.task_id}' systemd platform must be one of "
                 f"{sorted(SUPPORTED_SYSTEMD_PLATFORMS)}."
@@ -519,16 +624,17 @@ def validate_task_spec(task_spec: WorkflowTaskSpec) -> None:
                 f"Task '{task_spec.task_id}' systemd scope must be one of "
                 f"{sorted(SUPPORTED_SYSTEMD_SCOPES)}."
             )
-        if not systemd_cfg.get("service_name"):
+        if require_runtime_config and not systemd_cfg.get("service_name"):
             raise ValueError(f"Task '{task_spec.task_id}' must define systemd.service_name.")
 
     if task_spec.task_type in {"linux_script", "windows_script"}:
         commands = task_spec.commands or {}
-        for action_name in ("start", "stop", "status"):
-            if action_name not in commands:
-                raise ValueError(
-                    f"Task '{task_spec.task_id}' must define commands.{action_name}."
-                )
+        if require_runtime_config:
+            for action_name in ("start", "stop", "status"):
+                if action_name not in commands:
+                    raise ValueError(
+                        f"Task '{task_spec.task_id}' must define commands.{action_name}."
+                    )
 
     if task_spec.task_type == "windows_script" and task_spec.windows_shell not in SUPPORTED_WINDOWS_SHELLS:
         raise ValueError(
@@ -664,7 +770,7 @@ def prepare_workflow_plan(
             current_env=current_env,
         ):
             continue
-        validate_task_spec(resolved_task)
+        validate_task_spec(resolved_task, require_runtime_config=False)
         active_tasks.append(resolved_task)
 
     for group_spec in workflow.task_groups:
@@ -686,7 +792,7 @@ def prepare_workflow_plan(
                 current_env=current_env,
             ):
                 continue
-            validate_task_spec(resolved_task)
+            validate_task_spec(resolved_task, require_runtime_config=False)
             group_tasks.append(resolved_task)
 
         if not group_tasks:
@@ -950,6 +1056,7 @@ def host_target_to_payload(host_target: HostTarget) -> dict[str, Any]:
         "ssh_username_env_var": host_target.ssh_username_env_var,
         "ssh_password_env_var": host_target.ssh_password_env_var,
         "enable_kerberos": host_target.enable_kerberos,
+        "task_overrides": host_target.task_overrides,
     }
 
 
@@ -962,6 +1069,7 @@ def host_target_from_payload(payload: dict[str, Any]) -> HostTarget:
         ssh_username_env_var=payload.get("ssh_username_env_var", "SSH_USERNAME"),
         ssh_password_env_var=payload.get("ssh_password_env_var", "SSH_PASSWORD"),
         enable_kerberos=payload.get("enable_kerberos"),
+        task_overrides=payload.get("task_overrides"),
     )
 
 
@@ -1019,7 +1127,7 @@ def create_systemd_dag(
     workflow: SystemdWorkflowDefinition,
     dag_id: str,
     action: str,
-    schedule: str | None,
+    schedule: str | list[str] | tuple[str, ...] | None,
     source_file: str | Path | None = None,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ):
@@ -1147,8 +1255,12 @@ def create_systemd_dag(
             dag_action: str,
         ) -> str:
             selected_action = resolve_requested_action(validated, dag_action)
-            task_spec = task_spec_from_payload(task_payload)
             host_target = host_target_from_payload(host_payload)
+            task_spec = apply_task_runtime_overrides(
+                task_spec_from_payload(task_payload),
+                host_target.task_overrides,
+            )
+            validate_task_spec(task_spec)
             command = build_remote_task_command(
                 task_spec=task_spec,
                 host_target=host_target,
@@ -1216,12 +1328,17 @@ def create_systemd_dag(
         def create_operation(task_spec: WorkflowTaskSpec, host_target: HostTarget):
             host_id = sanitize_task_id(host_target.host)
             task_id = f"run__{sanitize_task_id(task_spec.task_id)}__{host_id}"
+            effective_task_spec = apply_task_runtime_overrides(
+                task_spec,
+                host_target.task_overrides,
+            )
+            validate_task_spec(effective_task_spec)
             return run_remote_task.override(
                 task_id=task_id,
                 executor_config=executor_config,
             )(
                 validated_task,
-                task_spec_to_payload(task_spec),
+                task_spec_to_payload(effective_task_spec),
                 host_target_to_payload(host_target),
                 action,
             )
@@ -1401,15 +1518,50 @@ def build_task_group_spec_from_config(data: dict) -> WorkflowTaskGroupSpec:
     )
 
 
-def build_systemd_workflow_definition_from_config(data: dict) -> SystemdWorkflowDefinition:
+def build_schedule_pair_from_config(data: dict, *, default_pair_id: str) -> WorkflowSchedulePair:
+    dag_ids = data.get("dag_ids", {})
+    pair_id = data.get("pair_id") or data.get("id") or data.get("name") or default_pair_id
+    return WorkflowSchedulePair(
+        pair_id=pair_id,
+        start=normalize_schedule_value(data.get("start", data.get("schedule_start"))),
+        stop=normalize_schedule_value(data.get("stop", data.get("schedule_stop"))),
+        dag_id_prefix=data.get("dag_id_prefix"),
+        start_dag_id=data.get("start_dag_id") or dag_ids.get("start"),
+        stop_dag_id=data.get("stop_dag_id") or dag_ids.get("stop"),
+        enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
+    )
+
+
+def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, ...]:
     schedules = data.get("schedules", {})
+    raw_pairs = data.get("schedule_pairs") or schedules.get("pairs")
+
+    if raw_pairs:
+        if not isinstance(raw_pairs, list):
+            raise TypeError("schedule_pairs must be a list of schedule pair objects.")
+        return tuple(
+            build_schedule_pair_from_config(pair_data, default_pair_id=f"pair_{index + 1}")
+            for index, pair_data in enumerate(raw_pairs)
+        )
+
+    return (
+        WorkflowSchedulePair(
+            pair_id="default",
+            start=normalize_schedule_value(schedules.get("start", data.get("schedule_start"))),
+            stop=normalize_schedule_value(schedules.get("stop", data.get("schedule_stop"))),
+        ),
+    )
+
+
+def build_systemd_workflow_definition_from_config(data: dict) -> SystemdWorkflowDefinition:
+    schedule_pairs = build_schedule_pairs_from_config(data)
     upstream_dags = data.get("upstream_dags", {})
     return SystemdWorkflowDefinition(
         workflow_id=data["workflow_id"],
         title=data.get("title", data["workflow_id"]),
         description=data.get("description", ""),
-        schedule_start=schedules.get("start", data.get("schedule_start")),
-        schedule_stop=schedules.get("stop", data.get("schedule_stop")),
+        schedule_start=schedule_pairs[0].start if schedule_pairs else None,
+        schedule_stop=schedule_pairs[0].stop if schedule_pairs else None,
         fields=data.get("fields") or {},
         tasks=tuple(build_task_spec_from_config(task_data) for task_data in data.get("tasks", [])),
         task_groups=tuple(
@@ -1424,6 +1576,7 @@ def build_systemd_workflow_definition_from_config(data: dict) -> SystemdWorkflow
             build_external_dependency_from_config(dep_data)
             for dep_data in upstream_dags.get("stop", data.get("upstream_dags_for_stop", []))
         ),
+        schedule_pairs=schedule_pairs,
         environments=data.get("environments") or data.get("topologies") or {},
         tags=tuple(data.get("tags") or ("systemd", "ssh")),
         owner=data.get("owner"),
@@ -1439,6 +1592,35 @@ def default_dag_id_prefix(workflow_id: str) -> str:
     return workflow_id.replace("_", "-")
 
 
+def slugify_dag_id_part(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9-]+", "-", value).strip("-").lower()
+    return safe or "schedule"
+
+
+def build_pair_dag_id(
+    *,
+    action: str,
+    workflow_prefix: str,
+    pair: WorkflowSchedulePair,
+    pair_count: int,
+    top_level_dag_ids: dict,
+) -> str:
+    explicit_dag_id = pair.start_dag_id if action == "start" else pair.stop_dag_id
+    if explicit_dag_id:
+        return explicit_dag_id
+
+    if pair_count == 1:
+        top_level_dag_id = top_level_dag_ids.get(action)
+        if top_level_dag_id:
+            return top_level_dag_id
+
+    pair_prefix = pair.dag_id_prefix or workflow_prefix
+    if pair_count == 1 and pair.pair_id in {"default", "primary"}:
+        return f"{pair_prefix}-{action}"
+
+    return f"{pair_prefix}-{slugify_dag_id_part(pair.pair_id)}-{action}"
+
+
 def register_systemd_dags_from_json(
     *,
     config_file: str | Path,
@@ -1451,24 +1633,48 @@ def register_systemd_dags_from_json(
     workflow = build_systemd_workflow_definition_from_config(config)
     dag_id_prefix = config.get("dag_id_prefix", default_dag_id_prefix(workflow.workflow_id))
     dag_ids = config.get("dag_ids", {})
-
-    start_dag = create_systemd_dag(
-        workflow=workflow,
-        dag_id=dag_ids.get("start", f"{dag_id_prefix}-start"),
-        action="start",
-        schedule=workflow.schedule_start,
-        source_file=config_file,
-    )
-    stop_dag = create_systemd_dag(
-        workflow=workflow,
-        dag_id=dag_ids.get("stop", f"{dag_id_prefix}-stop"),
-        action="stop",
-        schedule=workflow.schedule_stop,
-        source_file=config_file,
+    current_env = get_current_env_name()
+    enabled_pairs = tuple(
+        pair for pair in workflow.schedule_pairs if current_env in pair.enabled_in_envs
     )
 
-    global_namespace[f"{workflow.workflow_id}_start"] = start_dag
-    global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
+    for pair in enabled_pairs:
+        start_dag_id = build_pair_dag_id(
+            action="start",
+            workflow_prefix=dag_id_prefix,
+            pair=pair,
+            pair_count=len(enabled_pairs),
+            top_level_dag_ids=dag_ids,
+        )
+        stop_dag_id = build_pair_dag_id(
+            action="stop",
+            workflow_prefix=dag_id_prefix,
+            pair=pair,
+            pair_count=len(enabled_pairs),
+            top_level_dag_ids=dag_ids,
+        )
+        start_dag = create_systemd_dag(
+            workflow=workflow,
+            dag_id=start_dag_id,
+            action="start",
+            schedule=pair.start,
+            source_file=config_file,
+        )
+        stop_dag = create_systemd_dag(
+            workflow=workflow,
+            dag_id=stop_dag_id,
+            action="stop",
+            schedule=pair.stop,
+            source_file=config_file,
+        )
+
+        global_name_suffix = slugify_dag_id_part(pair.pair_id).replace("-", "_")
+        if len(enabled_pairs) == 1 and pair.pair_id in {"default", "primary"}:
+            global_namespace[f"{workflow.workflow_id}_start"] = start_dag
+            global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
+        else:
+            global_namespace[f"{workflow.workflow_id}_{global_name_suffix}_start"] = start_dag
+            global_namespace[f"{workflow.workflow_id}_{global_name_suffix}_stop"] = stop_dag
 
 
 def register_systemd_dags_from_json_dir(
