@@ -1,5 +1,6 @@
 {
   "workflow_id": "example_platform",
+  "register_dags": false,
   "title": "Example Platform",
   "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates supported remote workflow features and is not imported by a DAG file.",
   "owner": "example_owner",

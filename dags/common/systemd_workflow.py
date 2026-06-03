@@ -1130,7 +1130,11 @@ def create_systemd_dag(
         validated_task = validate_inputs.override(
             executor_config=executor_config
         )()
-        start_node = EmptyOperator(task_id="start", executor_config=executor_config)
+        start_node = EmptyOperator(
+            task_id="start",
+            trigger_rule="none_failed_min_one_success",
+            executor_config=executor_config,
+        )
         end_node = EmptyOperator(
             task_id="end",
             trigger_rule="none_failed_min_one_success",
@@ -1145,6 +1149,7 @@ def create_systemd_dag(
             external_gate = allow_external_dependencies.override(
                 executor_config=executor_config
             )(validated_task)
+            validated_task >> start_node
             for sensor in wait_sensors:
                 external_gate >> sensor >> start_node
         else:
@@ -1381,3 +1386,51 @@ def build_systemd_workflow_definition_from_config(data: dict) -> SystemdWorkflow
 
 def load_systemd_workflow_definition_from_json(config_file: str | Path) -> SystemdWorkflowDefinition:
     return build_systemd_workflow_definition_from_config(load_json_file(config_file))
+
+
+def default_dag_id_prefix(workflow_id: str) -> str:
+    return workflow_id.replace("_", "-")
+
+
+def register_systemd_dags_from_json(
+    *,
+    config_file: str | Path,
+    global_namespace: dict,
+) -> None:
+    config = load_json_file(config_file)
+    if config.get("register_dags", True) is False:
+        return
+
+    workflow = build_systemd_workflow_definition_from_config(config)
+    dag_id_prefix = config.get("dag_id_prefix", default_dag_id_prefix(workflow.workflow_id))
+    dag_ids = config.get("dag_ids", {})
+
+    start_dag = create_systemd_dag(
+        workflow=workflow,
+        dag_id=dag_ids.get("start", f"{dag_id_prefix}-start"),
+        action="start",
+        schedule=workflow.schedule_start,
+        source_file=config_file,
+    )
+    stop_dag = create_systemd_dag(
+        workflow=workflow,
+        dag_id=dag_ids.get("stop", f"{dag_id_prefix}-stop"),
+        action="stop",
+        schedule=workflow.schedule_stop,
+        source_file=config_file,
+    )
+
+    global_namespace[f"{workflow.workflow_id}_start"] = start_dag
+    global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
+
+
+def register_systemd_dags_from_json_dir(
+    *,
+    config_dir: str | Path,
+    global_namespace: dict,
+) -> None:
+    for config_file in sorted(Path(config_dir).glob("*.json")):
+        register_systemd_dags_from_json(
+            config_file=config_file,
+            global_namespace=global_namespace,
+        )
