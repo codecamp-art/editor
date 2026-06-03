@@ -9,12 +9,61 @@
   "fields": {},
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "systemd", "market-data", "ssh"],
+  "environments": {
+    "dev": {
+      "env_suffix": "_dev",
+      "host_groups": {
+        "mds": {
+          "login_user": "mduser_dev",
+          "hosts": ["dev-mds-01.company.net"]
+        },
+        "gateway": {
+          "login_user": "mdgateway_dev",
+          "hosts": ["dev-gw-01.company.net"]
+        }
+      }
+    },
+    "qa": {
+      "env_suffix": "_qa",
+      "host_groups": {
+        "mds": {
+          "login_user": "mduser_qa",
+          "hosts": ["qa-mds-01.company.net"]
+        },
+        "gateway": {
+          "login_user": "mdgateway_qa",
+          "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
+        }
+      }
+    },
+    "prod": {
+      "env_suffix": "",
+      "host_groups": {
+        "mds": {
+          "login_user": "mduser",
+          "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
+        },
+        "gateway": {
+          "login_user": "mdgateway",
+          "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
+        }
+      }
+    },
+    "dr": {
+      "env_suffix": "_dr",
+      "host_groups": {
+        "mds": {
+          "login_user": "mduser_dr",
+          "hosts": ["dr-mds-01.company.net"]
+        }
+      }
+    }
+  },
   "tasks": [
     {
       "task_id": "mds_collector",
       "type": "systemd",
       "host_group": "mds",
-      "login_user": "mduser{env_suffix}",
       "systemd": {
         "platform": "rhel8",
         "scope": "user",
@@ -25,7 +74,6 @@
       "task_id": "mds_gateway",
       "type": "systemd",
       "host_group": "gateway",
-      "login_user": "mduser{env_suffix}",
       "depends_on": ["mds_collector"],
       "systemd": {
         "platform": "rhel7",

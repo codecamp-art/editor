@@ -2,7 +2,7 @@
   "workflow_id": "example_platform",
   "register_dags": false,
   "title": "Example Platform",
-  "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates supported remote workflow features and is not imported by a DAG file.",
+  "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates a complete self-contained system workflow config.",
   "owner": "example_owner",
   "schedules": {
     "start": "0 6 * * 1-5",
@@ -11,13 +11,98 @@
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "example"],
   "fields": {},
+  "environments": {
+    "dev": {
+      "env_suffix": "_dev",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser_dev",
+          "hosts": ["dev-gw-01.company.net"]
+        },
+        "pricing": {
+          "login_user": "pricing_dev",
+          "hosts": ["dev-pricing-01.company.net"]
+        },
+        "risk": {
+          "login_user": "risk_dev",
+          "hosts": ["dev-risk-01.company.net"]
+        }
+      }
+    },
+    "qa": {
+      "env_suffix": "_qa",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser_qa",
+          "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
+        },
+        "pricing": {
+          "login_user": "pricing_qa",
+          "hosts": ["qa-pricing-01.company.net"]
+        },
+        "risk": {
+          "login_user": "risk_qa",
+          "hosts": ["qa-risk-01.company.net"]
+        },
+        "windows_adapter": {
+          "hosts": ["qa-win-adapter-01.company.net"]
+        }
+      }
+    },
+    "prod": {
+      "env_suffix": "",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser",
+          "hosts": [
+            {"host": "prod-gw-01.company.net", "login_user": "gwuser_primary"},
+            {"host": "prod-gw-02.company.net", "login_user": "gwuser_secondary"}
+          ]
+        },
+        "pricing": {
+          "login_user": "pricing",
+          "hosts": ["prod-pricing-01.company.net", "prod-pricing-02.company.net"]
+        },
+        "risk": {
+          "login_user": "risk",
+          "hosts": ["prod-risk-01.company.net"]
+        },
+        "backup": {
+          "login_user": "backup",
+          "hosts": ["prod-backup-01.company.net"]
+        },
+        "windows_adapter": {
+          "hosts": ["prod-win-adapter-01.company.net"]
+        }
+      }
+    },
+    "dr": {
+      "env_suffix": "_dr",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser_dr",
+          "hosts": ["dr-gw-01.company.net"]
+        },
+        "pricing": {
+          "login_user": "pricing_dr",
+          "hosts": ["dr-pricing-01.company.net"]
+        },
+        "risk": {
+          "login_user": "risk_dr",
+          "hosts": ["dr-risk-01.company.net"]
+        },
+        "backup": {
+          "login_user": "backup_dr",
+          "hosts": ["dr-backup-01.company.net"]
+        }
+      }
+    }
+  },
   "tasks": [
     {
       "task_id": "gateway_rhel7",
       "type": "systemd",
       "host_group": "gateway",
-      "login_user": "gwuser{env_suffix}",
-      "ssh_user": "airflow{env_suffix}",
       "systemd": {
         "platform": "rhel7",
         "scope": "system",
@@ -35,7 +120,6 @@
           "task_id": "pricing_rhel8",
           "type": "systemd",
           "host_group": "pricing",
-          "login_user": "pricing{env_suffix}",
           "systemd": {
             "platform": "rhel8",
             "scope": "user",
@@ -43,7 +127,6 @@
           },
           "env_overrides": {
             "prod": {
-              "login_user": "pricing",
               "systemd": {
                 "service_name": "pricing-prod.service"
               }
@@ -54,7 +137,6 @@
           "task_id": "risk_linux_script",
           "type": "linux_script",
           "host_group": "risk",
-          "login_user": "risk{env_suffix}",
           "working_dir": "/opt/risk/current",
           "depends_on": ["pricing_rhel8"],
           "remote_env_vars": {
@@ -71,10 +153,7 @@
           "task_id": "ha_backup",
           "type": "systemd",
           "host_group": "backup",
-          "login_user": "backup{env_suffix}",
           "depends_on": ["risk_linux_script"],
-          "enabled_in_envs": ["prod", "dr"],
-          "optional": true,
           "systemd": {
             "platform": "rhel8",
             "scope": "system",
@@ -92,7 +171,6 @@
           "task_id": "windows_adapter",
           "type": "windows_script",
           "host_group": "windows_adapter",
-          "ssh_user": "svc-airflow{env_suffix}",
           "windows_shell": "powershell",
           "working_dir": "D:\\Apps\\Adapter",
           "remote_env_vars": {

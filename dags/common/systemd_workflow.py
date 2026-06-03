@@ -21,7 +21,6 @@ from common.config_loader import (
     get_current_env_name,
     get_current_loc_name,
     load_json_file,
-    load_topology_for_current_env,
 )
 from common.dag_factory import (
     DEFAULT_RUNTIME_ENV_FILE,
@@ -44,7 +43,6 @@ from common.remote_command import (
 from common.ssh_hook import MSSSHHook, execute_ssh_command
 
 
-DEFAULT_SYSTEMD_TOPOLOGY_FILE = Path(__file__).resolve().parents[1] / "configs" / "systemd_topologies.json"
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
 SUPPORTED_TASK_TYPES = {"systemd", "linux_script", "windows_script"}
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
@@ -125,6 +123,7 @@ class SystemdWorkflowDefinition:
     task_groups: tuple[WorkflowTaskGroupSpec, ...] = ()
     upstream_dags_for_start: tuple[ExternalDagDependency, ...] = ()
     upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
+    environments: dict[str, Any] | None = None
     tags: tuple[str, ...] = ("systemd", "ssh")
     owner: str | None = None
     command_timeout_seconds: int = 1800
@@ -198,6 +197,16 @@ def build_env_tokens(topology: dict, current_env: str) -> dict[str, str]:
     }
     tokens.update({str(key): str(value) for key, value in topology.get("variables", {}).items()})
     return tokens
+
+
+def resolve_topology_for_env(workflow: SystemdWorkflowDefinition, current_env: str) -> dict:
+    environments = workflow.environments or {}
+    topology = environments.get(current_env)
+    if topology is None:
+        return {"host_groups": {}}
+    if not isinstance(topology, dict):
+        raise TypeError(f"Workflow environment '{current_env}' topology must be a JSON object.")
+    return topology
 
 
 def build_systemd_airflow_fields(
@@ -372,26 +381,70 @@ def resolve_hosts_for_task(
 ) -> tuple[HostTarget, ...]:
     groups = topology.get("host_groups", {})
     if task_spec.host_group not in groups:
-        if task_spec.optional:
-            return ()
-        raise KeyError(f"Host group '{task_spec.host_group}' not found in topology.")
+        return ()
 
-    host_entries = groups[task_spec.host_group]
+    host_group_config = groups[task_spec.host_group]
+    host_group_defaults: dict[str, Any] = {}
+    if isinstance(host_group_config, dict):
+        host_entries = host_group_config.get("hosts", [])
+        host_group_defaults = {
+            key: value
+            for key, value in host_group_config.items()
+            if key != "hosts"
+        }
+    else:
+        host_entries = host_group_config
+
     if not isinstance(host_entries, list):
-        raise TypeError(f"Host group '{task_spec.host_group}' must be a list.")
+        raise TypeError(
+            f"Host group '{task_spec.host_group}' must be a list or an object with hosts."
+        )
+
+    if not host_entries:
+        return ()
+
+    group_tokens = dict(tokens)
+    group_tokens.update(
+        {str(k): str(v) for k, v in host_group_defaults.get("variables", {}).items()}
+    )
+
+    default_login_user = render_template_value(
+        host_group_defaults.get("login_user", task_spec.login_user),
+        group_tokens,
+    )
+    default_ssh_user = render_template_value(
+        host_group_defaults.get("ssh_user", task_spec.ssh_user),
+        group_tokens,
+    )
+    default_ssh_conn_id = render_template_value(
+        host_group_defaults.get("ssh_conn_id", task_spec.ssh_conn_id),
+        group_tokens,
+    )
+    default_ssh_username_env_var = host_group_defaults.get(
+        "ssh_username_env_var",
+        task_spec.ssh_username_env_var,
+    )
+    default_ssh_password_env_var = host_group_defaults.get(
+        "ssh_password_env_var",
+        task_spec.ssh_password_env_var,
+    )
+    default_enable_kerberos = host_group_defaults.get(
+        "enable_kerberos",
+        task_spec.enable_kerberos,
+    )
 
     targets: list[HostTarget] = []
     for entry in host_entries:
         if isinstance(entry, str):
             targets.append(
                 HostTarget(
-                    host=render_template_value(entry, tokens),
-                    login_user=task_spec.login_user,
-                    ssh_user=task_spec.ssh_user,
-                    ssh_conn_id=task_spec.ssh_conn_id,
-                    ssh_username_env_var=task_spec.ssh_username_env_var,
-                    ssh_password_env_var=task_spec.ssh_password_env_var,
-                    enable_kerberos=task_spec.enable_kerberos,
+                    host=render_template_value(entry, group_tokens),
+                    login_user=default_login_user,
+                    ssh_user=default_ssh_user,
+                    ssh_conn_id=default_ssh_conn_id,
+                    ssh_username_env_var=default_ssh_username_env_var,
+                    ssh_password_env_var=default_ssh_password_env_var,
+                    enable_kerberos=default_enable_kerberos,
                 )
             )
             continue
@@ -408,7 +461,7 @@ def resolve_hosts_for_task(
         if current_env not in entry_envs:
             continue
 
-        entry_tokens = dict(tokens)
+        entry_tokens = dict(group_tokens)
         entry_tokens.update({str(k): str(v) for k, v in entry.get("variables", {}).items()})
         host = entry.get("host") or entry.get("hostname")
         if not host:
@@ -418,33 +471,27 @@ def resolve_hosts_for_task(
             HostTarget(
                 host=render_template_value(host, entry_tokens),
                 login_user=render_template_value(
-                    entry.get("login_user", task_spec.login_user),
+                    entry.get("login_user", default_login_user),
                     entry_tokens,
                 ),
                 ssh_user=render_template_value(
-                    entry.get("ssh_user", task_spec.ssh_user),
+                    entry.get("ssh_user", default_ssh_user),
                     entry_tokens,
                 ),
                 ssh_conn_id=render_template_value(
-                    entry.get("ssh_conn_id", task_spec.ssh_conn_id),
+                    entry.get("ssh_conn_id", default_ssh_conn_id),
                     entry_tokens,
                 ),
                 ssh_username_env_var=entry.get(
                     "ssh_username_env_var",
-                    task_spec.ssh_username_env_var,
+                    default_ssh_username_env_var,
                 ),
                 ssh_password_env_var=entry.get(
                     "ssh_password_env_var",
-                    task_spec.ssh_password_env_var,
+                    default_ssh_password_env_var,
                 ),
-                enable_kerberos=entry.get("enable_kerberos", task_spec.enable_kerberos),
+                enable_kerberos=entry.get("enable_kerberos", default_enable_kerberos),
             )
-        )
-
-    if not targets and not task_spec.optional:
-        raise ValueError(
-            f"Host group '{task_spec.host_group}' has no hosts for required task "
-            f"'{task_spec.task_id}' in env '{current_env}'."
         )
 
     return tuple(targets)
@@ -975,7 +1022,6 @@ def create_systemd_dag(
     schedule: str | None,
     source_file: str | Path | None = None,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
-    topology_file: str | Path = DEFAULT_SYSTEMD_TOPOLOGY_FILE,
 ):
     if action not in {"start", "stop"}:
         raise ValueError("action must be 'start' or 'stop'")
@@ -984,8 +1030,8 @@ def create_systemd_dag(
         owner=workflow.owner or workflow.workflow_id,
         config_file=runtime_env_file,
     )
-    topology = load_topology_for_current_env(topology_file)
     current_env = get_current_env_name()
+    topology = resolve_topology_for_env(workflow, current_env)
     plan = prepare_workflow_plan(
         workflow=workflow,
         topology=topology,
@@ -1378,6 +1424,7 @@ def build_systemd_workflow_definition_from_config(data: dict) -> SystemdWorkflow
             build_external_dependency_from_config(dep_data)
             for dep_data in upstream_dags.get("stop", data.get("upstream_dags_for_stop", []))
         ),
+        environments=data.get("environments") or data.get("topologies") or {},
         tags=tuple(data.get("tags") or ("systemd", "ssh")),
         owner=data.get("owner"),
         command_timeout_seconds=int(data.get("command_timeout_seconds", 1800)),

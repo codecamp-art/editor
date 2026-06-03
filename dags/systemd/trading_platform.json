@@ -9,12 +9,89 @@
   "fields": {},
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "systemd", "trading-platform", "ssh"],
+  "environments": {
+    "dev": {
+      "env_suffix": "_dev",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser_dev",
+          "hosts": ["dev-gw-01.company.net"]
+        },
+        "mds": {
+          "login_user": "mdsuser_dev",
+          "hosts": ["dev-mds-01.company.net"]
+        },
+        "app_primary": {
+          "login_user": "appuser_dev",
+          "hosts": ["dev-app-01.company.net"]
+        }
+      }
+    },
+    "qa": {
+      "env_suffix": "_qa",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser_qa",
+          "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
+        },
+        "mds": {
+          "login_user": "mdsuser_qa",
+          "hosts": ["qa-mds-01.company.net"]
+        },
+        "app_primary": {
+          "login_user": "appuser_qa",
+          "hosts": ["qa-app-01.company.net"]
+        },
+        "app_secondary": {
+          "login_user": "appuser_qa",
+          "hosts": ["qa-app-02.company.net"]
+        }
+      }
+    },
+    "prod": {
+      "env_suffix": "",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser",
+          "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
+        },
+        "mds": {
+          "login_user": "mdsuser",
+          "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
+        },
+        "app_primary": {
+          "login_user": "appuser",
+          "hosts": ["prod-app-01.company.net"]
+        },
+        "app_secondary": {
+          "login_user": "appuser_backup",
+          "hosts": ["prod-app-02.company.net"]
+        }
+      }
+    },
+    "dr": {
+      "env_suffix": "_dr",
+      "host_groups": {
+        "gateway": {
+          "login_user": "gwuser_dr",
+          "hosts": ["dr-gw-01.company.net"]
+        },
+        "mds": {
+          "login_user": "mdsuser_dr",
+          "hosts": ["dr-mds-01.company.net"]
+        },
+        "app_primary": {
+          "login_user": "appuser_dr",
+          "hosts": ["dr-app-01.company.net"]
+        }
+      }
+    }
+  },
   "tasks": [
     {
       "task_id": "gateway",
       "type": "systemd",
       "host_group": "gateway",
-      "login_user": "gwuser{env_suffix}",
       "systemd": {
         "platform": "rhel7",
         "scope": "system",
@@ -25,7 +102,6 @@
       "task_id": "mds",
       "type": "systemd",
       "host_group": "mds",
-      "login_user": "mdsuser{env_suffix}",
       "depends_on": ["gateway"],
       "systemd": {
         "platform": "rhel8",
@@ -44,7 +120,6 @@
           "task_id": "app_primary",
           "type": "systemd",
           "host_group": "app_primary",
-          "login_user": "appuser{env_suffix}",
           "systemd": {
             "platform": "rhel8",
             "scope": "user",
@@ -55,7 +130,6 @@
           "task_id": "app_secondary",
           "type": "systemd",
           "host_group": "app_secondary",
-          "login_user": "appuser{env_suffix}",
           "depends_on": ["app_primary"],
           "enabled_in_envs": ["qa", "prod"],
           "optional": true,
