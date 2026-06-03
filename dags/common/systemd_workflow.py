@@ -90,6 +90,8 @@ class WorkflowTaskSpec:
     working_dir: str | None = None
     remote_env_vars: dict[str, Any] | None = None
     depends_on: tuple[str, ...] = ()
+    start_depends_on: tuple[str, ...] = ()
+    stop_depends_on: tuple[str, ...] = ()
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     optional: bool = False
     enabled: bool = True
@@ -105,6 +107,8 @@ class WorkflowTaskGroupSpec:
     group_id: str
     tooltip: str | None = None
     depends_on: tuple[str, ...] = ()
+    start_depends_on: tuple[str, ...] = ()
+    stop_depends_on: tuple[str, ...] = ()
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     optional: bool = False
     enabled: bool = True
@@ -172,6 +176,13 @@ def normalize_schedule_value(value: Any) -> str | tuple[str, ...] | None:
         schedules = tuple(str(item).strip() for item in value if str(item).strip())
         return schedules or None
     raise TypeError("Schedule value must be a string, list of strings, or null.")
+
+
+def first_config_value(data: dict[str, Any], keys: tuple[str, ...], default: Any = None) -> Any:
+    for key in keys:
+        if key in data:
+            return data[key]
+    return default
 
 
 def deep_merge_dicts(*items: dict | None) -> dict:
@@ -383,6 +394,9 @@ def apply_task_env_overrides(
             commands=render_template_value(task_spec.commands, tokens),
             working_dir=render_template_value(task_spec.working_dir, tokens),
             remote_env_vars=render_template_value(task_spec.remote_env_vars, tokens),
+            depends_on=render_template_value(task_spec.depends_on, tokens),
+            start_depends_on=render_template_value(task_spec.start_depends_on, tokens),
+            stop_depends_on=render_template_value(task_spec.stop_depends_on, tokens),
             env_overrides=None,
         )
 
@@ -405,7 +419,23 @@ def apply_task_env_overrides(
         commands=merged_commands,
         working_dir=override.get("working_dir", task_spec.working_dir),
         remote_env_vars=merged_env_vars,
-        depends_on=normalize_string_tuple(override.get("depends_on", task_spec.depends_on)),
+        depends_on=normalize_string_tuple(
+            first_config_value(override, ("depends_on", "start_after"), task_spec.depends_on)
+        ),
+        start_depends_on=normalize_string_tuple(
+            first_config_value(
+                override,
+                ("start_depends_on", "start_after", "depends_on"),
+                task_spec.start_depends_on,
+            )
+        ),
+        stop_depends_on=normalize_string_tuple(
+            first_config_value(
+                override,
+                ("stop_depends_on", "stop_after"),
+                task_spec.stop_depends_on,
+            )
+        ),
         enabled_in_envs=normalize_string_tuple(
             override.get("enabled_in_envs", task_spec.enabled_in_envs)
         ),
@@ -432,6 +462,9 @@ def apply_task_env_overrides(
         commands=render_template_value(resolved.commands, tokens),
         working_dir=render_template_value(resolved.working_dir, tokens),
         remote_env_vars=render_template_value(resolved.remote_env_vars, tokens),
+        depends_on=render_template_value(resolved.depends_on, tokens),
+        start_depends_on=render_template_value(resolved.start_depends_on, tokens),
+        stop_depends_on=render_template_value(resolved.stop_depends_on, tokens),
     )
 
 
@@ -444,7 +477,23 @@ def apply_group_env_overrides(
     resolved = replace(
         group_spec,
         tooltip=override.get("tooltip", group_spec.tooltip),
-        depends_on=normalize_string_tuple(override.get("depends_on", group_spec.depends_on)),
+        depends_on=normalize_string_tuple(
+            first_config_value(override, ("depends_on", "start_after"), group_spec.depends_on)
+        ),
+        start_depends_on=normalize_string_tuple(
+            first_config_value(
+                override,
+                ("start_depends_on", "start_after", "depends_on"),
+                group_spec.start_depends_on,
+            )
+        ),
+        stop_depends_on=normalize_string_tuple(
+            first_config_value(
+                override,
+                ("stop_depends_on", "stop_after"),
+                group_spec.stop_depends_on,
+            )
+        ),
         enabled_in_envs=normalize_string_tuple(
             override.get("enabled_in_envs", group_spec.enabled_in_envs)
         ),
@@ -456,6 +505,8 @@ def apply_group_env_overrides(
         resolved,
         tooltip=render_template_value(resolved.tooltip, tokens),
         depends_on=render_template_value(resolved.depends_on, tokens),
+        start_depends_on=render_template_value(resolved.start_depends_on, tokens),
+        stop_depends_on=render_template_value(resolved.stop_depends_on, tokens),
     )
 
 
@@ -643,12 +694,39 @@ def validate_task_spec(
         )
 
 
-def build_start_dependency_map(
+def task_dependency_ids(task_spec: WorkflowTaskSpec, action: str) -> tuple[str, ...]:
+    if action == "start":
+        return task_spec.start_depends_on or task_spec.depends_on
+    if action == "stop":
+        return task_spec.stop_depends_on
+    raise ValueError("action must be 'start' or 'stop'")
+
+
+def group_dependency_ids(group_spec: WorkflowTaskGroupSpec, action: str) -> tuple[str, ...]:
+    if action == "start":
+        return group_spec.start_depends_on or group_spec.depends_on
+    if action == "stop":
+        return group_spec.stop_depends_on
+    raise ValueError("action must be 'start' or 'stop'")
+
+
+def has_custom_stop_dependency_graph(
+    *,
+    tasks: tuple[WorkflowTaskSpec, ...],
+    groups: tuple[WorkflowTaskGroupSpec, ...],
+) -> bool:
+    return any(task_spec.stop_depends_on for task_spec in tasks) or any(
+        group_spec.stop_depends_on for group_spec in groups
+    )
+
+
+def build_dependency_map(
     *,
     tasks: tuple[WorkflowTaskSpec, ...],
     groups: tuple[WorkflowTaskGroupSpec, ...],
     defined_task_ids: set[str],
     defined_group_ids: set[str],
+    action: str,
 ) -> dict[str, tuple[str, ...]]:
     active_task_ids = {task_spec.task_id for task_spec in tasks}
     active_groups = {group_spec.group_id: group_spec for group_spec in groups}
@@ -664,7 +742,7 @@ def build_start_dependency_map(
     for task_spec in tasks:
         direct_internal_deps_by_task[task_spec.task_id] = {
             dep_id
-            for dep_id in task_spec.depends_on
+            for dep_id in task_dependency_ids(task_spec, action)
             if dep_id in active_task_ids and task_group_lookup.get(dep_id) == task_spec.group_id
         }
 
@@ -688,26 +766,42 @@ def build_start_dependency_map(
             return group_leaf_tasks(dep_id)
         return ()
 
-    start_map: dict[str, tuple[str, ...]] = {}
+    dependency_map: dict[str, tuple[str, ...]] = {}
     group_lookup = {group_spec.group_id: group_spec for group_spec in groups}
 
     for task_spec in tasks:
-        dep_ids = list(task_spec.depends_on)
+        dep_ids = list(task_dependency_ids(task_spec, action))
         if task_spec.group_id and not direct_internal_deps_by_task[task_spec.task_id]:
-            dep_ids.extend(group_lookup[task_spec.group_id].depends_on)
+            dep_ids.extend(group_dependency_ids(group_lookup[task_spec.group_id], action))
 
         expanded: list[str] = []
         for dep_id in dep_ids:
             expanded.extend(expand_dependency(dep_id))
 
-        start_map[task_spec.task_id] = tuple(
+        dependency_map[task_spec.task_id] = tuple(
             dep_id
             for dep_id in unique_preserving_order(expanded)
             if dep_id != task_spec.task_id
         )
 
-    validate_acyclic_task_graph(start_map)
-    return start_map
+    validate_acyclic_task_graph(dependency_map)
+    return dependency_map
+
+
+def build_start_dependency_map(
+    *,
+    tasks: tuple[WorkflowTaskSpec, ...],
+    groups: tuple[WorkflowTaskGroupSpec, ...],
+    defined_task_ids: set[str],
+    defined_group_ids: set[str],
+) -> dict[str, tuple[str, ...]]:
+    return build_dependency_map(
+        tasks=tasks,
+        groups=groups,
+        defined_task_ids=defined_task_ids,
+        defined_group_ids=defined_group_ids,
+        action="start",
+    )
 
 
 def reverse_dependency_map(start_map: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
@@ -834,19 +928,33 @@ def prepare_workflow_plan(
         if any(task_spec.task_id in active_group_task_ids for task_spec in group_spec.tasks)
     ]
 
-    start_map = build_start_dependency_map(
+    start_map = build_dependency_map(
         tasks=tuple(active_tasks),
         groups=tuple(active_groups),
         defined_task_ids=defined_task_ids,
         defined_group_ids=defined_group_ids,
+        action="start",
     )
+    if has_custom_stop_dependency_graph(
+        tasks=tuple(active_tasks),
+        groups=tuple(active_groups),
+    ):
+        stop_map = build_dependency_map(
+            tasks=tuple(active_tasks),
+            groups=tuple(active_groups),
+            defined_task_ids=defined_task_ids,
+            defined_group_ids=defined_group_ids,
+            action="stop",
+        )
+    else:
+        stop_map = reverse_dependency_map(start_map)
 
     return WorkflowPlan(
         tasks=tuple(active_tasks),
         groups=tuple(active_groups),
         hosts_by_task_id=hosts_by_task_id,
         start_upstream_task_ids=start_map,
-        stop_upstream_task_ids=reverse_dependency_map(start_map),
+        stop_upstream_task_ids=stop_map,
     )
 
 
@@ -1338,7 +1446,7 @@ def create_systemd_dag(
                 executor_config=executor_config,
             )(
                 validated_task,
-                task_spec_to_payload(effective_task_spec),
+                task_spec_to_payload(task_spec),
                 host_target_to_payload(host_target),
                 action,
             )
@@ -1470,6 +1578,16 @@ def build_external_dependency_from_config(data: dict) -> ExternalDagDependency:
 
 def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> WorkflowTaskSpec:
     task_type = data.get("task_type", data.get("type", "systemd"))
+    depends_on = normalize_string_tuple(
+        first_config_value(data, ("depends_on", "start_after"), ())
+    )
+    start_depends_on = normalize_string_tuple(
+        first_config_value(
+            data,
+            ("start_depends_on", "start_after", "depends_on"),
+            depends_on,
+        )
+    )
     return WorkflowTaskSpec(
         task_id=data["task_id"],
         task_type=task_type,
@@ -1485,7 +1603,11 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
         commands=data.get("commands"),
         working_dir=data.get("working_dir"),
         remote_env_vars=data.get("remote_env_vars"),
-        depends_on=normalize_string_tuple(data.get("depends_on", data.get("start_after"))),
+        depends_on=depends_on,
+        start_depends_on=start_depends_on,
+        stop_depends_on=normalize_string_tuple(
+            first_config_value(data, ("stop_depends_on", "stop_after"), ())
+        ),
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),
@@ -1503,10 +1625,24 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
 
 def build_task_group_spec_from_config(data: dict) -> WorkflowTaskGroupSpec:
     group_id = data["group_id"]
+    depends_on = normalize_string_tuple(
+        first_config_value(data, ("depends_on", "start_after"), ())
+    )
+    start_depends_on = normalize_string_tuple(
+        first_config_value(
+            data,
+            ("start_depends_on", "start_after", "depends_on"),
+            depends_on,
+        )
+    )
     return WorkflowTaskGroupSpec(
         group_id=group_id,
         tooltip=data.get("tooltip"),
-        depends_on=normalize_string_tuple(data.get("depends_on")),
+        depends_on=depends_on,
+        start_depends_on=start_depends_on,
+        stop_depends_on=normalize_string_tuple(
+            first_config_value(data, ("stop_depends_on", "stop_after"), ())
+        ),
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),

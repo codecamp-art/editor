@@ -205,16 +205,19 @@
     {
       "group_id": "backend_services",
       "tooltip": "RHEL8 services and Linux scripts with internal dependencies",
-      "depends_on": ["gateway_rhel7"],
+      "start_depends_on": ["gateway_rhel7"],
+      "stop_depends_on": ["windows_jobs"],
       "tasks": [
         {
           "task_id": "pricing_rhel8",
-          "host_group": "pricing"
+          "host_group": "pricing",
+          "stop_depends_on": ["risk_linux_script"]
         },
         {
           "task_id": "risk_linux_script",
           "host_group": "risk",
-          "depends_on": ["pricing_rhel8"],
+          "start_depends_on": ["pricing_rhel8"],
+          "stop_depends_on": ["ha_backup"],
           "remote_env_vars": {
             "APP_ENV": "{env}",
             "APP_LOC": "{loc}"
@@ -223,14 +226,15 @@
         {
           "task_id": "ha_backup",
           "host_group": "backup",
-          "depends_on": ["risk_linux_script"]
+          "start_depends_on": ["risk_linux_script"]
         }
       ]
     },
     {
       "group_id": "windows_jobs",
       "tooltip": "Windows scripts can be grouped and depend on Linux/systemd tasks",
-      "depends_on": ["backend_services"],
+      "start_depends_on": ["backend_services"],
+      "stop_depends_on": ["gateway_rhel7"],
       "tasks": [
         {
           "task_id": "windows_adapter",
