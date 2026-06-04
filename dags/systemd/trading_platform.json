@@ -5,100 +5,125 @@
     "stop": "0 19 * * 1-5"
   },
   "command_timeout_seconds": 1800,
-  "tags": ["remote-workflow", "systemd", "trading-platform", "ssh"],
-  "environments": {
-    "defaults": {
-      "host_group_defaults": {
-        "platform": "rhel8"
-      },
-      "host_groups": {
-        "gateway": {
-          "type": "systemd"
-        },
-        "mds": {
-          "type": "systemd"
-        },
-        "app_primary": {
-          "type": "systemd"
-        },
-        "app_secondary": {
-          "type": "systemd"
-        }
-      }
-    },
-    "dev": {
-      "env_suffix": "_dev",
-      "host_groups": {
-        "gateway": {
+  "tags": [
+    "remote-workflow",
+    "systemd",
+    "trading-platform",
+    "ssh"
+  ],
+  "host_groups": {
+    "gateway": {
+      "type": "systemd",
+      "platform": "rhel7",
+      "service_name": "gateway.service",
+      "environments": {
+        "dev": {
           "sudo_user": "gwuser_dev",
-          "hosts": ["dev-gw-01.company.net"]
+          "hosts": [
+            "dev-gw-01.company.net"
+          ]
         },
-        "mds": {
-          "sudo_user": "mdsuser_dev",
-          "hosts": ["dev-mds-01.company.net"]
-        },
-        "app_primary": {
-          "sudo_user": "appuser_dev",
-          "hosts": ["dev-app-01.company.net"]
-        }
-      }
-    },
-    "qa": {
-      "env_suffix": "_qa",
-      "host_groups": {
-        "gateway": {
+        "qa": {
           "sudo_user": "gwuser_qa",
-          "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
+          "hosts": [
+            "qa-gw-01.company.net",
+            "qa-gw-02.company.net"
+          ]
         },
-        "mds": {
-          "sudo_user": "mdsuser_qa",
-          "hosts": ["qa-mds-01.company.net"]
-        },
-        "app_primary": {
-          "sudo_user": "appuser_qa",
-          "hosts": ["qa-app-01.company.net"]
-        },
-        "app_secondary": {
-          "sudo_user": "appuser_qa",
-          "hosts": ["qa-app-02.company.net"]
-        }
-      }
-    },
-    "prod": {
-      "env_suffix": "",
-      "host_groups": {
-        "gateway": {
+        "prod": {
           "sudo_user": "gwuser",
-          "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
+          "hosts": [
+            "prod-gw-01.company.net",
+            "prod-gw-02.company.net"
+          ]
         },
-        "mds": {
-          "sudo_user": "mdsuser",
-          "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
-        },
-        "app_primary": {
-          "sudo_user": "appuser",
-          "hosts": ["prod-app-01.company.net"]
-        },
-        "app_secondary": {
-          "sudo_user": "appuser_backup",
-          "hosts": ["prod-app-02.company.net"]
+        "dr": {
+          "sudo_user": "gwuser_dr",
+          "hosts": [
+            "dr-gw-01.company.net"
+          ]
         }
       }
     },
-    "dr": {
-      "env_suffix": "_dr",
-      "host_groups": {
-        "gateway": {
-          "sudo_user": "gwuser_dr",
-          "hosts": ["dr-gw-01.company.net"]
+    "mds": {
+      "type": "systemd",
+      "platform": "rhel8",
+      "service_name": "mds.service",
+      "environments": {
+        "dev": {
+          "sudo_user": "mdsuser_dev",
+          "hosts": [
+            "dev-mds-01.company.net"
+          ]
         },
-        "mds": {
+        "qa": {
+          "sudo_user": "mdsuser_qa",
+          "hosts": [
+            "qa-mds-01.company.net"
+          ]
+        },
+        "prod": {
+          "sudo_user": "mdsuser",
+          "hosts": [
+            "prod-mds-01.company.net",
+            "prod-mds-02.company.net"
+          ]
+        },
+        "dr": {
           "sudo_user": "mdsuser_dr",
-          "hosts": ["dr-mds-01.company.net"]
+          "hosts": [
+            "dr-mds-01.company.net"
+          ]
+        }
+      }
+    },
+    "app_primary": {
+      "type": "systemd",
+      "platform": "rhel8",
+      "service_name": "app-primary.service",
+      "environments": {
+        "dev": {
+          "sudo_user": "appuser_dev",
+          "hosts": [
+            "dev-app-01.company.net"
+          ]
         },
-        "app_primary": {
+        "qa": {
+          "sudo_user": "appuser_qa",
+          "hosts": [
+            "qa-app-01.company.net"
+          ]
+        },
+        "prod": {
+          "sudo_user": "appuser",
+          "hosts": [
+            "prod-app-01.company.net"
+          ]
+        },
+        "dr": {
           "sudo_user": "appuser_dr",
-          "hosts": ["dr-app-01.company.net"]
+          "hosts": [
+            "dr-app-01.company.net"
+          ]
+        }
+      }
+    },
+    "app_secondary": {
+      "type": "systemd",
+      "platform": "rhel8",
+      "service_name": "app-secondary.service",
+      "environments": {
+        "qa": {
+          "sudo_user": "appuser_qa",
+          "hosts": [
+            "qa-app-02.company.net"
+          ]
+        },
+        "prod": {
+          "sudo_user": "appuser_backup",
+          "hosts": [
+            "prod-app-02.company.net"
+          ]
         }
       }
     }
@@ -106,43 +131,39 @@
   "tasks": [
     {
       "task_id": "gateway",
-      "host_group": "gateway",
-      "systemd": {
-        "platform": "rhel7",
-        "service_name": "gateway.service"
-      }
+      "host_group": "gateway"
     },
     {
       "task_id": "mds",
       "host_group": "mds",
-      "depends_on": ["gateway"],
-      "systemd": {
-        "service_name": "mds.service"
-      }
+      "depends_on": [
+        "gateway"
+      ]
     }
   ],
   "task_groups": [
     {
       "group_id": "application_stack",
       "tooltip": "Primary and secondary application services",
-      "depends_on": ["mds"],
+      "depends_on": [
+        "mds"
+      ],
       "tasks": [
         {
           "task_id": "app_primary",
-          "host_group": "app_primary",
-          "systemd": {
-            "service_name": "app-primary.service"
-          }
+          "host_group": "app_primary"
         },
         {
           "task_id": "app_secondary",
           "host_group": "app_secondary",
-          "depends_on": ["app_primary"],
-          "enabled_in_envs": ["qa", "prod"],
-          "optional": true,
-          "systemd": {
-            "service_name": "app-secondary.service"
-          }
+          "depends_on": [
+            "app_primary"
+          ],
+          "enabled_in_envs": [
+            "qa",
+            "prod"
+          ],
+          "optional": true
         }
       ]
     }
@@ -152,12 +173,18 @@
       {
         "dag_id": "market-data-start",
         "task_id": "end",
-        "enabled_in_envs": ["qa", "prod", "dr"]
+        "enabled_in_envs": [
+          "qa",
+          "prod",
+          "dr"
+        ]
       },
       {
         "dag_id": "reference-data-start",
         "task_id": "end",
-        "enabled_in_envs": ["prod"]
+        "enabled_in_envs": [
+          "prod"
+        ]
       }
     ],
     "stop": []

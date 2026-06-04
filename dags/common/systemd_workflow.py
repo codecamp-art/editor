@@ -270,7 +270,6 @@ TOPOLOGY_METADATA_KEYS = {
     "variables",
 }
 
-
 def extract_host_defaults_from_topology(topology: dict[str, Any]) -> dict[str, Any]:
     defaults = {
         key: value
@@ -286,6 +285,33 @@ def extract_host_defaults_from_topology(topology: dict[str, Any]) -> dict[str, A
         defaults = deep_merge_dicts(defaults, raw_defaults)
     defaults.pop("hosts", None)
     return defaults
+
+
+def apply_host_group_env_overrides(
+    host_group_id: str,
+    host_group_config: dict[str, Any],
+    current_env: str,
+) -> dict[str, Any]:
+    env_overrides = host_group_config.get("environments")
+    if env_overrides is None:
+        return host_group_config
+    if not isinstance(env_overrides, dict):
+        raise TypeError(f"Host group '{host_group_id}' environments must be a JSON object.")
+
+    env_config = env_overrides.get(current_env)
+    if env_config is None:
+        env_config = {}
+    if not isinstance(env_config, dict):
+        raise TypeError(
+            f"Host group '{host_group_id}' environment '{current_env}' must be a JSON object."
+        )
+
+    base_config = {
+        key: value
+        for key, value in host_group_config.items()
+        if key != "environments"
+    }
+    return deep_merge_dicts(base_config, env_config)
 
 
 def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
@@ -621,6 +647,11 @@ def resolve_hosts_for_task(
     topology_host_defaults = extract_host_defaults_from_topology(topology)
     host_group_defaults: dict[str, Any] = dict(topology_host_defaults)
     if isinstance(host_group_config, dict):
+        host_group_config = apply_host_group_env_overrides(
+            task_spec.host_group,
+            host_group_config,
+            current_env,
+        )
         host_entries = host_group_config.get("hosts", [])
         host_group_defaults = deep_merge_dicts(
             topology_host_defaults,
@@ -642,8 +673,15 @@ def resolve_hosts_for_task(
         return ()
 
     group_tokens = dict(tokens)
+    if host_group_defaults.get("env_suffix") is not None:
+        group_tokens["env_suffix"] = str(
+            render_template_value(host_group_defaults["env_suffix"], group_tokens)
+        )
     group_tokens.update(
-        {str(k): str(v) for k, v in host_group_defaults.get("variables", {}).items()}
+        {
+            str(k): str(render_template_value(v, group_tokens))
+            for k, v in host_group_defaults.get("variables", {}).items()
+        }
     )
 
     default_sudo_user = render_template_value(
@@ -1799,6 +1837,27 @@ def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, 
     )
 
 
+def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
+    environments = data.get("environments") or data.get("topologies") or {}
+    flat_topology_keys = (
+        "env_suffix",
+        "host_defaults",
+        "host_group_defaults",
+        "host_groups",
+        "variables",
+    )
+    flat_topology = {
+        key: data[key]
+        for key in flat_topology_keys
+        if key in data
+    }
+    if not flat_topology:
+        return environments
+    if not isinstance(environments, dict):
+        raise TypeError("Workflow environments must be a JSON object.")
+    return deep_merge_dicts({"defaults": flat_topology}, environments)
+
+
 def build_systemd_workflow_definition_from_config(
     data: dict,
     *,
@@ -1830,7 +1889,7 @@ def build_systemd_workflow_definition_from_config(
             for dep_data in upstream_dags.get("stop", data.get("upstream_dags_for_stop", []))
         ),
         schedule_pairs=schedule_pairs,
-        environments=data.get("environments") or data.get("topologies") or {},
+        environments=build_workflow_environments_from_config(data),
         tags=tuple(data.get("tags") or ("systemd", "ssh")),
         owner=data.get("owner"),
         command_timeout_seconds=int(data.get("command_timeout_seconds", 1800)),

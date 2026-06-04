@@ -5,66 +5,69 @@
     "stop": "30 18 * * 1-5"
   },
   "command_timeout_seconds": 1800,
-  "tags": ["remote-workflow", "systemd", "market-data", "ssh"],
-  "environments": {
-    "defaults": {
-      "host_group_defaults": {
-        "platform": "rhel8"
-      },
-      "host_groups": {
-        "mds": {
-          "type": "systemd"
-        },
-        "gateway": {
-          "type": "systemd"
-        }
-      }
-    },
-    "dev": {
-      "env_suffix": "_dev",
-      "host_groups": {
-        "mds": {
+  "tags": [
+    "remote-workflow",
+    "systemd",
+    "market-data",
+    "ssh"
+  ],
+  "host_groups": {
+    "mds": {
+      "type": "systemd",
+      "platform": "rhel8",
+      "service_name": "mds-collector.service",
+      "environments": {
+        "dev": {
           "sudo_user": "mduser_dev",
-          "hosts": ["dev-mds-01.company.net"]
+          "hosts": [
+            "dev-mds-01.company.net"
+          ]
         },
-        "gateway": {
-          "sudo_user": "mdgateway_dev",
-          "hosts": ["dev-gw-01.company.net"]
-        }
-      }
-    },
-    "qa": {
-      "env_suffix": "_qa",
-      "host_groups": {
-        "mds": {
+        "qa": {
           "sudo_user": "mduser_qa",
-          "hosts": ["qa-mds-01.company.net"]
+          "hosts": [
+            "qa-mds-01.company.net"
+          ]
         },
-        "gateway": {
-          "sudo_user": "mdgateway_qa",
-          "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
-        }
-      }
-    },
-    "prod": {
-      "env_suffix": "",
-      "host_groups": {
-        "mds": {
+        "prod": {
           "sudo_user": "mduser",
-          "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
+          "hosts": [
+            "prod-mds-01.company.net",
+            "prod-mds-02.company.net"
+          ]
         },
-        "gateway": {
-          "sudo_user": "mdgateway",
-          "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
+        "dr": {
+          "sudo_user": "mduser_dr",
+          "hosts": [
+            "dr-mds-01.company.net"
+          ]
         }
       }
     },
-    "dr": {
-      "env_suffix": "_dr",
-      "host_groups": {
-        "mds": {
-          "sudo_user": "mduser_dr",
-          "hosts": ["dr-mds-01.company.net"]
+    "gateway": {
+      "type": "systemd",
+      "platform": "rhel7",
+      "service_name": "mds-gateway.service",
+      "environments": {
+        "dev": {
+          "sudo_user": "mdgateway_dev",
+          "hosts": [
+            "dev-gw-01.company.net"
+          ]
+        },
+        "qa": {
+          "sudo_user": "mdgateway_qa",
+          "hosts": [
+            "qa-gw-01.company.net",
+            "qa-gw-02.company.net"
+          ]
+        },
+        "prod": {
+          "sudo_user": "mdgateway",
+          "hosts": [
+            "prod-gw-01.company.net",
+            "prod-gw-02.company.net"
+          ]
         }
       }
     }
@@ -72,19 +75,14 @@
   "tasks": [
     {
       "task_id": "mds_collector",
-      "host_group": "mds",
-      "systemd": {
-        "service_name": "mds-collector.service"
-      }
+      "host_group": "mds"
     },
     {
       "task_id": "mds_gateway",
       "host_group": "gateway",
-      "depends_on": ["mds_collector"],
-      "systemd": {
-        "platform": "rhel7",
-        "service_name": "mds-gateway.service"
-      }
+      "depends_on": [
+        "mds_collector"
+      ]
     }
   ],
   "upstream_dags": {
@@ -93,7 +91,11 @@
       {
         "dag_id": "trading-platform-stop",
         "task_id": "end",
-        "enabled_in_envs": ["qa", "prod", "dr"]
+        "enabled_in_envs": [
+          "qa",
+          "prod",
+          "dr"
+        ]
       }
     ]
   }

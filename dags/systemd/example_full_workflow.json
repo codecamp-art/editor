@@ -8,115 +8,54 @@
     {
       "start": "0 8 * * 6",
       "stop": "0 12 * * 6",
-      "enabled_in_envs": ["dr"]
+      "enabled_in_envs": [
+        "dr"
+      ]
     }
   ],
   "command_timeout_seconds": 1800,
-  "tags": ["remote-workflow", "example"],
-  "environments": {
-    "defaults": {
+  "tags": [
+    "remote-workflow",
+    "example"
+  ],
+  "host_groups": {
+    "gateway": {
+      "type": "systemd",
+      "platform": "rhel7",
+      "service_name": "gateway{gateway_service_suffix}.service",
       "variables": {
-        "gateway_service_suffix": "",
-        "pricing_service_suffix": "",
-        "backup_service_suffix": "",
-        "default_platform": "rhel8",
-        "default_sudo_user": "app_{env}",
-        "risk_root": "/opt/risk"
+        "gateway_service_suffix": ""
       },
-      "host_group_defaults": {
-        "sudo_user": "{default_sudo_user}",
-        "working_dir": "{risk_root}/{env}/current",
-        "platform": "{default_platform}"
-      },
-      "host_groups": {
-        "gateway": {
-          "type": "systemd",
-          "platform": "rhel7",
-          "service_name": "gateway{gateway_service_suffix}.service"
-        },
-        "pricing": {
-          "type": "systemd",
-          "service_name": "pricing{pricing_service_suffix}.service"
-        },
-        "risk": {
-          "type": "linux_script",
-          "commands": {
-            "start": "./bin/risk-control start --env {env}",
-            "stop": "./bin/risk-control stop --env {env}",
-            "status": "./bin/risk-control status --env {env}"
-          }
-        },
-        "backup": {
-          "type": "systemd",
-          "service_name": "ha-backup{backup_service_suffix}.service"
-        },
-        "windows_adapter": {
-          "type": "windows_script",
-          "commands": {
-            "start": ".\\adapter.ps1 -Action Start -Env {env}",
-            "stop": ".\\adapter.ps1 -Action Stop -Env {env}",
-            "status": ".\\adapter.ps1 -Action Status -Env {env}"
-          }
-        }
-      }
-    },
-    "dev": {
-      "env_suffix": "_dev",
-      "variables": {
-        "default_sudo_user": "pricing_dev",
-        "gateway_service_suffix": "-dev",
-        "pricing_service_suffix": "-dev"
-      },
-      "host_groups": {
-        "gateway": {
+      "environments": {
+        "dev": {
+          "env_suffix": "_dev",
           "sudo_user": "gwuser_dev",
-          "hosts": ["dev-gw-01.company.net"]
+          "hosts": [
+            "dev-gw-01.company.net"
+          ],
+          "variables": {
+            "gateway_service_suffix": "-dev"
+          }
         },
-        "pricing": {
-          "hosts": ["dev-pricing-01.company.net"]
-        },
-        "risk": {
-          "sudo_user": "risk_dev",
-          "hosts": ["dev-risk-01.company.net"]
-        }
-      }
-    },
-    "qa": {
-      "env_suffix": "_qa",
-      "variables": {
-        "default_sudo_user": "pricing_qa",
-        "gateway_service_suffix": "-qa",
-        "pricing_service_suffix": "-qa"
-      },
-      "host_groups": {
-        "gateway": {
+        "qa": {
+          "env_suffix": "_qa",
           "sudo_user": "gwuser_qa",
-          "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
+          "hosts": [
+            "qa-gw-01.company.net",
+            "qa-gw-02.company.net"
+          ],
+          "variables": {
+            "gateway_service_suffix": "-qa"
+          }
         },
-        "pricing": {
-          "hosts": ["qa-pricing-01.company.net"]
-        },
-        "risk": {
-          "sudo_user": "risk_qa",
-          "hosts": ["qa-risk-01.company.net"]
-        },
-        "windows_adapter": {
-          "working_dir": "D:\\Apps\\AdapterQa",
-          "hosts": ["qa-win-adapter-01.company.net"]
-        }
-      }
-    },
-    "prod": {
-      "env_suffix": "",
-      "variables": {
-        "default_sudo_user": "pricing",
-        "pricing_service_suffix": "-prod"
-      },
-      "host_groups": {
-        "gateway": {
+        "prod": {
+          "env_suffix": "",
           "sudo_user": "gwuser",
           "hosts": [
-            {"host": "prod-gw-01.company.net", "sudo_user": "gwuser_primary"},
+            {
+              "host": "prod-gw-01.company.net",
+              "sudo_user": "gwuser_primary"
+            },
             {
               "host": "prod-gw-02.company.net",
               "sudo_user": "gwuser_secondary",
@@ -125,46 +64,148 @@
             }
           ]
         },
-        "pricing": {
-          "hosts": ["prod-pricing-01.company.net", "prod-pricing-02.company.net"]
-        },
-        "risk": {
-          "sudo_user": "risk",
-          "hosts": ["prod-risk-01.company.net"]
-        },
-        "backup": {
-          "sudo_user": "backup",
-          "hosts": ["prod-backup-01.company.net"]
-        },
-        "windows_adapter": {
-          "working_dir": "D:\\Apps\\Adapter",
-          "hosts": ["prod-win-adapter-01.company.net"]
+        "dr": {
+          "env_suffix": "_dr",
+          "sudo_user": "gwuser_dr",
+          "hosts": [
+            "dr-gw-01.company.net"
+          ],
+          "variables": {
+            "gateway_service_suffix": "-dr"
+          }
         }
       }
     },
-    "dr": {
-      "env_suffix": "_dr",
+    "pricing": {
+      "type": "systemd",
+      "platform": "rhel8",
+      "service_name": "pricing{pricing_service_suffix}.service",
       "variables": {
-        "default_sudo_user": "pricing_dr",
-        "gateway_service_suffix": "-dr",
-        "pricing_service_suffix": "-dr",
-        "backup_service_suffix": "-dr"
+        "pricing_service_suffix": ""
       },
-      "host_groups": {
-        "gateway": {
-          "sudo_user": "gwuser_dr",
-          "hosts": ["dr-gw-01.company.net"]
+      "environments": {
+        "dev": {
+          "sudo_user": "pricing_dev",
+          "hosts": [
+            "dev-pricing-01.company.net"
+          ],
+          "variables": {
+            "pricing_service_suffix": "-dev"
+          }
         },
-        "pricing": {
-          "hosts": ["dr-pricing-01.company.net"]
+        "qa": {
+          "sudo_user": "pricing_qa",
+          "hosts": [
+            "qa-pricing-01.company.net"
+          ],
+          "variables": {
+            "pricing_service_suffix": "-qa"
+          }
         },
-        "risk": {
+        "prod": {
+          "sudo_user": "pricing",
+          "hosts": [
+            "prod-pricing-01.company.net",
+            "prod-pricing-02.company.net"
+          ],
+          "variables": {
+            "pricing_service_suffix": "-prod"
+          }
+        },
+        "dr": {
+          "sudo_user": "pricing_dr",
+          "hosts": [
+            "dr-pricing-01.company.net"
+          ],
+          "variables": {
+            "pricing_service_suffix": "-dr"
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "linux_script",
+      "sudo_user": "risk_{env}",
+      "working_dir": "{risk_root}/{env}/current",
+      "variables": {
+        "risk_root": "/opt/risk"
+      },
+      "commands": {
+        "start": "./bin/risk-control start --env {env}",
+        "stop": "./bin/risk-control stop --env {env}",
+        "status": "./bin/risk-control status --env {env}"
+      },
+      "environments": {
+        "dev": {
+          "sudo_user": "risk_dev",
+          "hosts": [
+            "dev-risk-01.company.net"
+          ]
+        },
+        "qa": {
+          "sudo_user": "risk_qa",
+          "hosts": [
+            "qa-risk-01.company.net"
+          ]
+        },
+        "prod": {
+          "sudo_user": "risk",
+          "hosts": [
+            "prod-risk-01.company.net"
+          ]
+        },
+        "dr": {
           "sudo_user": "risk_dr",
-          "hosts": ["dr-risk-01.company.net"]
+          "hosts": [
+            "dr-risk-01.company.net"
+          ]
+        }
+      }
+    },
+    "backup": {
+      "type": "systemd",
+      "platform": "rhel8",
+      "service_name": "ha-backup{backup_service_suffix}.service",
+      "variables": {
+        "backup_service_suffix": ""
+      },
+      "environments": {
+        "prod": {
+          "sudo_user": "backup",
+          "hosts": [
+            "prod-backup-01.company.net"
+          ]
         },
-        "backup": {
+        "dr": {
           "sudo_user": "backup_dr",
-          "hosts": ["dr-backup-01.company.net"]
+          "hosts": [
+            "dr-backup-01.company.net"
+          ],
+          "variables": {
+            "backup_service_suffix": "-dr"
+          }
+        }
+      }
+    },
+    "windows_adapter": {
+      "type": "windows_script",
+      "commands": {
+        "start": ".\\adapter.ps1 -Action Start -Env {env}",
+        "stop": ".\\adapter.ps1 -Action Stop -Env {env}",
+        "status": ".\\adapter.ps1 -Action Status -Env {env}"
+      },
+      "environments": {
+        "qa": {
+          "working_dir": "D:\\Apps\\AdapterQa",
+          "hosts": [
+            "qa-win-adapter-01.company.net"
+          ]
+        },
+        "prod": {
+          "working_dir": "D:\\Apps\\Adapter",
+          "hosts": [
+            "prod-win-adapter-01.company.net"
+          ]
         }
       }
     }
@@ -179,19 +220,29 @@
     {
       "group_id": "backend_services",
       "tooltip": "RHEL8 services and Linux scripts with internal dependencies",
-      "start_depends_on": ["gateway_rhel7"],
-      "stop_depends_on": ["windows_jobs"],
+      "start_depends_on": [
+        "gateway_rhel7"
+      ],
+      "stop_depends_on": [
+        "windows_jobs"
+      ],
       "tasks": [
         {
           "task_id": "pricing_rhel8",
           "host_group": "pricing",
-          "stop_depends_on": ["risk_linux_script"]
+          "stop_depends_on": [
+            "risk_linux_script"
+          ]
         },
         {
           "task_id": "risk_linux_script",
           "host_group": "risk",
-          "start_depends_on": ["pricing_rhel8"],
-          "stop_depends_on": ["ha_backup"],
+          "start_depends_on": [
+            "pricing_rhel8"
+          ],
+          "stop_depends_on": [
+            "ha_backup"
+          ],
           "remote_env_vars": {
             "APP_ENV": "{env}",
             "APP_LOC": "{loc}"
@@ -200,15 +251,21 @@
         {
           "task_id": "ha_backup",
           "host_group": "backup",
-          "start_depends_on": ["risk_linux_script"]
+          "start_depends_on": [
+            "risk_linux_script"
+          ]
         }
       ]
     },
     {
       "group_id": "windows_jobs",
       "tooltip": "Windows scripts can be grouped and depend on Linux/systemd tasks",
-      "start_depends_on": ["backend_services"],
-      "stop_depends_on": ["gateway_rhel7"],
+      "start_depends_on": [
+        "backend_services"
+      ],
+      "stop_depends_on": [
+        "gateway_rhel7"
+      ],
       "tasks": [
         {
           "task_id": "windows_adapter",
@@ -226,14 +283,19 @@
       {
         "dag_id": "reference-data-start",
         "task_id": "end",
-        "enabled_in_envs": ["qa", "prod"]
+        "enabled_in_envs": [
+          "qa",
+          "prod"
+        ]
       }
     ],
     "stop": [
       {
         "dag_id": "trading-close-check",
         "task_id": "end",
-        "enabled_in_envs": ["prod"]
+        "enabled_in_envs": [
+          "prod"
+        ]
       }
     ]
   }
