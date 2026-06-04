@@ -46,7 +46,6 @@ from common.ssh_hook import MSSSHHook, execute_ssh_command
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
 SUPPORTED_TASK_TYPES = {"systemd", "linux_script", "windows_script"}
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
-SUPPORTED_SYSTEMD_SCOPES = {"system", "user"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
 
 
@@ -130,7 +129,6 @@ class WorkflowSchedulePair:
 @dataclass(frozen=True)
 class SystemdWorkflowDefinition:
     workflow_id: str
-    title: str
     description: str
     schedule_start: str | list[str] | tuple[str, ...] | None
     schedule_stop: str | list[str] | tuple[str, ...] | None
@@ -251,7 +249,7 @@ def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
         return overrides
 
     systemd_overrides = dict(config.get("systemd") or {})
-    for key in ("platform", "scope", "service_name"):
+    for key in ("platform", "service_name"):
         if key in config:
             systemd_overrides[key] = config[key]
 
@@ -705,7 +703,6 @@ def validate_task_spec(
     if task_spec.task_type == "systemd":
         systemd_cfg = task_spec.systemd or {}
         platform = systemd_cfg.get("platform", task_spec.platform)
-        scope = systemd_cfg.get("scope", "system")
         if platform not in SUPPORTED_SYSTEMD_PLATFORMS and (
             require_runtime_config
             or "platform" in systemd_cfg
@@ -714,11 +711,6 @@ def validate_task_spec(
             raise ValueError(
                 f"Task '{task_spec.task_id}' systemd platform must be one of "
                 f"{sorted(SUPPORTED_SYSTEMD_PLATFORMS)}."
-            )
-        if scope not in SUPPORTED_SYSTEMD_SCOPES:
-            raise ValueError(
-                f"Task '{task_spec.task_id}' systemd scope must be one of "
-                f"{sorted(SUPPORTED_SYSTEMD_SCOPES)}."
             )
         if require_runtime_config and not systemd_cfg.get("service_name"):
             raise ValueError(f"Task '{task_spec.task_id}' must define systemd.service_name.")
@@ -882,6 +874,14 @@ def validate_acyclic_task_graph(upstream_map: dict[str, tuple[str, ...]]) -> Non
         visit(task_id, [])
 
 
+def infer_systemd_scope(platform: str) -> str:
+    if platform == "rhel7":
+        return "system"
+    if platform == "rhel8":
+        return "user"
+    raise ValueError(f"Unsupported systemd platform '{platform}'.")
+
+
 def prepare_workflow_plan(
     *,
     workflow: SystemdWorkflowDefinition,
@@ -1011,14 +1011,12 @@ def build_systemd_service_command(
 ) -> str:
     systemd_cfg = task_spec.systemd or {}
     platform = systemd_cfg.get("platform", task_spec.platform)
-    scope = systemd_cfg.get("scope", "system")
+    scope = infer_systemd_scope(platform)
     service_name = systemd_cfg["service_name"]
     login_user = host_target.login_user or task_spec.login_user
 
     if platform not in SUPPORTED_SYSTEMD_PLATFORMS:
         raise ValueError(f"Unsupported systemd platform '{platform}'.")
-    if scope not in SUPPORTED_SYSTEMD_SCOPES:
-        raise ValueError(f"Unsupported systemd scope '{scope}'.")
 
     if action == "status":
         systemctl_args = ["status", service_name, "--no-pager"]
@@ -1743,12 +1741,19 @@ def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, 
     )
 
 
-def build_systemd_workflow_definition_from_config(data: dict) -> SystemdWorkflowDefinition:
+def build_systemd_workflow_definition_from_config(
+    data: dict,
+    *,
+    default_workflow_id: str | None = None,
+) -> SystemdWorkflowDefinition:
     schedule_pairs = build_schedule_pairs_from_config(data)
     upstream_dags = data.get("upstream_dags", {})
+    workflow_id = data.get("workflow_id") or default_workflow_id
+    if not workflow_id:
+        raise ValueError("Workflow config must define workflow_id or be loaded from a JSON file.")
+
     return SystemdWorkflowDefinition(
-        workflow_id=data["workflow_id"],
-        title=data.get("title", data["workflow_id"]),
+        workflow_id=workflow_id,
         description=data.get("description", ""),
         schedule_start=schedule_pairs[0].start if schedule_pairs else None,
         schedule_stop=schedule_pairs[0].stop if schedule_pairs else None,
@@ -1775,7 +1780,11 @@ def build_systemd_workflow_definition_from_config(data: dict) -> SystemdWorkflow
 
 
 def load_systemd_workflow_definition_from_json(config_file: str | Path) -> SystemdWorkflowDefinition:
-    return build_systemd_workflow_definition_from_config(load_json_file(config_file))
+    config_path = Path(config_file)
+    return build_systemd_workflow_definition_from_config(
+        load_json_file(config_path),
+        default_workflow_id=config_path.stem,
+    )
 
 
 def default_dag_id_prefix(workflow_id: str) -> str:
@@ -1816,11 +1825,15 @@ def register_systemd_dags_from_json(
     config_file: str | Path,
     global_namespace: dict,
 ) -> None:
-    config = load_json_file(config_file)
-    if config.get("register_dags", True) is False:
+    config_path = Path(config_file)
+    if config_path.name.startswith("example_"):
         return
 
-    workflow = build_systemd_workflow_definition_from_config(config)
+    config = load_json_file(config_path)
+    workflow = build_systemd_workflow_definition_from_config(
+        config,
+        default_workflow_id=config_path.stem,
+    )
     dag_id_prefix = config.get("dag_id_prefix", default_dag_id_prefix(workflow.workflow_id))
     dag_ids = config.get("dag_ids", {})
     current_env = get_current_env_name()

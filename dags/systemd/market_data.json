@@ -1,6 +1,4 @@
 {
-  "workflow_id": "market_data",
-  "title": "Market Data",
   "description": "# Market Data Start/Stop\n\nThis workflow controls market data services.",
   "schedules": {
     "start": "30 6 * * 1-5",
@@ -71,7 +69,6 @@
       "host_group": "mds",
       "systemd": {
         "platform": "rhel8",
-        "scope": "user",
         "service_name": "mds-collector.service"
       }
     },
@@ -81,7 +78,6 @@
       "depends_on": ["mds_collector"],
       "systemd": {
         "platform": "rhel7",
-        "scope": "system",
         "service_name": "mds-gateway.service"
       }
     }

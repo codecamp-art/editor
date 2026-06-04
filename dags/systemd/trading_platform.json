@@ -1,6 +1,4 @@
 {
-  "workflow_id": "trading_platform",
-  "title": "Trading Platform",
   "description": "# Trading Platform Start/Stop\n\nThis workflow controls trading platform services and scripts across remote Linux and Windows servers.",
   "schedules": {
     "start": "0 7 * * 1-5",
@@ -106,7 +104,6 @@
       "host_group": "gateway",
       "systemd": {
         "platform": "rhel7",
-        "scope": "system",
         "service_name": "gateway.service"
       }
     },
@@ -116,7 +113,6 @@
       "depends_on": ["gateway"],
       "systemd": {
         "platform": "rhel8",
-        "scope": "user",
         "service_name": "mds.service"
       }
     }
@@ -132,7 +128,6 @@
           "host_group": "app_primary",
           "systemd": {
             "platform": "rhel8",
-            "scope": "user",
             "service_name": "app-primary.service"
           }
         },
@@ -144,7 +139,6 @@
           "optional": true,
           "systemd": {
             "platform": "rhel8",
-            "scope": "user",
             "service_name": "app-secondary.service"
           }
         }
