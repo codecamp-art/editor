@@ -233,14 +233,59 @@ def build_env_tokens(topology: dict, current_env: str) -> dict[str, str]:
     return tokens
 
 
+def get_default_environment_topology(environments: dict[str, Any]) -> dict[str, Any]:
+    default_topology: dict[str, Any] = {}
+    for key in ("base", "default", "defaults"):
+        raw_topology = environments.get(key)
+        if raw_topology is None:
+            continue
+        if not isinstance(raw_topology, dict):
+            raise TypeError(f"Workflow environment '{key}' topology must be a JSON object.")
+        default_topology = deep_merge_dicts(default_topology, raw_topology)
+    return default_topology
+
+
 def resolve_topology_for_env(workflow: SystemdWorkflowDefinition, current_env: str) -> dict:
     environments = workflow.environments or {}
-    topology = environments.get(current_env)
-    if topology is None:
-        return {"host_groups": {}}
-    if not isinstance(topology, dict):
+    if not isinstance(environments, dict):
+        raise TypeError("Workflow environments must be a JSON object.")
+
+    default_topology = get_default_environment_topology(environments)
+    env_topology = environments.get(current_env, {})
+    if env_topology is None:
+        env_topology = {}
+    if not isinstance(env_topology, dict):
         raise TypeError(f"Workflow environment '{current_env}' topology must be a JSON object.")
+
+    topology = deep_merge_dicts(default_topology, env_topology)
+    topology.setdefault("host_groups", {})
     return topology
+
+
+TOPOLOGY_METADATA_KEYS = {
+    "env_suffix",
+    "host_defaults",
+    "host_group_defaults",
+    "host_groups",
+    "variables",
+}
+
+
+def extract_host_defaults_from_topology(topology: dict[str, Any]) -> dict[str, Any]:
+    defaults = {
+        key: value
+        for key, value in topology.items()
+        if key not in TOPOLOGY_METADATA_KEYS
+    }
+    for key in ("host_defaults", "host_group_defaults"):
+        raw_defaults = topology.get(key)
+        if raw_defaults is None:
+            continue
+        if not isinstance(raw_defaults, dict):
+            raise TypeError(f"Topology {key} must be a JSON object.")
+        defaults = deep_merge_dicts(defaults, raw_defaults)
+    defaults.pop("hosts", None)
+    return defaults
 
 
 def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
@@ -573,14 +618,18 @@ def resolve_hosts_for_task(
         return ()
 
     host_group_config = groups[task_spec.host_group]
-    host_group_defaults: dict[str, Any] = {}
+    topology_host_defaults = extract_host_defaults_from_topology(topology)
+    host_group_defaults: dict[str, Any] = dict(topology_host_defaults)
     if isinstance(host_group_config, dict):
         host_entries = host_group_config.get("hosts", [])
-        host_group_defaults = {
-            key: value
-            for key, value in host_group_config.items()
-            if key != "hosts"
-        }
+        host_group_defaults = deep_merge_dicts(
+            topology_host_defaults,
+            {
+                key: value
+                for key, value in host_group_config.items()
+                if key != "hosts"
+            },
+        )
     else:
         host_entries = host_group_config
 

@@ -7,17 +7,28 @@
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "systemd", "market-data", "ssh"],
   "environments": {
+    "defaults": {
+      "host_group_defaults": {
+        "platform": "rhel8"
+      },
+      "host_groups": {
+        "mds": {
+          "type": "systemd"
+        },
+        "gateway": {
+          "type": "systemd"
+        }
+      }
+    },
     "dev": {
       "env_suffix": "_dev",
       "host_groups": {
         "mds": {
           "sudo_user": "mduser_dev",
-          "type": "systemd",
           "hosts": ["dev-mds-01.company.net"]
         },
         "gateway": {
           "sudo_user": "mdgateway_dev",
-          "type": "systemd",
           "hosts": ["dev-gw-01.company.net"]
         }
       }
@@ -27,12 +38,10 @@
       "host_groups": {
         "mds": {
           "sudo_user": "mduser_qa",
-          "type": "systemd",
           "hosts": ["qa-mds-01.company.net"]
         },
         "gateway": {
           "sudo_user": "mdgateway_qa",
-          "type": "systemd",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         }
       }
@@ -42,12 +51,10 @@
       "host_groups": {
         "mds": {
           "sudo_user": "mduser",
-          "type": "systemd",
           "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
         },
         "gateway": {
           "sudo_user": "mdgateway",
-          "type": "systemd",
           "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
         }
       }
@@ -57,7 +64,6 @@
       "host_groups": {
         "mds": {
           "sudo_user": "mduser_dr",
-          "type": "systemd",
           "hosts": ["dr-mds-01.company.net"]
         }
       }

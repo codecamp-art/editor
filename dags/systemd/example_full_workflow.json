@@ -14,82 +14,107 @@
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "example"],
   "environments": {
+    "defaults": {
+      "variables": {
+        "gateway_service_suffix": "",
+        "pricing_service_suffix": "",
+        "backup_service_suffix": "",
+        "default_platform": "rhel8",
+        "default_sudo_user": "app_{env}",
+        "risk_root": "/opt/risk"
+      },
+      "host_group_defaults": {
+        "sudo_user": "{default_sudo_user}",
+        "working_dir": "{risk_root}/{env}/current",
+        "platform": "{default_platform}"
+      },
+      "host_groups": {
+        "gateway": {
+          "type": "systemd",
+          "platform": "rhel7",
+          "service_name": "gateway{gateway_service_suffix}.service"
+        },
+        "pricing": {
+          "type": "systemd",
+          "service_name": "pricing{pricing_service_suffix}.service"
+        },
+        "risk": {
+          "type": "linux_script",
+          "commands": {
+            "start": "./bin/risk-control start --env {env}",
+            "stop": "./bin/risk-control stop --env {env}",
+            "status": "./bin/risk-control status --env {env}"
+          }
+        },
+        "backup": {
+          "type": "systemd",
+          "service_name": "ha-backup{backup_service_suffix}.service"
+        },
+        "windows_adapter": {
+          "type": "windows_script",
+          "commands": {
+            "start": ".\\adapter.ps1 -Action Start -Env {env}",
+            "stop": ".\\adapter.ps1 -Action Stop -Env {env}",
+            "status": ".\\adapter.ps1 -Action Status -Env {env}"
+          }
+        }
+      }
+    },
     "dev": {
       "env_suffix": "_dev",
+      "variables": {
+        "default_sudo_user": "pricing_dev",
+        "gateway_service_suffix": "-dev",
+        "pricing_service_suffix": "-dev"
+      },
       "host_groups": {
         "gateway": {
           "sudo_user": "gwuser_dev",
-          "type": "systemd",
-          "platform": "rhel7",
-          "service_name": "gateway-dev.service",
           "hosts": ["dev-gw-01.company.net"]
         },
         "pricing": {
-          "sudo_user": "pricing_dev",
-          "type": "systemd",
-          "service_name": "pricing-dev.service",
           "hosts": ["dev-pricing-01.company.net"]
         },
         "risk": {
           "sudo_user": "risk_dev",
-          "type": "linux_script",
-          "working_dir": "/opt/risk/dev/current",
-          "commands": {
-            "start": "./bin/risk-control start --env dev",
-            "stop": "./bin/risk-control stop --env dev",
-            "status": "./bin/risk-control status --env dev"
-          },
           "hosts": ["dev-risk-01.company.net"]
         }
       }
     },
     "qa": {
       "env_suffix": "_qa",
+      "variables": {
+        "default_sudo_user": "pricing_qa",
+        "gateway_service_suffix": "-qa",
+        "pricing_service_suffix": "-qa"
+      },
       "host_groups": {
         "gateway": {
           "sudo_user": "gwuser_qa",
-          "type": "systemd",
-          "platform": "rhel7",
-          "service_name": "gateway-qa.service",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         },
         "pricing": {
-          "sudo_user": "pricing_qa",
-          "type": "systemd",
-          "service_name": "pricing-qa.service",
           "hosts": ["qa-pricing-01.company.net"]
         },
         "risk": {
           "sudo_user": "risk_qa",
-          "type": "linux_script",
-          "working_dir": "/opt/risk/qa/current",
-          "commands": {
-            "start": "./bin/risk-control start --env qa",
-            "stop": "./bin/risk-control stop --env qa",
-            "status": "./bin/risk-control status --env qa"
-          },
           "hosts": ["qa-risk-01.company.net"]
         },
         "windows_adapter": {
-          "type": "windows_script",
           "working_dir": "D:\\Apps\\AdapterQa",
-          "commands": {
-            "start": ".\\adapter.ps1 -Action Start -Env qa",
-            "stop": ".\\adapter.ps1 -Action Stop -Env qa",
-            "status": ".\\adapter.ps1 -Action Status -Env qa"
-          },
           "hosts": ["qa-win-adapter-01.company.net"]
         }
       }
     },
     "prod": {
       "env_suffix": "",
+      "variables": {
+        "default_sudo_user": "pricing",
+        "pricing_service_suffix": "-prod"
+      },
       "host_groups": {
         "gateway": {
           "sudo_user": "gwuser",
-          "type": "systemd",
-          "platform": "rhel7",
-          "service_name": "gateway.service",
           "hosts": [
             {"host": "prod-gw-01.company.net", "sudo_user": "gwuser_primary"},
             {
@@ -101,71 +126,44 @@
           ]
         },
         "pricing": {
-          "sudo_user": "pricing",
-          "type": "systemd",
-          "service_name": "pricing-prod.service",
           "hosts": ["prod-pricing-01.company.net", "prod-pricing-02.company.net"]
         },
         "risk": {
           "sudo_user": "risk",
-          "type": "linux_script",
-          "working_dir": "/opt/risk/prod/current",
-          "commands": {
-            "start": "./bin/risk-control start --env prod",
-            "stop": "./bin/risk-control stop --env prod",
-            "status": "./bin/risk-control status --env prod"
-          },
           "hosts": ["prod-risk-01.company.net"]
         },
         "backup": {
           "sudo_user": "backup",
-          "type": "systemd",
-          "service_name": "ha-backup.service",
           "hosts": ["prod-backup-01.company.net"]
         },
         "windows_adapter": {
-          "type": "windows_script",
           "working_dir": "D:\\Apps\\Adapter",
-          "commands": {
-            "start": ".\\adapter.ps1 -Action Start -Env prod",
-            "stop": ".\\adapter.ps1 -Action Stop -Env prod",
-            "status": ".\\adapter.ps1 -Action Status -Env prod"
-          },
           "hosts": ["prod-win-adapter-01.company.net"]
         }
       }
     },
     "dr": {
       "env_suffix": "_dr",
+      "variables": {
+        "default_sudo_user": "pricing_dr",
+        "gateway_service_suffix": "-dr",
+        "pricing_service_suffix": "-dr",
+        "backup_service_suffix": "-dr"
+      },
       "host_groups": {
         "gateway": {
           "sudo_user": "gwuser_dr",
-          "type": "systemd",
-          "platform": "rhel7",
-          "service_name": "gateway-dr.service",
           "hosts": ["dr-gw-01.company.net"]
         },
         "pricing": {
-          "sudo_user": "pricing_dr",
-          "type": "systemd",
-          "service_name": "pricing-dr.service",
           "hosts": ["dr-pricing-01.company.net"]
         },
         "risk": {
           "sudo_user": "risk_dr",
-          "type": "linux_script",
-          "working_dir": "/opt/risk/dr/current",
-          "commands": {
-            "start": "./bin/risk-control start --env dr",
-            "stop": "./bin/risk-control stop --env dr",
-            "status": "./bin/risk-control status --env dr"
-          },
           "hosts": ["dr-risk-01.company.net"]
         },
         "backup": {
           "sudo_user": "backup_dr",
-          "type": "systemd",
-          "service_name": "ha-backup-dr.service",
           "hosts": ["dr-backup-01.company.net"]
         }
       }
