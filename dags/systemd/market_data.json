@@ -6,7 +6,6 @@
     "start": "30 6 * * 1-5",
     "stop": "30 18 * * 1-5"
   },
-  "fields": {},
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "systemd", "market-data", "ssh"],
   "environments": {

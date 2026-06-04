@@ -336,14 +336,30 @@ def build_systemd_airflow_fields(
                 "type": "enum",
                 "default": "",
                 "values": ["", *task_ids],
-                "description": "Required when target_scope is task.",
+                "description": "Deprecated single-task selector; use target_tasks.",
+                "include_in_cli": False,
+            },
+            "target_tasks": {
+                "type": "multi_enum",
+                "default": [],
+                "values": list(task_ids),
+                "description": "Select one or more tasks when target_scope is task.",
                 "include_in_cli": False,
             },
             "target_task_group": {
                 "type": "enum",
                 "default": "",
                 "values": ["", *task_group_ids],
-                "description": "Required when target_scope is task_group.",
+                "description": "Deprecated single-task-group selector; use target_task_groups.",
+                "include_in_cli": False,
+            },
+            "target_task_groups": {
+                "type": "multi_enum",
+                "default": [],
+                "values": list(task_group_ids),
+                "description": (
+                    "Select one or more task groups when target_scope is task_group."
+                ),
                 "include_in_cli": False,
             },
         },
@@ -356,14 +372,43 @@ def resolve_requested_action(validated: dict, dag_action: str) -> str:
     return dag_action if requested == "default" else requested
 
 
+def normalize_target_selection(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        stripped = value.strip()
+        return (stripped,) if stripped else ()
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return (str(value).strip(),) if str(value).strip() else ()
+
+
+def selected_target_tasks(validated: dict) -> tuple[str, ...]:
+    return unique_preserving_order(
+        [
+            *normalize_target_selection(validated.get("target_task")),
+            *normalize_target_selection(validated.get("target_tasks")),
+        ]
+    )
+
+
+def selected_target_task_groups(validated: dict) -> tuple[str, ...]:
+    return unique_preserving_order(
+        [
+            *normalize_target_selection(validated.get("target_task_group")),
+            *normalize_target_selection(validated.get("target_task_groups")),
+        ]
+    )
+
+
 def target_matches(validated: dict, task_id: str, group_id: str | None) -> bool:
     target_scope = validated["target_scope"]
     if target_scope == "workflow":
         return True
     if target_scope == "task":
-        return validated.get("target_task") == task_id
+        return task_id in selected_target_tasks(validated)
     if target_scope == "task_group":
-        return bool(group_id) and validated.get("target_task_group") == group_id
+        return bool(group_id) and group_id in selected_target_task_groups(validated)
     raise ValueError(f"Unsupported target_scope '{target_scope}'.")
 
 
@@ -1292,11 +1337,20 @@ def create_systemd_dag(
                     f"Use the {selected_action} DAG for '{selected_action}'."
                 )
 
-            if validated["target_scope"] == "task" and not validated["target_task"]:
-                raise ValueError("target_task is required when target_scope=task.")
+            if validated["target_scope"] == "task" and not selected_target_tasks(validated):
+                raise ValueError(
+                    "target_tasks is required when target_scope=task. "
+                    "target_task is still accepted for backward compatibility."
+                )
 
-            if validated["target_scope"] == "task_group" and not validated["target_task_group"]:
-                raise ValueError("target_task_group is required when target_scope=task_group.")
+            if (
+                validated["target_scope"] == "task_group"
+                and not selected_target_task_groups(validated)
+            ):
+                raise ValueError(
+                    "target_task_groups is required when target_scope=task_group. "
+                    "target_task_group is still accepted for backward compatibility."
+                )
 
             return validated
 

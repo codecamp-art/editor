@@ -6,7 +6,6 @@
     "start": "0 7 * * 1-5",
     "stop": "0 19 * * 1-5"
   },
-  "fields": {},
   "command_timeout_seconds": 1800,
   "tags": ["remote-workflow", "systemd", "trading-platform", "ssh"],
   "environments": {
