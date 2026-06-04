@@ -2,12 +2,10 @@
   "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates a complete self-contained system workflow config.",
   "schedule_pairs": [
     {
-      "pair_id": "business_day",
       "start": "0 6 * * 1-5",
       "stop": "0 20 * * 1-5"
     },
     {
-      "pair_id": "saturday_dr_test",
       "start": "0 8 * * 6",
       "stop": "0 12 * * 6",
       "enabled_in_envs": ["dr"]
@@ -20,21 +18,20 @@
       "env_suffix": "_dev",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser_dev",
+          "sudo_user": "gwuser_dev",
           "type": "systemd",
           "platform": "rhel7",
           "service_name": "gateway-dev.service",
           "hosts": ["dev-gw-01.company.net"]
         },
         "pricing": {
-          "login_user": "pricing_dev",
+          "sudo_user": "pricing_dev",
           "type": "systemd",
-          "platform": "rhel8",
           "service_name": "pricing-dev.service",
           "hosts": ["dev-pricing-01.company.net"]
         },
         "risk": {
-          "login_user": "risk_dev",
+          "sudo_user": "risk_dev",
           "type": "linux_script",
           "working_dir": "/opt/risk/dev/current",
           "commands": {
@@ -50,21 +47,20 @@
       "env_suffix": "_qa",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser_qa",
+          "sudo_user": "gwuser_qa",
           "type": "systemd",
           "platform": "rhel7",
           "service_name": "gateway-qa.service",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         },
         "pricing": {
-          "login_user": "pricing_qa",
+          "sudo_user": "pricing_qa",
           "type": "systemd",
-          "platform": "rhel8",
           "service_name": "pricing-qa.service",
           "hosts": ["qa-pricing-01.company.net"]
         },
         "risk": {
-          "login_user": "risk_qa",
+          "sudo_user": "risk_qa",
           "type": "linux_script",
           "working_dir": "/opt/risk/qa/current",
           "commands": {
@@ -90,29 +86,28 @@
       "env_suffix": "",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser",
+          "sudo_user": "gwuser",
           "type": "systemd",
           "platform": "rhel7",
           "service_name": "gateway.service",
           "hosts": [
-            {"host": "prod-gw-01.company.net", "login_user": "gwuser_primary"},
+            {"host": "prod-gw-01.company.net", "sudo_user": "gwuser_primary"},
             {
               "host": "prod-gw-02.company.net",
-              "login_user": "gwuser_secondary",
+              "sudo_user": "gwuser_secondary",
               "platform": "rhel8",
               "service_name": "gateway-secondary.service"
             }
           ]
         },
         "pricing": {
-          "login_user": "pricing",
+          "sudo_user": "pricing",
           "type": "systemd",
-          "platform": "rhel8",
           "service_name": "pricing-prod.service",
           "hosts": ["prod-pricing-01.company.net", "prod-pricing-02.company.net"]
         },
         "risk": {
-          "login_user": "risk",
+          "sudo_user": "risk",
           "type": "linux_script",
           "working_dir": "/opt/risk/prod/current",
           "commands": {
@@ -123,9 +118,8 @@
           "hosts": ["prod-risk-01.company.net"]
         },
         "backup": {
-          "login_user": "backup",
+          "sudo_user": "backup",
           "type": "systemd",
-          "platform": "rhel8",
           "service_name": "ha-backup.service",
           "hosts": ["prod-backup-01.company.net"]
         },
@@ -145,21 +139,20 @@
       "env_suffix": "_dr",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser_dr",
+          "sudo_user": "gwuser_dr",
           "type": "systemd",
           "platform": "rhel7",
           "service_name": "gateway-dr.service",
           "hosts": ["dr-gw-01.company.net"]
         },
         "pricing": {
-          "login_user": "pricing_dr",
+          "sudo_user": "pricing_dr",
           "type": "systemd",
-          "platform": "rhel8",
           "service_name": "pricing-dr.service",
           "hosts": ["dr-pricing-01.company.net"]
         },
         "risk": {
-          "login_user": "risk_dr",
+          "sudo_user": "risk_dr",
           "type": "linux_script",
           "working_dir": "/opt/risk/dr/current",
           "commands": {
@@ -170,9 +163,8 @@
           "hosts": ["dr-risk-01.company.net"]
         },
         "backup": {
-          "login_user": "backup_dr",
+          "sudo_user": "backup_dr",
           "type": "systemd",
-          "platform": "rhel8",
           "service_name": "ha-backup-dr.service",
           "hosts": ["dr-backup-01.company.net"]
         }

@@ -11,17 +11,17 @@
       "env_suffix": "_dev",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser_dev",
+          "sudo_user": "gwuser_dev",
           "type": "systemd",
           "hosts": ["dev-gw-01.company.net"]
         },
         "mds": {
-          "login_user": "mdsuser_dev",
+          "sudo_user": "mdsuser_dev",
           "type": "systemd",
           "hosts": ["dev-mds-01.company.net"]
         },
         "app_primary": {
-          "login_user": "appuser_dev",
+          "sudo_user": "appuser_dev",
           "type": "systemd",
           "hosts": ["dev-app-01.company.net"]
         }
@@ -31,22 +31,22 @@
       "env_suffix": "_qa",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser_qa",
+          "sudo_user": "gwuser_qa",
           "type": "systemd",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         },
         "mds": {
-          "login_user": "mdsuser_qa",
+          "sudo_user": "mdsuser_qa",
           "type": "systemd",
           "hosts": ["qa-mds-01.company.net"]
         },
         "app_primary": {
-          "login_user": "appuser_qa",
+          "sudo_user": "appuser_qa",
           "type": "systemd",
           "hosts": ["qa-app-01.company.net"]
         },
         "app_secondary": {
-          "login_user": "appuser_qa",
+          "sudo_user": "appuser_qa",
           "type": "systemd",
           "hosts": ["qa-app-02.company.net"]
         }
@@ -56,22 +56,22 @@
       "env_suffix": "",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser",
+          "sudo_user": "gwuser",
           "type": "systemd",
           "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
         },
         "mds": {
-          "login_user": "mdsuser",
+          "sudo_user": "mdsuser",
           "type": "systemd",
           "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
         },
         "app_primary": {
-          "login_user": "appuser",
+          "sudo_user": "appuser",
           "type": "systemd",
           "hosts": ["prod-app-01.company.net"]
         },
         "app_secondary": {
-          "login_user": "appuser_backup",
+          "sudo_user": "appuser_backup",
           "type": "systemd",
           "hosts": ["prod-app-02.company.net"]
         }
@@ -81,17 +81,17 @@
       "env_suffix": "_dr",
       "host_groups": {
         "gateway": {
-          "login_user": "gwuser_dr",
+          "sudo_user": "gwuser_dr",
           "type": "systemd",
           "hosts": ["dr-gw-01.company.net"]
         },
         "mds": {
-          "login_user": "mdsuser_dr",
+          "sudo_user": "mdsuser_dr",
           "type": "systemd",
           "hosts": ["dr-mds-01.company.net"]
         },
         "app_primary": {
-          "login_user": "appuser_dr",
+          "sudo_user": "appuser_dr",
           "type": "systemd",
           "hosts": ["dr-app-01.company.net"]
         }
@@ -112,7 +112,6 @@
       "host_group": "mds",
       "depends_on": ["gateway"],
       "systemd": {
-        "platform": "rhel8",
         "service_name": "mds.service"
       }
     }
@@ -127,7 +126,6 @@
           "task_id": "app_primary",
           "host_group": "app_primary",
           "systemd": {
-            "platform": "rhel8",
             "service_name": "app-primary.service"
           }
         },
@@ -138,7 +136,6 @@
           "enabled_in_envs": ["qa", "prod"],
           "optional": true,
           "systemd": {
-            "platform": "rhel8",
             "service_name": "app-secondary.service"
           }
         }

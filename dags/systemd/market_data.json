@@ -11,12 +11,12 @@
       "env_suffix": "_dev",
       "host_groups": {
         "mds": {
-          "login_user": "mduser_dev",
+          "sudo_user": "mduser_dev",
           "type": "systemd",
           "hosts": ["dev-mds-01.company.net"]
         },
         "gateway": {
-          "login_user": "mdgateway_dev",
+          "sudo_user": "mdgateway_dev",
           "type": "systemd",
           "hosts": ["dev-gw-01.company.net"]
         }
@@ -26,12 +26,12 @@
       "env_suffix": "_qa",
       "host_groups": {
         "mds": {
-          "login_user": "mduser_qa",
+          "sudo_user": "mduser_qa",
           "type": "systemd",
           "hosts": ["qa-mds-01.company.net"]
         },
         "gateway": {
-          "login_user": "mdgateway_qa",
+          "sudo_user": "mdgateway_qa",
           "type": "systemd",
           "hosts": ["qa-gw-01.company.net", "qa-gw-02.company.net"]
         }
@@ -41,12 +41,12 @@
       "env_suffix": "",
       "host_groups": {
         "mds": {
-          "login_user": "mduser",
+          "sudo_user": "mduser",
           "type": "systemd",
           "hosts": ["prod-mds-01.company.net", "prod-mds-02.company.net"]
         },
         "gateway": {
-          "login_user": "mdgateway",
+          "sudo_user": "mdgateway",
           "type": "systemd",
           "hosts": ["prod-gw-01.company.net", "prod-gw-02.company.net"]
         }
@@ -56,7 +56,7 @@
       "env_suffix": "_dr",
       "host_groups": {
         "mds": {
-          "login_user": "mduser_dr",
+          "sudo_user": "mduser_dr",
           "type": "systemd",
           "hosts": ["dr-mds-01.company.net"]
         }
@@ -68,7 +68,6 @@
       "task_id": "mds_collector",
       "host_group": "mds",
       "systemd": {
-        "platform": "rhel8",
         "service_name": "mds-collector.service"
       }
     },

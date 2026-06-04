@@ -63,7 +63,7 @@ class ExternalDagDependency:
 @dataclass(frozen=True)
 class HostTarget:
     host: str
-    login_user: str | None = None
+    sudo_user: str | None = None
     ssh_user: str | None = None
     ssh_conn_id: str | None = None
     ssh_username_env_var: str = "SSH_USERNAME"
@@ -77,13 +77,13 @@ class WorkflowTaskSpec:
     task_id: str
     task_type: str
     host_group: str
-    login_user: str | None = None
+    sudo_user: str | None = None
     ssh_user: str | None = None
     ssh_conn_id: str | None = None
     ssh_username_env_var: str = "SSH_USERNAME"
     ssh_password_env_var: str = "SSH_PASSWORD"
     enable_kerberos: bool | None = None
-    platform: str = "linux"
+    platform: str = "rhel8"
     systemd: dict[str, Any] | None = None
     commands: dict[str, Any] | None = None
     working_dir: str | None = None
@@ -117,7 +117,7 @@ class WorkflowTaskGroupSpec:
 
 @dataclass(frozen=True)
 class WorkflowSchedulePair:
-    pair_id: str
+    schedule_id: str
     start: str | list[str] | tuple[str, ...] | None = None
     stop: str | list[str] | tuple[str, ...] | None = None
     dag_id_prefix: str | None = None
@@ -341,7 +341,10 @@ def build_systemd_airflow_fields(
                 "type": "multi_enum",
                 "default": [],
                 "values": list(task_ids),
-                "description": "Select one or more tasks when target_scope is task.",
+                "description": (
+                    "Select one or more tasks when target_scope is task, or narrow a "
+                    "selected task_group to specific tasks."
+                ),
                 "include_in_cli": False,
             },
             "target_task_group": {
@@ -406,7 +409,12 @@ def target_matches(validated: dict, task_id: str, group_id: str | None) -> bool:
     if target_scope == "task":
         return task_id in selected_target_tasks(validated)
     if target_scope == "task_group":
-        return bool(group_id) and group_id in selected_target_task_groups(validated)
+        selected_task_ids = selected_target_tasks(validated)
+        return (
+            bool(group_id)
+            and group_id in selected_target_task_groups(validated)
+            and (not selected_task_ids or task_id in selected_task_ids)
+        )
     raise ValueError(f"Unsupported target_scope '{target_scope}'.")
 
 
@@ -428,7 +436,7 @@ def apply_task_env_overrides(
     if not override:
         return replace(
             task_spec,
-            login_user=render_template_value(task_spec.login_user, tokens),
+            sudo_user=render_template_value(task_spec.sudo_user, tokens),
             ssh_user=render_template_value(task_spec.ssh_user, tokens),
             ssh_conn_id=render_template_value(task_spec.ssh_conn_id, tokens),
             host_group=render_template_value(task_spec.host_group, tokens),
@@ -451,7 +459,7 @@ def apply_task_env_overrides(
         task_spec,
         task_type=override.get("task_type", override.get("type", task_spec.task_type)),
         host_group=override.get("host_group", task_spec.host_group),
-        login_user=override.get("login_user", task_spec.login_user),
+        sudo_user=override.get("sudo_user", task_spec.sudo_user),
         ssh_user=override.get("ssh_user", task_spec.ssh_user),
         ssh_conn_id=override.get("ssh_conn_id", task_spec.ssh_conn_id),
         ssh_username_env_var=override.get("ssh_username_env_var", task_spec.ssh_username_env_var),
@@ -496,7 +504,7 @@ def apply_task_env_overrides(
 
     return replace(
         resolved,
-        login_user=render_template_value(resolved.login_user, tokens),
+        sudo_user=render_template_value(resolved.sudo_user, tokens),
         ssh_user=render_template_value(resolved.ssh_user, tokens),
         ssh_conn_id=render_template_value(resolved.ssh_conn_id, tokens),
         host_group=render_template_value(resolved.host_group, tokens),
@@ -589,8 +597,8 @@ def resolve_hosts_for_task(
         {str(k): str(v) for k, v in host_group_defaults.get("variables", {}).items()}
     )
 
-    default_login_user = render_template_value(
-        host_group_defaults.get("login_user", task_spec.login_user),
+    default_sudo_user = render_template_value(
+        host_group_defaults.get("sudo_user", task_spec.sudo_user),
         group_tokens,
     )
     default_ssh_user = render_template_value(
@@ -624,7 +632,7 @@ def resolve_hosts_for_task(
             targets.append(
                 HostTarget(
                     host=render_template_value(entry, group_tokens),
-                    login_user=default_login_user,
+                    sudo_user=default_sudo_user,
                     ssh_user=default_ssh_user,
                     ssh_conn_id=default_ssh_conn_id,
                     ssh_username_env_var=default_ssh_username_env_var,
@@ -660,8 +668,8 @@ def resolve_hosts_for_task(
         targets.append(
             HostTarget(
                 host=render_template_value(host, entry_tokens),
-                login_user=render_template_value(
-                    entry.get("login_user", default_login_user),
+                sudo_user=render_template_value(
+                    entry.get("sudo_user", default_sudo_user),
                     entry_tokens,
                 ),
                 ssh_user=render_template_value(
@@ -703,11 +711,7 @@ def validate_task_spec(
     if task_spec.task_type == "systemd":
         systemd_cfg = task_spec.systemd or {}
         platform = systemd_cfg.get("platform", task_spec.platform)
-        if platform not in SUPPORTED_SYSTEMD_PLATFORMS and (
-            require_runtime_config
-            or "platform" in systemd_cfg
-            or task_spec.platform != "linux"
-        ):
+        if platform not in SUPPORTED_SYSTEMD_PLATFORMS:
             raise ValueError(
                 f"Task '{task_spec.task_id}' systemd platform must be one of "
                 f"{sorted(SUPPORTED_SYSTEMD_PLATFORMS)}."
@@ -1013,7 +1017,7 @@ def build_systemd_service_command(
     platform = systemd_cfg.get("platform", task_spec.platform)
     scope = infer_systemd_scope(platform)
     service_name = systemd_cfg["service_name"]
-    login_user = host_target.login_user or task_spec.login_user
+    sudo_user = host_target.sudo_user or task_spec.sudo_user
 
     if platform not in SUPPORTED_SYSTEMD_PLATFORMS:
         raise ValueError(f"Unsupported systemd platform '{platform}'.")
@@ -1032,9 +1036,9 @@ def build_systemd_service_command(
     if scope == "system":
         inner_command = shell_join(["sudo", "-n", *command_parts])
 
-    if login_user:
+    if sudo_user:
         return build_sudo_bash_command(
-            sudo_user=login_user,
+            sudo_user=sudo_user,
             inner_command=inner_command,
             sudo_mode=task_spec.sudo_mode,
         )
@@ -1045,7 +1049,7 @@ def build_systemd_service_command(
 def build_linux_shell_command(
     *,
     raw_command: Any,
-    login_user: str | None,
+    sudo_user: str | None,
     working_dir: str | None,
     remote_env_vars: dict[str, Any] | None,
     sudo_mode: str,
@@ -1062,9 +1066,9 @@ def build_linux_shell_command(
     prefix_parts.append(command_text)
     inner_command = " && ".join(prefix_parts)
 
-    if login_user:
+    if sudo_user:
         return build_sudo_bash_command(
-            sudo_user=login_user,
+            sudo_user=sudo_user,
             inner_command=inner_command,
             sudo_mode=sudo_mode,
         )
@@ -1132,11 +1136,11 @@ def build_remote_task_command(
     if action not in commands:
         raise ValueError(f"Task '{task_spec.task_id}' has no command for action '{action}'.")
 
-    login_user = host_target.login_user or task_spec.login_user
+    sudo_user = host_target.sudo_user or task_spec.sudo_user
     if task_spec.task_type == "linux_script":
         return build_linux_shell_command(
             raw_command=commands[action],
-            login_user=login_user,
+            sudo_user=sudo_user,
             working_dir=task_spec.working_dir,
             remote_env_vars=task_spec.remote_env_vars,
             sudo_mode=task_spec.sudo_mode,
@@ -1157,7 +1161,7 @@ def task_spec_to_payload(task_spec: WorkflowTaskSpec) -> dict[str, Any]:
     return {
         "task_id": task_spec.task_id,
         "task_type": task_spec.task_type,
-        "login_user": task_spec.login_user,
+        "sudo_user": task_spec.sudo_user,
         "ssh_user": task_spec.ssh_user,
         "ssh_conn_id": task_spec.ssh_conn_id,
         "ssh_username_env_var": task_spec.ssh_username_env_var,
@@ -1180,13 +1184,13 @@ def task_spec_from_payload(payload: dict[str, Any]) -> WorkflowTaskSpec:
         task_id=payload["task_id"],
         task_type=payload["task_type"],
         host_group="",
-        login_user=payload.get("login_user"),
+        sudo_user=payload.get("sudo_user"),
         ssh_user=payload.get("ssh_user"),
         ssh_conn_id=payload.get("ssh_conn_id"),
         ssh_username_env_var=payload.get("ssh_username_env_var", "SSH_USERNAME"),
         ssh_password_env_var=payload.get("ssh_password_env_var", "SSH_PASSWORD"),
         enable_kerberos=payload.get("enable_kerberos"),
-        platform=payload.get("platform", "linux"),
+        platform=payload.get("platform", "rhel8"),
         systemd=payload.get("systemd"),
         commands=payload.get("commands"),
         working_dir=payload.get("working_dir"),
@@ -1201,7 +1205,7 @@ def task_spec_from_payload(payload: dict[str, Any]) -> WorkflowTaskSpec:
 def host_target_to_payload(host_target: HostTarget) -> dict[str, Any]:
     return {
         "host": host_target.host,
-        "login_user": host_target.login_user,
+        "sudo_user": host_target.sudo_user,
         "ssh_user": host_target.ssh_user,
         "ssh_conn_id": host_target.ssh_conn_id,
         "ssh_username_env_var": host_target.ssh_username_env_var,
@@ -1214,7 +1218,7 @@ def host_target_to_payload(host_target: HostTarget) -> dict[str, Any]:
 def host_target_from_payload(payload: dict[str, Any]) -> HostTarget:
     return HostTarget(
         host=payload["host"],
-        login_user=payload.get("login_user"),
+        sudo_user=payload.get("sudo_user"),
         ssh_user=payload.get("ssh_user"),
         ssh_conn_id=payload.get("ssh_conn_id"),
         ssh_username_env_var=payload.get("ssh_username_env_var", "SSH_USERNAME"),
@@ -1383,7 +1387,10 @@ def create_systemd_dag(
             if target_scope == "workflow":
                 required_upstream_ids = workflow_upstream_task_ids
             elif target_scope == "task_group":
-                required_upstream_ids = group_upstream_task_ids
+                if selected_target_tasks(validated):
+                    required_upstream_ids = []
+                else:
+                    required_upstream_ids = group_upstream_task_ids
             else:
                 required_upstream_ids = []
 
@@ -1644,13 +1651,13 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
         task_id=data["task_id"],
         task_type=task_type,
         host_group=data["host_group"],
-        login_user=data.get("login_user"),
+        sudo_user=data.get("sudo_user"),
         ssh_user=data.get("ssh_user"),
         ssh_conn_id=data.get("ssh_conn_id"),
         ssh_username_env_var=data.get("ssh_username_env_var", "SSH_USERNAME"),
         ssh_password_env_var=data.get("ssh_password_env_var", "SSH_PASSWORD"),
         enable_kerberos=data.get("enable_kerberos"),
-        platform=data.get("platform", "linux"),
+        platform=data.get("platform", "rhel8"),
         systemd=data.get("systemd"),
         commands=data.get("commands"),
         working_dir=data.get("working_dir"),
@@ -1706,11 +1713,10 @@ def build_task_group_spec_from_config(data: dict) -> WorkflowTaskGroupSpec:
     )
 
 
-def build_schedule_pair_from_config(data: dict, *, default_pair_id: str) -> WorkflowSchedulePair:
+def build_schedule_pair_from_config(data: dict, *, schedule_id: str) -> WorkflowSchedulePair:
     dag_ids = data.get("dag_ids", {})
-    pair_id = data.get("pair_id") or data.get("id") or data.get("name") or default_pair_id
     return WorkflowSchedulePair(
-        pair_id=pair_id,
+        schedule_id=schedule_id,
         start=normalize_schedule_value(data.get("start", data.get("schedule_start"))),
         stop=normalize_schedule_value(data.get("stop", data.get("schedule_stop"))),
         dag_id_prefix=data.get("dag_id_prefix"),
@@ -1728,13 +1734,16 @@ def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, 
         if not isinstance(raw_pairs, list):
             raise TypeError("schedule_pairs must be a list of schedule pair objects.")
         return tuple(
-            build_schedule_pair_from_config(pair_data, default_pair_id=f"pair_{index + 1}")
+            build_schedule_pair_from_config(
+                pair_data,
+                schedule_id="default" if len(raw_pairs) == 1 else f"schedule_{index + 1}",
+            )
             for index, pair_data in enumerate(raw_pairs)
         )
 
     return (
         WorkflowSchedulePair(
-            pair_id="default",
+            schedule_id="default",
             start=normalize_schedule_value(schedules.get("start", data.get("schedule_start"))),
             stop=normalize_schedule_value(schedules.get("stop", data.get("schedule_stop"))),
         ),
@@ -1814,10 +1823,10 @@ def build_pair_dag_id(
             return top_level_dag_id
 
     pair_prefix = pair.dag_id_prefix or workflow_prefix
-    if pair_count == 1 and pair.pair_id in {"default", "primary"}:
+    if pair_count == 1 and pair.schedule_id == "default":
         return f"{pair_prefix}-{action}"
 
-    return f"{pair_prefix}-{slugify_dag_id_part(pair.pair_id)}-{action}"
+    return f"{pair_prefix}-{slugify_dag_id_part(pair.schedule_id)}-{action}"
 
 
 def register_systemd_dags_from_json(
@@ -1871,8 +1880,8 @@ def register_systemd_dags_from_json(
             source_file=config_file,
         )
 
-        global_name_suffix = slugify_dag_id_part(pair.pair_id).replace("-", "_")
-        if len(enabled_pairs) == 1 and pair.pair_id in {"default", "primary"}:
+        global_name_suffix = slugify_dag_id_part(pair.schedule_id).replace("-", "_")
+        if len(enabled_pairs) == 1 and pair.schedule_id == "default":
             global_namespace[f"{workflow.workflow_id}_start"] = start_dag
             global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
         else:
