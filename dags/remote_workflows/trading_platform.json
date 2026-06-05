@@ -25,6 +25,7 @@
         },
         "qa": {
           "sudo_user": "gwuser_qa",
+          "service_name": "gateway-qa.service",
           "hosts": [
             "qa-gw-01.company.net",
             "qa-gw-02.company.net"
@@ -71,6 +72,7 @@
         },
         "dr": {
           "sudo_user": "mdsuser_dr",
+          "service_name": "mds-dr.service",
           "hosts": [
             "dr-mds-01.company.net"
           ]

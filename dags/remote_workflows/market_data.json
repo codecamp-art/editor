@@ -25,12 +25,15 @@
         },
         "qa": {
           "sudo_user": "mduser_qa",
+          "service_name": "mds-collector-qa.service",
           "hosts": [
             "qa-mds-01.company.net"
           ]
         },
         "prod": {
           "sudo_user": "mduser",
+          "platform": "rhel7",
+          "service_name": "mds-collector-prod.service",
           "hosts": [
             "prod-mds-01.company.net",
             "prod-mds-02.company.net"

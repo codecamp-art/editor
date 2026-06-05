@@ -52,6 +52,8 @@
         },
         "qa": {
           "sudo_user": "gwuser_qa",
+          "platform": "rhel8",
+          "service_name": "gateway-qa-user.service",
           "hosts": [
             "qa-gw-01.company.net",
             "qa-gw-02.company.net"
@@ -158,6 +160,12 @@
         },
         "qa": {
           "sudo_user": "risk_qa",
+          "working_dir": "/opt/risk/qa/current",
+          "commands": {
+            "start": "./bin/risk-control start --env qa --profile qa",
+            "stop": "./bin/risk-control stop --env qa --profile qa",
+            "status": "./bin/risk-control status --env qa --profile qa"
+          },
           "remote_env_vars": {
             "APP_LOC": "qa-primary"
           },
@@ -227,6 +235,11 @@
         },
         "prod": {
           "working_dir": "D:\\Apps\\Adapter",
+          "commands": {
+            "start": ".\\adapter.ps1 -Action Start -Env prod -Cluster primary",
+            "stop": ".\\adapter.ps1 -Action Stop -Env prod -Cluster primary",
+            "status": ".\\adapter.ps1 -Action Status -Env prod -Cluster primary"
+          },
           "hosts": [
             "prod-win-adapter-01.company.net"
           ]
