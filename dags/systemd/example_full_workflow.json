@@ -131,6 +131,10 @@
         "stop": "./bin/risk-control stop --env {env}",
         "status": "./bin/risk-control status --env {env}"
       },
+      "remote_env_vars": {
+        "APP_ENV": "{env}",
+        "APP_LOC": "{loc}"
+      },
       "environments": {
         "dev": {
           "sudo_user": "risk_dev",
@@ -140,12 +144,18 @@
         },
         "qa": {
           "sudo_user": "risk_qa",
+          "remote_env_vars": {
+            "APP_LOC": "qa-primary"
+          },
           "hosts": [
             "qa-risk-01.company.net"
           ]
         },
         "prod": {
           "sudo_user": "risk",
+          "remote_env_vars": {
+            "APP_LOC": "prod-primary"
+          },
           "hosts": [
             "prod-risk-01.company.net"
           ]
@@ -185,6 +195,10 @@
     },
     "windows_adapter": {
       "type": "windows_script",
+      "windows_shell": "powershell",
+      "remote_env_vars": {
+        "APP_ENV": "{env}"
+      },
       "commands": {
         "start": ".\\adapter.ps1 -Action Start -Env {env}",
         "stop": ".\\adapter.ps1 -Action Stop -Env {env}",
@@ -238,11 +252,7 @@
           ],
           "stop_depends_on": [
             "ha_backup"
-          ],
-          "remote_env_vars": {
-            "APP_ENV": "{env}",
-            "APP_LOC": "{loc}"
-          }
+          ]
         },
         {
           "task_id": "ha_backup",
@@ -265,11 +275,7 @@
       "tasks": [
         {
           "task_id": "windows_adapter",
-          "host_group": "windows_adapter",
-          "windows_shell": "powershell",
-          "remote_env_vars": {
-            "APP_ENV": "{env}"
-          }
+          "host_group": "windows_adapter"
         }
       ]
     }

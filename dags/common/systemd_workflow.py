@@ -47,6 +47,7 @@ ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
 SUPPORTED_TASK_TYPES = {"systemd", "linux_script", "windows_script"}
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
+HOST_GROUP_ONLY_RUNTIME_KEYS = ("remote_env_vars", "windows_shell")
 
 
 @dataclass(frozen=True)
@@ -312,6 +313,35 @@ def apply_host_group_env_overrides(
     return deep_merge_dicts(base_config, env_config)
 
 
+def reject_host_group_only_runtime_keys(
+    config: dict[str, Any],
+    *,
+    scope: str,
+) -> None:
+    invalid_keys = [key for key in HOST_GROUP_ONLY_RUNTIME_KEYS if key in config]
+    if invalid_keys:
+        raise ValueError(
+            f"{scope} must define {', '.join(invalid_keys)} in host_groups, "
+            "not in tasks or task_groups."
+        )
+
+    env_overrides = config.get("env_overrides") or {}
+    if not isinstance(env_overrides, dict):
+        return
+    for env_name, env_config in env_overrides.items():
+        if not isinstance(env_config, dict):
+            continue
+        invalid_env_keys = [
+            key for key in HOST_GROUP_ONLY_RUNTIME_KEYS if key in env_config
+        ]
+        if invalid_env_keys:
+            raise ValueError(
+                f"{scope} env_overrides.{env_name} must define "
+                f"{', '.join(invalid_env_keys)} in host_groups.environments, "
+                "not in task or task_group overrides."
+            )
+
+
 def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     if not config:
@@ -522,7 +552,6 @@ def apply_task_env_overrides(
 
     merged_systemd = deep_merge_dicts(task_spec.systemd, override.get("systemd"))
     merged_commands = deep_merge_dicts(task_spec.commands, override.get("commands"))
-    merged_env_vars = deep_merge_dicts(task_spec.remote_env_vars, override.get("remote_env_vars"))
 
     resolved = replace(
         task_spec,
@@ -538,7 +567,6 @@ def apply_task_env_overrides(
         systemd=merged_systemd,
         commands=merged_commands,
         working_dir=override.get("working_dir", task_spec.working_dir),
-        remote_env_vars=merged_env_vars,
         depends_on=normalize_string_tuple(
             first_config_value(override, ("depends_on", "start_after"), task_spec.depends_on)
         ),
@@ -567,7 +595,6 @@ def apply_task_env_overrides(
             if override.get("command_timeout_seconds") is not None
             else task_spec.command_timeout_seconds
         ),
-        windows_shell=override.get("windows_shell", task_spec.windows_shell),
         env_overrides=None,
     )
 
@@ -1717,6 +1744,10 @@ def build_external_dependency_from_config(data: dict) -> ExternalDagDependency:
 
 
 def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> WorkflowTaskSpec:
+    reject_host_group_only_runtime_keys(
+        data,
+        scope=f"Task '{data.get('task_id', '<unknown>')}'",
+    )
     task_type = data.get("task_type", data.get("type", "systemd"))
     depends_on = normalize_string_tuple(
         first_config_value(data, ("depends_on", "start_after"), ())
@@ -1742,7 +1773,6 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
         systemd=data.get("systemd"),
         commands=data.get("commands"),
         working_dir=data.get("working_dir"),
-        remote_env_vars=data.get("remote_env_vars"),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
         stop_depends_on=normalize_string_tuple(
@@ -1757,13 +1787,16 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
             if data.get("command_timeout_seconds") is not None
             else None
         ),
-        windows_shell=data.get("windows_shell", "powershell"),
         env_overrides=data.get("env_overrides"),
         group_id=group_id,
     )
 
 
 def build_task_group_spec_from_config(data: dict) -> WorkflowTaskGroupSpec:
+    reject_host_group_only_runtime_keys(
+        data,
+        scope=f"Task group '{data.get('group_id', '<unknown>')}'",
+    )
     group_id = data["group_id"]
     depends_on = normalize_string_tuple(
         first_config_value(data, ("depends_on", "start_after"), ())
