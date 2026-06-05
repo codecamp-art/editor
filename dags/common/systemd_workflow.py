@@ -48,6 +48,27 @@ SUPPORTED_TASK_TYPES = {"systemd", "linux_script", "windows_script"}
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
 HOST_GROUP_ONLY_RUNTIME_KEYS = ("remote_env_vars", "windows_shell")
+DEPENDENCY_KEYS = ("depends_on", "start_after")
+START_DEPENDENCY_KEYS = ("start_depends_on", "start_after", "depends_on")
+STOP_DEPENDENCY_KEYS = ("stop_depends_on", "stop_after")
+DEFAULT_TOPOLOGY_KEYS = ("base", "default", "defaults")
+FLAT_TOPOLOGY_KEYS = ("host_defaults", "host_group_defaults", "host_groups", "variables")
+TOPOLOGY_METADATA_KEYS = (
+    "host_defaults",
+    "host_group_defaults",
+    "host_groups",
+    "variables",
+)
+RUNTIME_OVERRIDE_KEYS = (
+    "task_type",
+    "type",
+    "commands",
+    "working_dir",
+    "remote_env_vars",
+    "sudo_mode",
+    "command_timeout_seconds",
+    "windows_shell",
+)
 
 
 @dataclass(frozen=True)
@@ -188,6 +209,35 @@ def first_config_value(data: dict[str, Any], keys: tuple[str, ...], default: Any
     return default
 
 
+def dependency_fields_from_config(
+    data: dict[str, Any],
+    *,
+    depends_on_default: tuple[str, ...] = (),
+    start_depends_on_default: tuple[str, ...] | None = None,
+    stop_depends_on_default: tuple[str, ...] = (),
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    depends_on = normalize_string_tuple(
+        first_config_value(data, DEPENDENCY_KEYS, depends_on_default)
+    )
+    if start_depends_on_default is None:
+        start_depends_on_default = depends_on
+    start_depends_on = normalize_string_tuple(
+        first_config_value(data, START_DEPENDENCY_KEYS, start_depends_on_default)
+    )
+    stop_depends_on = normalize_string_tuple(
+        first_config_value(data, STOP_DEPENDENCY_KEYS, stop_depends_on_default)
+    )
+    return depends_on, start_depends_on, stop_depends_on
+
+
+def optional_json_object(value: Any, *, name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError(f"{name} must be a JSON object.")
+    return value
+
+
 def deep_merge_dicts(*items: dict | None) -> dict:
     merged: dict = {}
     for item in items:
@@ -239,39 +289,31 @@ def build_env_tokens(topology: dict, current_env: str) -> dict[str, str]:
 
 def get_default_environment_topology(environments: dict[str, Any]) -> dict[str, Any]:
     default_topology: dict[str, Any] = {}
-    for key in ("base", "default", "defaults"):
+    for key in DEFAULT_TOPOLOGY_KEYS:
         raw_topology = environments.get(key)
         if raw_topology is None:
             continue
-        if not isinstance(raw_topology, dict):
-            raise TypeError(f"Workflow environment '{key}' topology must be a JSON object.")
-        default_topology = deep_merge_dicts(default_topology, raw_topology)
+        default_topology = deep_merge_dicts(
+            default_topology,
+            optional_json_object(
+                raw_topology,
+                name=f"Workflow environment '{key}' topology",
+            ),
+        )
     return default_topology
 
 
 def resolve_topology_for_env(workflow: SystemdWorkflowDefinition, current_env: str) -> dict:
-    environments = workflow.environments or {}
-    if not isinstance(environments, dict):
-        raise TypeError("Workflow environments must be a JSON object.")
-
+    environments = optional_json_object(workflow.environments, name="Workflow environments")
     default_topology = get_default_environment_topology(environments)
-    env_topology = environments.get(current_env, {})
-    if env_topology is None:
-        env_topology = {}
-    if not isinstance(env_topology, dict):
-        raise TypeError(f"Workflow environment '{current_env}' topology must be a JSON object.")
-
+    env_topology = optional_json_object(
+        environments.get(current_env),
+        name=f"Workflow environment '{current_env}' topology",
+    )
     topology = deep_merge_dicts(default_topology, env_topology)
     topology.setdefault("host_groups", {})
     return topology
 
-
-TOPOLOGY_METADATA_KEYS = {
-    "host_defaults",
-    "host_group_defaults",
-    "host_groups",
-    "variables",
-}
 
 def extract_host_defaults_from_topology(topology: dict[str, Any]) -> dict[str, Any]:
     defaults = {
@@ -298,16 +340,15 @@ def apply_host_group_env_overrides(
     env_overrides = host_group_config.get("environments")
     if env_overrides is None:
         return host_group_config
-    if not isinstance(env_overrides, dict):
-        raise TypeError(f"Host group '{host_group_id}' environments must be a JSON object.")
+    env_overrides = optional_json_object(
+        env_overrides,
+        name=f"Host group '{host_group_id}' environments",
+    )
 
-    env_config = env_overrides.get(current_env)
-    if env_config is None:
-        env_config = {}
-    if not isinstance(env_config, dict):
-        raise TypeError(
-            f"Host group '{host_group_id}' environment '{current_env}' must be a JSON object."
-        )
+    env_config = optional_json_object(
+        env_overrides.get(current_env),
+        name=f"Host group '{host_group_id}' environment '{current_env}'",
+    )
 
     base_config = {
         key: value
@@ -361,16 +402,7 @@ def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
     if systemd_overrides:
         overrides["systemd"] = systemd_overrides
 
-    for key in (
-        "task_type",
-        "type",
-        "commands",
-        "working_dir",
-        "remote_env_vars",
-        "sudo_mode",
-        "command_timeout_seconds",
-        "windows_shell",
-    ):
+    for key in RUNTIME_OVERRIDE_KEYS:
         if key in config:
             overrides[key] = config[key]
 
@@ -521,6 +553,39 @@ def target_matches(validated: dict, task_id: str, group_id: str | None) -> bool:
     raise ValueError(f"Unsupported target_scope '{target_scope}'.")
 
 
+def render_task_templates(task_spec: WorkflowTaskSpec, tokens: dict[str, str]) -> WorkflowTaskSpec:
+    return replace(
+        task_spec,
+        sudo_user=render_template_value(task_spec.sudo_user, tokens),
+        ssh_user=render_template_value(task_spec.ssh_user, tokens),
+        ssh_conn_id=render_template_value(task_spec.ssh_conn_id, tokens),
+        host_group=render_template_value(task_spec.host_group, tokens),
+        platform=render_template_value(task_spec.platform, tokens),
+        systemd=render_template_value(task_spec.systemd, tokens),
+        commands=render_template_value(task_spec.commands, tokens),
+        working_dir=render_template_value(task_spec.working_dir, tokens),
+        remote_env_vars=render_template_value(task_spec.remote_env_vars, tokens),
+        depends_on=render_template_value(task_spec.depends_on, tokens),
+        start_depends_on=render_template_value(task_spec.start_depends_on, tokens),
+        stop_depends_on=render_template_value(task_spec.stop_depends_on, tokens),
+        env_overrides=None,
+    )
+
+
+def render_group_templates(
+    group_spec: WorkflowTaskGroupSpec,
+    tokens: dict[str, str],
+) -> WorkflowTaskGroupSpec:
+    return replace(
+        group_spec,
+        tooltip=render_template_value(group_spec.tooltip, tokens),
+        depends_on=render_template_value(group_spec.depends_on, tokens),
+        start_depends_on=render_template_value(group_spec.start_depends_on, tokens),
+        stop_depends_on=render_template_value(group_spec.stop_depends_on, tokens),
+        env_overrides=None,
+    )
+
+
 def is_enabled_for_env(
     *,
     enabled: bool,
@@ -537,25 +602,16 @@ def apply_task_env_overrides(
 ) -> WorkflowTaskSpec:
     override = (task_spec.env_overrides or {}).get(current_env, {})
     if not override:
-        return replace(
-            task_spec,
-            sudo_user=render_template_value(task_spec.sudo_user, tokens),
-            ssh_user=render_template_value(task_spec.ssh_user, tokens),
-            ssh_conn_id=render_template_value(task_spec.ssh_conn_id, tokens),
-            host_group=render_template_value(task_spec.host_group, tokens),
-            platform=render_template_value(task_spec.platform, tokens),
-            systemd=render_template_value(task_spec.systemd, tokens),
-            commands=render_template_value(task_spec.commands, tokens),
-            working_dir=render_template_value(task_spec.working_dir, tokens),
-            remote_env_vars=render_template_value(task_spec.remote_env_vars, tokens),
-            depends_on=render_template_value(task_spec.depends_on, tokens),
-            start_depends_on=render_template_value(task_spec.start_depends_on, tokens),
-            stop_depends_on=render_template_value(task_spec.stop_depends_on, tokens),
-            env_overrides=None,
-        )
+        return render_task_templates(task_spec, tokens)
 
     merged_systemd = deep_merge_dicts(task_spec.systemd, override.get("systemd"))
     merged_commands = deep_merge_dicts(task_spec.commands, override.get("commands"))
+    depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(
+        override,
+        depends_on_default=task_spec.depends_on,
+        start_depends_on_default=task_spec.start_depends_on,
+        stop_depends_on_default=task_spec.stop_depends_on,
+    )
 
     resolved = replace(
         task_spec,
@@ -571,23 +627,9 @@ def apply_task_env_overrides(
         systemd=merged_systemd,
         commands=merged_commands,
         working_dir=override.get("working_dir", task_spec.working_dir),
-        depends_on=normalize_string_tuple(
-            first_config_value(override, ("depends_on", "start_after"), task_spec.depends_on)
-        ),
-        start_depends_on=normalize_string_tuple(
-            first_config_value(
-                override,
-                ("start_depends_on", "start_after", "depends_on"),
-                task_spec.start_depends_on,
-            )
-        ),
-        stop_depends_on=normalize_string_tuple(
-            first_config_value(
-                override,
-                ("stop_depends_on", "stop_after"),
-                task_spec.stop_depends_on,
-            )
-        ),
+        depends_on=depends_on,
+        start_depends_on=start_depends_on,
+        stop_depends_on=stop_depends_on,
         enabled_in_envs=normalize_string_tuple(
             override.get("enabled_in_envs", task_spec.enabled_in_envs)
         ),
@@ -602,21 +644,7 @@ def apply_task_env_overrides(
         env_overrides=None,
     )
 
-    return replace(
-        resolved,
-        sudo_user=render_template_value(resolved.sudo_user, tokens),
-        ssh_user=render_template_value(resolved.ssh_user, tokens),
-        ssh_conn_id=render_template_value(resolved.ssh_conn_id, tokens),
-        host_group=render_template_value(resolved.host_group, tokens),
-        platform=render_template_value(resolved.platform, tokens),
-        systemd=render_template_value(resolved.systemd, tokens),
-        commands=render_template_value(resolved.commands, tokens),
-        working_dir=render_template_value(resolved.working_dir, tokens),
-        remote_env_vars=render_template_value(resolved.remote_env_vars, tokens),
-        depends_on=render_template_value(resolved.depends_on, tokens),
-        start_depends_on=render_template_value(resolved.start_depends_on, tokens),
-        stop_depends_on=render_template_value(resolved.stop_depends_on, tokens),
-    )
+    return render_task_templates(resolved, tokens)
 
 
 def apply_group_env_overrides(
@@ -625,26 +653,18 @@ def apply_group_env_overrides(
     tokens: dict[str, str],
 ) -> WorkflowTaskGroupSpec:
     override = (group_spec.env_overrides or {}).get(current_env, {})
+    depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(
+        override,
+        depends_on_default=group_spec.depends_on,
+        start_depends_on_default=group_spec.start_depends_on,
+        stop_depends_on_default=group_spec.stop_depends_on,
+    )
     resolved = replace(
         group_spec,
         tooltip=override.get("tooltip", group_spec.tooltip),
-        depends_on=normalize_string_tuple(
-            first_config_value(override, ("depends_on", "start_after"), group_spec.depends_on)
-        ),
-        start_depends_on=normalize_string_tuple(
-            first_config_value(
-                override,
-                ("start_depends_on", "start_after", "depends_on"),
-                group_spec.start_depends_on,
-            )
-        ),
-        stop_depends_on=normalize_string_tuple(
-            first_config_value(
-                override,
-                ("stop_depends_on", "stop_after"),
-                group_spec.stop_depends_on,
-            )
-        ),
+        depends_on=depends_on,
+        start_depends_on=start_depends_on,
+        stop_depends_on=stop_depends_on,
         enabled_in_envs=normalize_string_tuple(
             override.get("enabled_in_envs", group_spec.enabled_in_envs)
         ),
@@ -652,13 +672,7 @@ def apply_group_env_overrides(
         enabled=bool(override.get("enabled", group_spec.enabled)),
         env_overrides=None,
     )
-    return replace(
-        resolved,
-        tooltip=render_template_value(resolved.tooltip, tokens),
-        depends_on=render_template_value(resolved.depends_on, tokens),
-        start_depends_on=render_template_value(resolved.start_depends_on, tokens),
-        stop_depends_on=render_template_value(resolved.stop_depends_on, tokens),
-    )
+    return render_group_templates(resolved, tokens)
 
 
 def resolve_hosts_for_task(
@@ -1769,16 +1783,7 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
         scope=f"Task '{data.get('task_id', '<unknown>')}'",
     )
     task_type = data.get("task_type", data.get("type", "systemd"))
-    depends_on = normalize_string_tuple(
-        first_config_value(data, ("depends_on", "start_after"), ())
-    )
-    start_depends_on = normalize_string_tuple(
-        first_config_value(
-            data,
-            ("start_depends_on", "start_after", "depends_on"),
-            depends_on,
-        )
-    )
+    depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(data)
     return WorkflowTaskSpec(
         task_id=data["task_id"],
         task_type=task_type,
@@ -1795,9 +1800,7 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
         working_dir=data.get("working_dir"),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
-        stop_depends_on=normalize_string_tuple(
-            first_config_value(data, ("stop_depends_on", "stop_after"), ())
-        ),
+        stop_depends_on=stop_depends_on,
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),
@@ -1818,24 +1821,13 @@ def build_task_group_spec_from_config(data: dict) -> WorkflowTaskGroupSpec:
         scope=f"Task group '{data.get('group_id', '<unknown>')}'",
     )
     group_id = data["group_id"]
-    depends_on = normalize_string_tuple(
-        first_config_value(data, ("depends_on", "start_after"), ())
-    )
-    start_depends_on = normalize_string_tuple(
-        first_config_value(
-            data,
-            ("start_depends_on", "start_after", "depends_on"),
-            depends_on,
-        )
-    )
+    depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(data)
     return WorkflowTaskGroupSpec(
         group_id=group_id,
         tooltip=data.get("tooltip"),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
-        stop_depends_on=normalize_string_tuple(
-            first_config_value(data, ("stop_depends_on", "stop_after"), ())
-        ),
+        stop_depends_on=stop_depends_on,
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),
@@ -1885,37 +1877,29 @@ def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, 
 
 
 def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
-    environments = data.get("environments") or data.get("topologies") or {}
-    flat_topology_keys = (
-        "host_defaults",
-        "host_group_defaults",
-        "host_groups",
-        "variables",
+    environments = optional_json_object(
+        data.get("environments") or data.get("topologies"),
+        name="Workflow environments",
     )
     flat_topology = {
         key: data[key]
-        for key in flat_topology_keys
+        for key in FLAT_TOPOLOGY_KEYS
         if key in data
     }
     if not flat_topology:
         return environments
-    if not isinstance(environments, dict):
-        raise TypeError("Workflow environments must be a JSON object.")
     return deep_merge_dicts({"defaults": flat_topology}, environments)
 
 
 def action_metadata_from_config(data: dict, action: str) -> dict[str, Any]:
-    metadata = data.get("dag_metadata") or data.get("dag_overrides") or {}
-    if metadata is None:
-        return {}
-    if not isinstance(metadata, dict):
-        raise TypeError("dag_metadata must be a JSON object.")
-    action_metadata = metadata.get(action, {})
-    if action_metadata is None:
-        return {}
-    if not isinstance(action_metadata, dict):
-        raise TypeError(f"dag_metadata.{action} must be a JSON object.")
-    return action_metadata
+    metadata = optional_json_object(
+        data.get("dag_metadata") or data.get("dag_overrides"),
+        name="dag_metadata",
+    )
+    return optional_json_object(
+        metadata.get(action),
+        name=f"dag_metadata.{action}",
+    )
 
 
 def build_systemd_workflow_definition_from_config(
@@ -1984,25 +1968,25 @@ def default_dag_id_prefix(workflow_id: str) -> str:
     return workflow_id.replace("_", "-")
 
 
-def append_schedule_value(values: list[str], schedule: str | tuple[str, ...] | list[str] | None) -> None:
+def schedule_values(schedule: str | tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
     if schedule is None:
-        return
+        return ()
     if isinstance(schedule, str):
-        candidates = (schedule,)
-    else:
-        candidates = schedule
-    for candidate in candidates:
-        if candidate not in values:
-            values.append(candidate)
+        return (schedule,)
+    return tuple(schedule)
 
 
 def collect_schedule_values(
     pairs: tuple[WorkflowSchedulePair, ...],
     action: str,
 ) -> str | tuple[str, ...] | None:
-    values: list[str] = []
-    for pair in pairs:
-        append_schedule_value(values, pair.start if action == "start" else pair.stop)
+    values = unique_preserving_order(
+        [
+            value
+            for pair in pairs
+            for value in schedule_values(pair.start if action == "start" else pair.stop)
+        ]
+    )
     if not values:
         return None
     if len(values) == 1:
