@@ -387,16 +387,20 @@ def reject_host_group_only_runtime_keys(
             )
 
 
+def extract_systemd_overrides(config: dict[str, Any]) -> dict[str, Any]:
+    systemd_overrides = dict(config.get("systemd") or {})
+    for key in ("platform", "service_name"):
+        if key in config:
+            systemd_overrides[key] = config[key]
+    return systemd_overrides
+
+
 def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     if not config:
         return overrides
 
-    systemd_overrides = dict(config.get("systemd") or {})
-    for key in ("platform", "service_name"):
-        if key in config:
-            systemd_overrides[key] = config[key]
-
+    systemd_overrides = extract_systemd_overrides(config)
     if "platform" in config:
         overrides["platform"] = config["platform"]
     if systemd_overrides:
@@ -604,8 +608,9 @@ def apply_task_env_overrides(
     if not override:
         return render_task_templates(task_spec, tokens)
 
-    merged_systemd = deep_merge_dicts(task_spec.systemd, override.get("systemd"))
-    merged_commands = deep_merge_dicts(task_spec.commands, override.get("commands"))
+    runtime_overrides = extract_task_runtime_overrides(override)
+    merged_systemd = deep_merge_dicts(task_spec.systemd, runtime_overrides.get("systemd"))
+    merged_commands = deep_merge_dicts(task_spec.commands, runtime_overrides.get("commands"))
     depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(
         override,
         depends_on_default=task_spec.depends_on,
@@ -615,7 +620,10 @@ def apply_task_env_overrides(
 
     resolved = replace(
         task_spec,
-        task_type=override.get("task_type", override.get("type", task_spec.task_type)),
+        task_type=runtime_overrides.get(
+            "task_type",
+            runtime_overrides.get("type", task_spec.task_type),
+        ),
         host_group=override.get("host_group", task_spec.host_group),
         sudo_user=override.get("sudo_user", task_spec.sudo_user),
         ssh_user=override.get("ssh_user", task_spec.ssh_user),
@@ -623,10 +631,10 @@ def apply_task_env_overrides(
         ssh_username_env_var=override.get("ssh_username_env_var", task_spec.ssh_username_env_var),
         ssh_password_env_var=override.get("ssh_password_env_var", task_spec.ssh_password_env_var),
         enable_kerberos=override.get("enable_kerberos", task_spec.enable_kerberos),
-        platform=override.get("platform", task_spec.platform),
+        platform=runtime_overrides.get("platform", task_spec.platform),
         systemd=merged_systemd,
         commands=merged_commands,
-        working_dir=override.get("working_dir", task_spec.working_dir),
+        working_dir=runtime_overrides.get("working_dir", task_spec.working_dir),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
         stop_depends_on=stop_depends_on,
@@ -635,10 +643,10 @@ def apply_task_env_overrides(
         ),
         optional=bool(override.get("optional", task_spec.optional)),
         enabled=bool(override.get("enabled", task_spec.enabled)),
-        sudo_mode=override.get("sudo_mode", task_spec.sudo_mode),
+        sudo_mode=runtime_overrides.get("sudo_mode", task_spec.sudo_mode),
         command_timeout_seconds=(
-            int(override["command_timeout_seconds"])
-            if override.get("command_timeout_seconds") is not None
+            int(runtime_overrides["command_timeout_seconds"])
+            if runtime_overrides.get("command_timeout_seconds") is not None
             else task_spec.command_timeout_seconds
         ),
         env_overrides=None,
@@ -1795,7 +1803,7 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
         ssh_password_env_var=data.get("ssh_password_env_var", "SSH_PASSWORD"),
         enable_kerberos=data.get("enable_kerberos"),
         platform=data.get("platform", "rhel8"),
-        systemd=data.get("systemd"),
+        systemd=extract_systemd_overrides(data) or None,
         commands=data.get("commands"),
         working_dir=data.get("working_dir"),
         depends_on=depends_on,
