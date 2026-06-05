@@ -227,7 +227,6 @@ def build_env_tokens(topology: dict, current_env: str) -> dict[str, str]:
     tokens = {
         "env": current_env,
         "loc": get_current_loc_name(),
-        "env_suffix": topology.get("env_suffix", f"_{current_env}"),
     }
     tokens.update({str(key): str(value) for key, value in topology.get("variables", {}).items()})
     return tokens
@@ -263,7 +262,6 @@ def resolve_topology_for_env(workflow: SystemdWorkflowDefinition, current_env: s
 
 
 TOPOLOGY_METADATA_KEYS = {
-    "env_suffix",
     "host_defaults",
     "host_group_defaults",
     "host_groups",
@@ -673,10 +671,6 @@ def resolve_hosts_for_task(
         return ()
 
     group_tokens = dict(tokens)
-    if host_group_defaults.get("env_suffix") is not None:
-        group_tokens["env_suffix"] = str(
-            render_template_value(host_group_defaults["env_suffix"], group_tokens)
-        )
     group_tokens.update(
         {
             str(k): str(render_template_value(v, group_tokens))
@@ -1840,7 +1834,6 @@ def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, 
 def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
     environments = data.get("environments") or data.get("topologies") or {}
     flat_topology_keys = (
-        "env_suffix",
         "host_defaults",
         "host_group_defaults",
         "host_groups",
@@ -1908,33 +1901,50 @@ def default_dag_id_prefix(workflow_id: str) -> str:
     return workflow_id.replace("_", "-")
 
 
-def slugify_dag_id_part(value: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9-]+", "-", value).strip("-").lower()
-    return safe or "schedule"
+def append_schedule_value(values: list[str], schedule: str | tuple[str, ...] | list[str] | None) -> None:
+    if schedule is None:
+        return
+    if isinstance(schedule, str):
+        candidates = (schedule,)
+    else:
+        candidates = schedule
+    for candidate in candidates:
+        if candidate not in values:
+            values.append(candidate)
 
 
-def build_pair_dag_id(
+def collect_schedule_values(
+    pairs: tuple[WorkflowSchedulePair, ...],
+    action: str,
+) -> str | tuple[str, ...] | None:
+    values: list[str] = []
+    for pair in pairs:
+        append_schedule_value(values, pair.start if action == "start" else pair.stop)
+    if not values:
+        return None
+    if len(values) == 1:
+        return values[0]
+    return tuple(values)
+
+
+def build_workflow_action_dag_id(
     *,
     action: str,
     workflow_prefix: str,
-    pair: WorkflowSchedulePair,
-    pair_count: int,
+    enabled_pairs: tuple[WorkflowSchedulePair, ...],
     top_level_dag_ids: dict,
 ) -> str:
-    explicit_dag_id = pair.start_dag_id if action == "start" else pair.stop_dag_id
-    if explicit_dag_id:
-        return explicit_dag_id
+    top_level_dag_id = top_level_dag_ids.get(action)
+    if top_level_dag_id:
+        return top_level_dag_id
 
-    if pair_count == 1:
-        top_level_dag_id = top_level_dag_ids.get(action)
-        if top_level_dag_id:
-            return top_level_dag_id
+    if len(enabled_pairs) == 1:
+        pair = enabled_pairs[0]
+        explicit_dag_id = pair.start_dag_id if action == "start" else pair.stop_dag_id
+        if explicit_dag_id:
+            return explicit_dag_id
 
-    pair_prefix = pair.dag_id_prefix or workflow_prefix
-    if pair_count == 1 and pair.schedule_id == "default":
-        return f"{pair_prefix}-{action}"
-
-    return f"{pair_prefix}-{slugify_dag_id_part(pair.schedule_id)}-{action}"
+    return f"{workflow_prefix}-{action}"
 
 
 def register_systemd_dags_from_json(
@@ -1957,44 +1967,36 @@ def register_systemd_dags_from_json(
     enabled_pairs = tuple(
         pair for pair in workflow.schedule_pairs if current_env in pair.enabled_in_envs
     )
+    if not enabled_pairs:
+        return
 
-    for pair in enabled_pairs:
-        start_dag_id = build_pair_dag_id(
+    start_dag = create_systemd_dag(
+        workflow=workflow,
+        dag_id=build_workflow_action_dag_id(
             action="start",
             workflow_prefix=dag_id_prefix,
-            pair=pair,
-            pair_count=len(enabled_pairs),
+            enabled_pairs=enabled_pairs,
             top_level_dag_ids=dag_ids,
-        )
-        stop_dag_id = build_pair_dag_id(
+        ),
+        action="start",
+        schedule=collect_schedule_values(enabled_pairs, "start"),
+        source_file=config_file,
+    )
+    stop_dag = create_systemd_dag(
+        workflow=workflow,
+        dag_id=build_workflow_action_dag_id(
             action="stop",
             workflow_prefix=dag_id_prefix,
-            pair=pair,
-            pair_count=len(enabled_pairs),
+            enabled_pairs=enabled_pairs,
             top_level_dag_ids=dag_ids,
-        )
-        start_dag = create_systemd_dag(
-            workflow=workflow,
-            dag_id=start_dag_id,
-            action="start",
-            schedule=pair.start,
-            source_file=config_file,
-        )
-        stop_dag = create_systemd_dag(
-            workflow=workflow,
-            dag_id=stop_dag_id,
-            action="stop",
-            schedule=pair.stop,
-            source_file=config_file,
-        )
+        ),
+        action="stop",
+        schedule=collect_schedule_values(enabled_pairs, "stop"),
+        source_file=config_file,
+    )
 
-        global_name_suffix = slugify_dag_id_part(pair.schedule_id).replace("-", "_")
-        if len(enabled_pairs) == 1 and pair.schedule_id == "default":
-            global_namespace[f"{workflow.workflow_id}_start"] = start_dag
-            global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
-        else:
-            global_namespace[f"{workflow.workflow_id}_{global_name_suffix}_start"] = start_dag
-            global_namespace[f"{workflow.workflow_id}_{global_name_suffix}_stop"] = stop_dag
+    global_namespace[f"{workflow.workflow_id}_start"] = start_dag
+    global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
 
 
 def register_systemd_dags_from_json_dir(

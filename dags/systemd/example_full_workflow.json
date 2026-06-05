@@ -28,7 +28,6 @@
       },
       "environments": {
         "dev": {
-          "env_suffix": "_dev",
           "sudo_user": "gwuser_dev",
           "hosts": [
             "dev-gw-01.company.net"
@@ -38,7 +37,6 @@
           }
         },
         "qa": {
-          "env_suffix": "_qa",
           "sudo_user": "gwuser_qa",
           "hosts": [
             "qa-gw-01.company.net",
@@ -49,7 +47,6 @@
           }
         },
         "prod": {
-          "env_suffix": "",
           "sudo_user": "gwuser",
           "hosts": [
             {
@@ -65,7 +62,6 @@
           ]
         },
         "dr": {
-          "env_suffix": "_dr",
           "sudo_user": "gwuser_dr",
           "hosts": [
             "dr-gw-01.company.net"
