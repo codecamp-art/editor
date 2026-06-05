@@ -80,6 +80,11 @@ HOST_GROUP_BULK_TASK_KEYS = (
     "scripts",
     "processes",
 )
+HOST_GROUP_ENV_METADATA_KEYS = (
+    "hosts",
+    "variables",
+    "environments",
+)
 RUNTIME_OVERRIDE_KEYS = (
     "task_type",
     "type",
@@ -191,7 +196,7 @@ class RemoteWorkflowDefinition:
     schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
     actions: tuple[str, ...] = START_STOP_ACTIONS
     target_runtime_envs: tuple[str, ...] = ()
-    target_runtime_envs_enabled_in_envs: tuple[str, ...] = ()
+    enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     environments: dict[str, Any] | None = None
     tags: tuple[str, ...] = ("remote-workflow", "ssh")
     run_description: str = ""
@@ -507,6 +512,19 @@ def task_override_config_from_bulk_item(item: dict[str, Any]) -> dict[str, Any]:
     return override_config
 
 
+def common_task_override_from_host_group_env(env_config: dict[str, Any]) -> dict[str, Any]:
+    override_config: dict[str, Any] = {}
+    for key, value in env_config.items():
+        if key in HOST_GROUP_ENV_METADATA_KEYS or value is None:
+            continue
+        if key in {"service_names", "services", "scripts", "processes"}:
+            continue
+        if key in {"service_name", "commands"} and isinstance(value, list):
+            continue
+        override_config[key] = value
+    return task_override_config_from_bulk_item(override_config)
+
+
 def task_config_from_bulk_item(
     *,
     host_group_id: str,
@@ -636,13 +654,20 @@ def task_configs_from_host_group_bulk_items(
         host_group_id=host_group_id,
         host_group_config=host_group_config,
     ):
+        common_override = common_task_override_from_host_group_env(env_config)
+        if common_override:
+            for task_config in task_configs_by_id.values():
+                merge_task_env_override(task_config, env_name, common_override)
+
         for item in host_group_bulk_items(env_config):
             task_id = bulk_item_task_id(host_group_id, item)
+            item_override = task_override_config_from_bulk_item(item)
+            env_override = deep_merge_dicts(common_override, item_override)
             if task_id in task_configs_by_id:
                 merge_task_env_override(
                     task_configs_by_id[task_id],
                     env_name,
-                    task_override_config_from_bulk_item(item),
+                    env_override,
                 )
                 continue
 
@@ -655,7 +680,7 @@ def task_configs_from_host_group_bulk_items(
             merge_task_env_override(
                 task_config,
                 env_name,
-                task_override_config_from_bulk_item(item),
+                env_override,
             )
 
     return tuple(task_configs_by_id.values())
@@ -676,9 +701,14 @@ def build_generated_task_group_from_host_group(
     if not task_configs:
         return None
 
+    legacy_keys = [key for key in ("task_group", "task_group_id") if key in host_group_config]
+    if legacy_keys:
+        raise ValueError(
+            f"host_group '{host_group_id}' no longer supports {', '.join(legacy_keys)}; "
+            "define task group metadata in generated_task_groups."
+        )
+
     task_group_config = task_group_config or {}
-    if task_group_config is None:
-        task_group_config = {}
     if not isinstance(task_group_config, dict):
         raise TypeError(f"generated_task_groups.{host_group_id} must be a JSON object.")
 
@@ -2680,41 +2710,17 @@ def normalize_workflow_actions(
     return unique_preserving_order(actions)
 
 
-def configured_runtime_envs(
-    data: dict,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def configured_target_runtime_envs(data: dict) -> tuple[str, ...]:
     raw_envs = first_config_value(
         data,
         ("runtime_envs", "target_runtime_envs", "dag_runtime_envs"),
     )
     if raw_envs is None:
-        return (), ()
-
-    if isinstance(raw_envs, dict):
-        targets = normalize_string_tuple(
-            first_config_value(
-                raw_envs,
-                ("targets", "envs", "runtime_envs", "target_runtime_envs"),
-            )
-        )
-        enabled_in_envs = normalize_string_tuple(
-            first_config_value(
-                raw_envs,
-                ("enabled_in_envs", "airflow_envs", "active_in_envs"),
-                data.get("runtime_envs_enabled_in_envs", targets),
-            )
-        )
-    else:
-        targets = normalize_string_tuple(raw_envs)
-        enabled_in_envs = normalize_string_tuple(
-            data.get("runtime_envs_enabled_in_envs", targets)
-        )
-
-    if not targets:
+        return ()
+    envs = normalize_string_tuple(raw_envs)
+    if not envs:
         raise ValueError("runtime_envs must define at least one environment when provided.")
-    if not enabled_in_envs:
-        raise ValueError("runtime_envs enabled_in_envs must define at least one environment.")
-    return targets, enabled_in_envs
+    return envs
 
 
 def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
@@ -2766,7 +2772,6 @@ def build_workflow_definition_from_config(
 ) -> RemoteWorkflowDefinition:
     schedule_pairs = build_schedule_pairs_from_config(data)
     actions = normalize_workflow_actions(data, schedule_pairs)
-    target_runtime_envs, target_runtime_envs_enabled_in_envs = configured_runtime_envs(data)
     environments = build_workflow_environments_from_config(data)
     explicit_task_groups = tuple(
         build_task_group_spec_from_config(group_data)
@@ -2797,8 +2802,8 @@ def build_workflow_definition_from_config(
         upstream_dags_for_stop=upstream_dags_for_action(data, STOP_ACTION),
         schedule_pairs=schedule_pairs,
         actions=actions,
-        target_runtime_envs=target_runtime_envs,
-        target_runtime_envs_enabled_in_envs=target_runtime_envs_enabled_in_envs,
+        target_runtime_envs=configured_target_runtime_envs(data),
+        enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         environments=environments,
         tags=tuple(data.get("tags") or ("remote-workflow", "ssh")),
         run_description=run_metadata.get(
@@ -2937,21 +2942,18 @@ def build_workflow_action_dag_id(
     return default_dag_id_for_action(workflow_prefix, action)
 
 
-def runtime_env_targets_are_enabled(
+def workflow_targets_runtime_envs(
     workflow: RemoteWorkflowDefinition,
     current_env: str,
 ) -> bool:
-    return (
-        bool(workflow.target_runtime_envs)
-        and current_env in workflow.target_runtime_envs_enabled_in_envs
-    )
+    return bool(workflow.target_runtime_envs) and workflow.target_runtime_envs[0] == current_env
 
 
 def effective_target_runtime_envs(
     workflow: RemoteWorkflowDefinition,
     current_env: str,
 ) -> tuple[str, ...]:
-    if runtime_env_targets_are_enabled(workflow, current_env):
+    if workflow_targets_runtime_envs(workflow, current_env):
         return workflow.target_runtime_envs
     return (current_env,)
 
@@ -2986,13 +2988,16 @@ def register_workflow_dags_from_json(
         config,
         default_workflow_id=default_workflow_id_from_path(config_path, root_path),
     )
+    current_env = get_current_env_name()
+    if current_env not in workflow.enabled_in_envs:
+        return
+
     dag_id_prefix = config.get("dag_id_prefix", default_dag_id_prefix(workflow.workflow_id))
     dag_ids = dict(config.get("dag_ids", {}))
     if config.get("dag_id"):
         dag_ids.setdefault(RUN_ACTION, config["dag_id"])
-    current_env = get_current_env_name()
+    include_env_in_dag_id = workflow_targets_runtime_envs(workflow, current_env)
     target_envs = effective_target_runtime_envs(workflow, current_env)
-    include_env_in_dag_id = runtime_env_targets_are_enabled(workflow, current_env)
     for target_env in target_envs:
         enabled_pairs = tuple(
             pair for pair in workflow.schedule_pairs if target_env in pair.enabled_in_envs

@@ -258,6 +258,7 @@ class RemoteWorkflowTest(unittest.TestCase):
                             {
                                 "task_id": "gateway",
                                 "service_name": "gateway.service",
+                                "sudo_user": "gateway_base",
                             },
                             {
                                 "task_id": "pricing",
@@ -293,8 +294,8 @@ class RemoteWorkflowTest(unittest.TestCase):
                                 ],
                             },
                             "dr": {
-                                "hosts": ["dr-shared-01.company.net"],
                                 "sudo_user": "shared_dr",
+                                "hosts": ["dr-shared-01.company.net"],
                                 "service_name": [
                                     {
                                         "task_id": "pricing",
@@ -362,6 +363,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         )
         self.assertIn("gateway.service", gateway_command)
         self.assertIn("shared_prod", gateway_command)
+        self.assertNotIn("gateway_base", gateway_command)
 
         pricing_task = next(task for task in plan.tasks if task.task_id == "pricing")
         pricing_host = plan.hosts_by_task_id["pricing"][0]
@@ -417,6 +419,7 @@ class RemoteWorkflowTest(unittest.TestCase):
             action="start",
         )
         self.assertIn("/opt/cache/dr/current", dr_cache_command)
+        self.assertIn("shared_dr", dr_cache_command)
 
         dr_replay_task = next(task for task in dr_plan.tasks if task.task_id == "dr_replay_check")
         dr_replay_host = dr_plan.hosts_by_task_id["dr_replay_check"][0]
@@ -430,6 +433,23 @@ class RemoteWorkflowTest(unittest.TestCase):
         )
         self.assertIn("./replay-check start", dr_replay_command)
         self.assertIn("replayops", dr_replay_command)
+
+    def test_legacy_host_group_task_group_field_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no longer supports task_group"):
+            build_workflow_definition_from_config(
+                {
+                    "host_groups": {
+                        "shared_server": {
+                            "hosts": ["prod-shared-01.company.net"],
+                            "services": ["gateway.service"],
+                            "task_group": {
+                                "group_id": "shared_server_services",
+                            },
+                        },
+                    },
+                },
+                default_workflow_id="shared",
+            )
 
     def test_run_workflow_uses_single_run_action_and_depends_on_graph(self) -> None:
         workflow = build_workflow_definition_from_config(
@@ -550,10 +570,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         from unittest.mock import patch
 
         config = {
-            "runtime_envs": {
-                "enabled_in_envs": ["prod"],
-                "targets": ["prod", "dr"],
-            },
+            "runtime_envs": ["prod", "dr"],
             "schedules": {
                 "start": "0 7 * * 1-5",
                 "stop": "0 19 * * 1-5",
@@ -582,16 +599,16 @@ class RemoteWorkflowTest(unittest.TestCase):
             config_path.write_text(json.dumps(config), encoding="utf-8")
             registered = {}
 
-            with patch("workflow.remote_workflow.get_current_env_name", return_value="prod"):
-                with patch(
-                    "workflow.remote_workflow.create_workflow_dag",
-                    side_effect=lambda **kwargs: {
-                        "dag_id": kwargs["dag_id"],
-                        "action": kwargs["action"],
-                        "schedule": kwargs["schedule"],
-                        "target_env": kwargs["target_env"],
-                    },
-                ):
+            with patch(
+                "workflow.remote_workflow.create_workflow_dag",
+                side_effect=lambda **kwargs: {
+                    "dag_id": kwargs["dag_id"],
+                    "action": kwargs["action"],
+                    "schedule": kwargs["schedule"],
+                    "target_env": kwargs["target_env"],
+                },
+            ):
+                with patch("workflow.remote_workflow.get_current_env_name", return_value="prod"):
                     register_workflow_dags_from_json(
                         config_file=config_path,
                         global_namespace=registered,
@@ -612,17 +629,14 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(registered["platform_dr_stop"]["dag_id"], "platform-dr-stop")
         self.assertEqual(registered["platform_dr_stop"]["target_env"], "dr")
 
-    def test_runtime_envs_are_ignored_when_current_airflow_env_is_not_enabled(self) -> None:
+    def test_runtime_envs_fallback_to_current_env_when_not_primary_env(self) -> None:
         import json
         import tempfile
         from pathlib import Path
         from unittest.mock import patch
 
         config = {
-            "runtime_envs": {
-                "enabled_in_envs": ["prod"],
-                "targets": ["prod", "dr"],
-            },
+            "runtime_envs": ["prod", "dr"],
             "schedules": {
                 "start": "0 7 * * 1-5",
                 "stop": "0 19 * * 1-5",
@@ -648,15 +662,15 @@ class RemoteWorkflowTest(unittest.TestCase):
             config_path.write_text(json.dumps(config), encoding="utf-8")
             registered = {}
 
-            with patch("workflow.remote_workflow.get_current_env_name", return_value="qa"):
-                with patch(
-                    "workflow.remote_workflow.create_workflow_dag",
-                    side_effect=lambda **kwargs: {
-                        "dag_id": kwargs["dag_id"],
-                        "action": kwargs["action"],
-                        "target_env": kwargs["target_env"],
-                    },
-                ):
+            with patch(
+                "workflow.remote_workflow.create_workflow_dag",
+                side_effect=lambda **kwargs: {
+                    "dag_id": kwargs["dag_id"],
+                    "action": kwargs["action"],
+                    "target_env": kwargs["target_env"],
+                },
+            ):
+                with patch("workflow.remote_workflow.get_current_env_name", return_value="qa"):
                     register_workflow_dags_from_json(
                         config_file=config_path,
                         global_namespace=registered,
@@ -667,6 +681,46 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(registered["platform_start"]["dag_id"], "platform-start")
         self.assertEqual(registered["platform_start"]["target_env"], "qa")
 
+    def test_enabled_in_envs_skips_workflow_file_for_current_env(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        config = {
+            "enabled_in_envs": ["dev", "qa"],
+            "actions": ["run"],
+            "schedules": {
+                "run": "15 9 * * 1-5",
+            },
+            "host_groups": {
+                "batch": {
+                    "type": "linux_script",
+                    "hosts": ["prod-batch-01.company.net"],
+                    "commands": {
+                        "run": "./bin/run-job",
+                    },
+                },
+            },
+            "tasks": [
+                {"task_id": "batch", "host_group": "batch"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "daily.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            registered = {}
+
+            with patch("workflow.remote_workflow.get_current_env_name", return_value="prod"):
+                register_workflow_dags_from_json(
+                    config_file=config_path,
+                    global_namespace=registered,
+                    config_root=Path(tmp),
+                )
+
+        self.assertEqual(registered, {})
+
     def test_register_run_workflow_can_target_multiple_runtime_envs(self) -> None:
         import json
         import tempfile
@@ -674,10 +728,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         from unittest.mock import patch
 
         config = {
-            "runtime_envs": {
-                "enabled_in_envs": ["prod"],
-                "targets": ["prod", "dr"],
-            },
+            "runtime_envs": ["prod", "dr"],
             "actions": ["run"],
             "schedules": {
                 "run": "15 9 * * 1-5",
@@ -708,15 +759,15 @@ class RemoteWorkflowTest(unittest.TestCase):
             config_path.write_text(json.dumps(config), encoding="utf-8")
             registered = {}
 
-            with patch("workflow.remote_workflow.get_current_env_name", return_value="prod"):
-                with patch(
-                    "workflow.remote_workflow.create_workflow_dag",
-                    side_effect=lambda **kwargs: {
-                        "dag_id": kwargs["dag_id"],
-                        "action": kwargs["action"],
-                        "target_env": kwargs["target_env"],
-                    },
-                ):
+            with patch(
+                "workflow.remote_workflow.create_workflow_dag",
+                side_effect=lambda **kwargs: {
+                    "dag_id": kwargs["dag_id"],
+                    "action": kwargs["action"],
+                    "target_env": kwargs["target_env"],
+                },
+            ):
+                with patch("workflow.remote_workflow.get_current_env_name", return_value="prod"):
                     register_workflow_dags_from_json(
                         config_file=config_path,
                         global_namespace=registered,

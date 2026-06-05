@@ -1,14 +1,14 @@
 {
   "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates a complete self-contained remote workflow config.",
-  "runtime_envs": {
-    "enabled_in_envs": [
-      "prod"
-    ],
-    "targets": [
-      "prod",
-      "dr"
-    ]
-  },
+  "enabled_in_envs": [
+    "dev",
+    "qa",
+    "prod"
+  ],
+  "runtime_envs": [
+    "prod",
+    "dr"
+  ],
   "schedule_pairs": [
     {
       "start": "0 6 * * 1-5",
@@ -312,11 +312,11 @@
       ],
       "environments": {
         "prod": {
-          "sudo_user": "sharedapp_prod",
+          "sudo_user": "shared_app_prod",
           "services": [
             {
               "task_id": "position_api",
-              "working_dir": "/opt/position/prod/current"
+              "sudo_user": "positionapp_prod"
             }
           ],
           "scripts": [
@@ -330,11 +330,11 @@
           ]
         },
         "dr": {
-          "sudo_user": "sharedapp_dr",
+          "sudo_user": "shared_app_dr",
           "services": [
             {
               "task_id": "position_api",
-              "working_dir": "/opt/position/dr/current"
+              "sudo_user": "positionapp_dr"
             },
             {
               "task_id": "dr_replay_api",
