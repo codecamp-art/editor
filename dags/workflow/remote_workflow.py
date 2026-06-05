@@ -38,6 +38,7 @@ from common.remote_command import (
     build_env_exports,
     build_sudo_bash_command,
     shell_join,
+    split_extra_args,
     validate_sudo_mode,
 )
 from common.ssh_hook import MSSSHHook, execute_ssh_command
@@ -66,8 +67,10 @@ RUNTIME_OVERRIDE_KEYS = (
     "task_type",
     "type",
     "commands",
+    "fields",
     "working_dir",
     "remote_env_vars",
+    "preset_params",
     "sudo_mode",
     "command_timeout_seconds",
     "windows_shell",
@@ -111,8 +114,10 @@ class WorkflowTaskSpec:
     platform: str = "rhel8"
     systemd: dict[str, Any] | None = None
     commands: dict[str, Any] | None = None
+    fields: dict[str, Any] | None = None
     working_dir: str | None = None
     remote_env_vars: dict[str, Any] | None = None
+    preset_params: dict[str, Any] | None = None
     depends_on: tuple[str, ...] = ()
     start_depends_on: tuple[str, ...] = ()
     stop_depends_on: tuple[str, ...] = ()
@@ -435,7 +440,12 @@ def apply_task_runtime_overrides(
     rendered = render_template_value(overrides, tokens or {})
     merged_systemd = deep_merge_dicts(task_spec.systemd, rendered.get("systemd"))
     merged_commands = deep_merge_dicts(task_spec.commands, rendered.get("commands"))
+    merged_fields = deep_merge_dicts(task_spec.fields, rendered.get("fields"))
     merged_env_vars = deep_merge_dicts(task_spec.remote_env_vars, rendered.get("remote_env_vars"))
+    merged_preset_params = deep_merge_dicts(
+        task_spec.preset_params,
+        rendered.get("preset_params"),
+    )
 
     return replace(
         task_spec,
@@ -443,8 +453,10 @@ def apply_task_runtime_overrides(
         platform=rendered.get("platform", task_spec.platform),
         systemd=merged_systemd or None,
         commands=merged_commands or None,
+        fields=merged_fields or None,
         working_dir=rendered.get("working_dir", task_spec.working_dir),
         remote_env_vars=merged_env_vars or None,
+        preset_params=merged_preset_params or None,
         sudo_mode=rendered.get("sudo_mode", task_spec.sudo_mode),
         command_timeout_seconds=(
             int(rendered["command_timeout_seconds"])
@@ -526,6 +538,112 @@ def build_workflow_airflow_fields(
     )
 
 
+def field_definitions_with_defaults(
+    fields: dict[str, Any] | None,
+    preset_params: dict[str, Any] | None,
+) -> dict[str, Any]:
+    resolved_fields = deep_merge_dicts(fields)
+    for field_name, default_value in (preset_params or {}).items():
+        if field_name in resolved_fields:
+            resolved_fields[field_name] = {
+                **resolved_fields[field_name],
+                "default": default_value,
+            }
+    return resolved_fields
+
+
+def build_script_airflow_fields(plan: WorkflowPlan) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for task_spec in plan.tasks:
+        task_hosts = plan.hosts_by_task_id.get(task_spec.task_id, ())
+        for host_target in task_hosts:
+            effective_task = apply_task_runtime_overrides(
+                task_spec,
+                host_target.task_overrides,
+            )
+            if effective_task.task_type not in {"linux_script", "windows_script"}:
+                continue
+            fields = merge_field_definitions(
+                fields,
+                field_definitions_with_defaults(
+                    effective_task.fields,
+                    effective_task.preset_params,
+                ),
+            )
+    return fields
+
+
+def merge_params_with_priority(*param_maps: dict[str, Any] | None) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for item in param_maps:
+        if item:
+            merged.update(item)
+    return merged
+
+
+def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
+    args: list[str] = []
+
+    for field_name, spec in fields.items():
+        if spec.get("include_in_cli", True) is False:
+            continue
+
+        value = validated.get(field_name)
+        if value in (None, "") or (isinstance(value, list) and not value):
+            continue
+
+        cli_name = spec.get("cli_name", field_name)
+        transform = spec.get("transform")
+
+        if transform == "lower_bool":
+            value = str(bool(value)).lower()
+        elif isinstance(value, list):
+            value = spec.get("cli_joiner", ",").join(str(item) for item in value)
+
+        args.append(f"--{cli_name}={value}")
+
+    return args
+
+
+def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
+    env_vars: dict[str, str] = {}
+
+    for field_name, spec in fields.items():
+        if spec.get("export_to_env") is not True:
+            continue
+
+        value = validated.get(field_name)
+        if value in (None, "") or (isinstance(value, list) and not value):
+            continue
+
+        env_name = spec.get("env_name")
+        if not env_name:
+            continue
+
+        transform = spec.get("env_transform")
+        if transform == "lower_bool":
+            value = str(bool(value)).lower()
+        elif isinstance(value, list):
+            value = spec.get("env_joiner", ",").join(str(item) for item in value)
+
+        env_vars[env_name] = str(value)
+
+    return env_vars
+
+
+def resolve_script_runtime_params(
+    *,
+    validated_params: dict[str, Any] | None,
+    task_spec: WorkflowTaskSpec,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    fields = task_spec.fields or {}
+    resolved_params = merge_params_with_priority(
+        task_spec.preset_params,
+        validated_params or {},
+    )
+    return resolved_params, fields
+
+
 def resolve_requested_action(validated: dict, dag_action: str) -> str:
     requested = validated.get("control_action") or "default"
     return dag_action if requested == "default" else requested
@@ -592,8 +710,10 @@ def render_task_templates(task_spec: WorkflowTaskSpec, tokens: dict[str, str]) -
         platform=render_template_value(task_spec.platform, tokens),
         systemd=render_template_value(task_spec.systemd, tokens),
         commands=render_template_value(task_spec.commands, tokens),
+        fields=render_template_value(task_spec.fields, tokens),
         working_dir=render_template_value(task_spec.working_dir, tokens),
         remote_env_vars=render_template_value(task_spec.remote_env_vars, tokens),
+        preset_params=render_template_value(task_spec.preset_params, tokens),
         depends_on=render_template_value(task_spec.depends_on, tokens),
         start_depends_on=render_template_value(task_spec.start_depends_on, tokens),
         stop_depends_on=render_template_value(task_spec.stop_depends_on, tokens),
@@ -636,6 +756,11 @@ def apply_task_env_overrides(
     runtime_overrides = extract_task_runtime_overrides(override)
     merged_systemd = deep_merge_dicts(task_spec.systemd, runtime_overrides.get("systemd"))
     merged_commands = deep_merge_dicts(task_spec.commands, runtime_overrides.get("commands"))
+    merged_fields = deep_merge_dicts(task_spec.fields, runtime_overrides.get("fields"))
+    merged_preset_params = deep_merge_dicts(
+        task_spec.preset_params,
+        runtime_overrides.get("preset_params"),
+    )
     depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(
         override,
         depends_on_default=task_spec.depends_on,
@@ -659,6 +784,7 @@ def apply_task_env_overrides(
         platform=runtime_overrides.get("platform", task_spec.platform),
         systemd=merged_systemd,
         commands=merged_commands,
+        fields=merged_fields or None,
         working_dir=runtime_overrides.get("working_dir", task_spec.working_dir),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
@@ -668,6 +794,7 @@ def apply_task_env_overrides(
         ),
         optional=bool(override.get("optional", task_spec.optional)),
         enabled=bool(override.get("enabled", task_spec.enabled)),
+        preset_params=merged_preset_params or None,
         sudo_mode=runtime_overrides.get("sudo_mode", task_spec.sudo_mode),
         command_timeout_seconds=(
             int(runtime_overrides["command_timeout_seconds"])
@@ -1229,12 +1356,18 @@ def build_systemd_service_command(
 def build_linux_shell_command(
     *,
     raw_command: Any,
+    app_args: list[str] | None,
     sudo_user: str | None,
     working_dir: str | None,
     remote_env_vars: dict[str, Any] | None,
     sudo_mode: str,
 ) -> str:
-    command_text = shell_join(str(part) for part in raw_command) if isinstance(raw_command, list) else str(raw_command)
+    command_args = app_args or []
+    command_text = (
+        shell_join([*(str(part) for part in raw_command), *command_args])
+        if isinstance(raw_command, list)
+        else " ".join(part for part in (str(raw_command), shell_join(command_args)) if part)
+    )
     prefix_parts: list[str] = []
     if working_dir:
         prefix_parts.append(f"cd {shlex.quote(working_dir)}")
@@ -1262,11 +1395,17 @@ def powershell_quote(value: str) -> str:
 def build_windows_command(
     *,
     raw_command: Any,
+    app_args: list[str] | None,
     shell: str,
     working_dir: str | None,
     remote_env_vars: dict[str, Any] | None,
 ) -> str:
-    command_text = " ".join(str(part) for part in raw_command) if isinstance(raw_command, list) else str(raw_command)
+    command_args = app_args or []
+    command_text = (
+        " ".join([*(str(part) for part in raw_command), *command_args])
+        if isinstance(raw_command, list)
+        else " ".join(part for part in (str(raw_command), " ".join(command_args)) if part)
+    )
 
     if shell == "raw":
         return command_text
@@ -1304,6 +1443,7 @@ def build_remote_task_command(
     task_spec: WorkflowTaskSpec,
     host_target: HostTarget,
     action: str,
+    validated_params: dict[str, Any] | None = None,
 ) -> str:
     if task_spec.task_type == "systemd":
         return build_systemd_service_command(
@@ -1316,22 +1456,36 @@ def build_remote_task_command(
     if action not in commands:
         raise ValueError(f"Task '{task_spec.task_id}' has no command for action '{action}'.")
 
+    script_params, script_fields = resolve_script_runtime_params(
+        validated_params=validated_params,
+        task_spec=task_spec,
+    )
+    app_args = [
+        *build_args_from_fields(script_params, script_fields),
+        *split_extra_args(script_params.get("extra_args")),
+    ]
+    remote_env_vars = deep_merge_dicts(
+        task_spec.remote_env_vars,
+        build_env_vars_from_fields(script_params, script_fields),
+    )
     sudo_user = host_target.sudo_user or task_spec.sudo_user
     if task_spec.task_type == "linux_script":
         return build_linux_shell_command(
             raw_command=commands[action],
+            app_args=app_args,
             sudo_user=sudo_user,
             working_dir=task_spec.working_dir,
-            remote_env_vars=task_spec.remote_env_vars,
+            remote_env_vars=remote_env_vars,
             sudo_mode=task_spec.sudo_mode,
         )
 
     if task_spec.task_type == "windows_script":
         return build_windows_command(
             raw_command=commands[action],
+            app_args=app_args,
             shell=task_spec.windows_shell,
             working_dir=task_spec.working_dir,
-            remote_env_vars=task_spec.remote_env_vars,
+            remote_env_vars=remote_env_vars,
         )
 
     raise ValueError(f"Unsupported task_type '{task_spec.task_type}'.")
@@ -1350,8 +1504,10 @@ def task_spec_to_payload(task_spec: WorkflowTaskSpec) -> dict[str, Any]:
         "platform": task_spec.platform,
         "systemd": task_spec.systemd,
         "commands": task_spec.commands,
+        "fields": task_spec.fields,
         "working_dir": task_spec.working_dir,
         "remote_env_vars": task_spec.remote_env_vars,
+        "preset_params": task_spec.preset_params,
         "sudo_mode": task_spec.sudo_mode,
         "command_timeout_seconds": task_spec.command_timeout_seconds,
         "windows_shell": task_spec.windows_shell,
@@ -1373,8 +1529,10 @@ def task_spec_from_payload(payload: dict[str, Any]) -> WorkflowTaskSpec:
         platform=payload.get("platform", "rhel8"),
         systemd=payload.get("systemd"),
         commands=payload.get("commands"),
+        fields=payload.get("fields"),
         working_dir=payload.get("working_dir"),
         remote_env_vars=payload.get("remote_env_vars"),
+        preset_params=payload.get("preset_params"),
         sudo_mode=payload.get("sudo_mode", "login"),
         command_timeout_seconds=payload.get("command_timeout_seconds"),
         windows_shell=payload.get("windows_shell", "powershell"),
@@ -1507,8 +1665,12 @@ def create_workflow_dag(
 
     task_ids = tuple(task_spec.task_id for task_spec in plan.tasks)
     group_ids = tuple(group_spec.group_id for group_spec in plan.groups)
+    extra_fields = merge_field_definitions(
+        workflow.fields,
+        build_script_airflow_fields(plan),
+    )
     airflow_fields = build_workflow_airflow_fields(
-        extra_fields=workflow.fields,
+        extra_fields=extra_fields,
         task_ids=task_ids,
         task_group_ids=group_ids,
         include_control_action=action in START_STOP_ACTIONS,
@@ -1641,6 +1803,7 @@ def create_workflow_dag(
                 task_spec=task_spec,
                 host_target=host_target,
                 action=selected_action,
+                validated_params=validated,
             )
             cmd_timeout = (
                 task_spec.command_timeout_seconds
@@ -1870,7 +2033,9 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
         platform=data.get("platform", "rhel8"),
         systemd=extract_systemd_overrides(data) or None,
         commands=data.get("commands"),
+        fields=data.get("fields"),
         working_dir=data.get("working_dir"),
+        preset_params=data.get("preset_params"),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
         stop_depends_on=stop_depends_on,

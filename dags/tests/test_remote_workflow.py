@@ -110,6 +110,7 @@ from workflow.remote_workflow import (  # noqa: E402
     apply_task_env_overrides,
     apply_task_runtime_overrides,
     build_remote_task_command,
+    build_script_airflow_fields,
     build_workflow_definition_from_config,
     default_workflow_id_from_path,
     prepare_workflow_plan,
@@ -378,6 +379,139 @@ class RemoteWorkflowTest(unittest.TestCase):
         )
 
         self.assertEqual(workflow.actions, ("start", "stop"))
+
+    def test_script_fields_are_env_overridable_and_render_as_args(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "actions": ["run"],
+                "host_groups": {
+                    "linux_batch": {
+                        "type": "linux_script",
+                        "hosts": ["qa-batch-01.company.net"],
+                        "commands": {
+                            "run": "./bin/run-report",
+                        },
+                        "fields": {
+                            "business_date": {
+                                "type": "string",
+                                "default": "",
+                                "description": "Business date",
+                            },
+                            "dry_run": {
+                                "type": "boolean",
+                                "default": False,
+                                "cli_name": "dry-run",
+                                "transform": "lower_bool",
+                                "description": "Run without publishing output",
+                            },
+                            "region": {
+                                "type": "enum",
+                                "default": "us",
+                                "values": ["us", "emea"],
+                                "export_to_env": True,
+                                "env_name": "REGION",
+                                "description": "Region",
+                            },
+                            "desks": {
+                                "type": "multi_enum",
+                                "default": [],
+                                "values": ["fx", "rates", "credit"],
+                                "cli_joiner": "|",
+                                "description": "Desks",
+                            },
+                        },
+                        "environments": {
+                            "qa": {
+                                "fields": {
+                                    "business_date": {
+                                        "default": "2026-06-05",
+                                    },
+                                    "region": {
+                                        "default": "emea",
+                                        "values": ["emea", "apac"],
+                                    },
+                                },
+                                "preset_params": {
+                                    "dry_run": True,
+                                    "desks": ["fx", "rates"],
+                                },
+                                "hosts": ["qa-batch-01.company.net"],
+                            },
+                        },
+                    },
+                    "windows_batch": {
+                        "type": "windows_script",
+                        "windows_shell": "raw",
+                        "hosts": ["qa-win-batch-01.company.net"],
+                        "commands": {
+                            "run": ".\\publish.ps1",
+                        },
+                        "fields": {
+                            "publish_mode": {
+                                "type": "enum",
+                                "default": "fast",
+                                "values": ["fast", "full"],
+                                "description": "Publish mode",
+                            },
+                        },
+                    },
+                },
+                "tasks": [
+                    {"task_id": "run_report", "host_group": "linux_batch"},
+                    {"task_id": "publish", "host_group": "windows_batch"},
+                ],
+            },
+            default_workflow_id="batch",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        airflow_fields = build_script_airflow_fields(plan)
+
+        self.assertEqual(airflow_fields["business_date"]["default"], "2026-06-05")
+        self.assertEqual(airflow_fields["dry_run"]["default"], True)
+        self.assertEqual(airflow_fields["region"]["values"], ["emea", "apac"])
+        self.assertEqual(airflow_fields["desks"]["default"], ["fx", "rates"])
+        self.assertEqual(airflow_fields["publish_mode"]["values"], ["fast", "full"])
+
+        linux_task = next(task for task in plan.tasks if task.task_id == "run_report")
+        linux_host = plan.hosts_by_task_id["run_report"][0]
+        linux_command = build_remote_task_command(
+            task_spec=apply_task_runtime_overrides(
+                linux_task,
+                linux_host.task_overrides,
+            ),
+            host_target=linux_host,
+            action="run",
+            validated_params={
+                "business_date": "2026-06-06",
+                "dry_run": True,
+                "region": "emea",
+                "desks": ["fx", "rates"],
+                "extra_args": "--limit 10",
+            },
+        )
+
+        self.assertIn("REGION=emea ./bin/run-report", linux_command)
+        self.assertIn("--business_date=2026-06-06", linux_command)
+        self.assertIn("--dry-run=true", linux_command)
+        self.assertIn("--region=emea", linux_command)
+        self.assertIn("--desks=fx|rates", linux_command)
+        self.assertIn("--limit 10", linux_command)
+
+        windows_task = next(task for task in plan.tasks if task.task_id == "publish")
+        windows_host = plan.hosts_by_task_id["publish"][0]
+        windows_command = build_remote_task_command(
+            task_spec=apply_task_runtime_overrides(
+                windows_task,
+                windows_host.task_overrides,
+            ),
+            host_target=windows_host,
+            action="run",
+            validated_params={
+                "publish_mode": "full",
+            },
+        )
+
+        self.assertEqual(windows_command, ".\\publish.ps1 --publish_mode=full")
 
 
 if __name__ == "__main__":

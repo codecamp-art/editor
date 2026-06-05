@@ -28,6 +28,43 @@
       "commands": {
         "run": "./bin/extract-orders --env {env}"
       },
+      "fields": {
+        "business_date": {
+          "type": "string",
+          "default": "",
+          "description": "Business date to extract. Leave empty to use scheduler date."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": false,
+          "cli_name": "dry-run",
+          "transform": "lower_bool",
+          "description": "Run validation without publishing output."
+        },
+        "region": {
+          "type": "enum",
+          "default": "us",
+          "values": [
+            "us",
+            "emea",
+            "apac"
+          ],
+          "export_to_env": true,
+          "env_name": "REGION",
+          "description": "Business region."
+        },
+        "desks": {
+          "type": "multi_enum",
+          "default": [],
+          "values": [
+            "fx",
+            "rates",
+            "credit"
+          ],
+          "cli_joiner": "|",
+          "description": "Desk filters."
+        }
+      },
       "environments": {
         "dev": {
           "sudo_user": "batch_dev",
@@ -37,6 +74,22 @@
         },
         "qa": {
           "sudo_user": "batch_qa",
+          "fields": {
+            "region": {
+              "default": "emea",
+              "values": [
+                "emea",
+                "apac"
+              ]
+            }
+          },
+          "preset_params": {
+            "dry_run": true,
+            "desks": [
+              "fx",
+              "rates"
+            ]
+          },
           "commands": {
             "run": "./bin/extract-orders --env qa --sample-size 1000"
           },
@@ -59,6 +112,24 @@
       "working_dir": "D:\\Apps\\BatchPublisher",
       "commands": {
         "run": ".\\publish.ps1 -Env {env}"
+      },
+      "fields": {
+        "publish_mode": {
+          "type": "enum",
+          "default": "fast",
+          "values": [
+            "fast",
+            "full"
+          ],
+          "description": "Publisher mode."
+        },
+        "notify": {
+          "type": "boolean",
+          "default": true,
+          "cli_name": "notify",
+          "transform": "lower_bool",
+          "description": "Send downstream notification."
+        }
       },
       "environments": {
         "qa": {
