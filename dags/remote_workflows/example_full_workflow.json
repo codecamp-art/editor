@@ -147,6 +147,42 @@
         "stop": "./bin/risk-control stop --env {env}",
         "status": "./bin/risk-control status --env {env}"
       },
+      "fields": {
+        "change_ticket": {
+          "type": "string",
+          "default": "",
+          "cli_name": "ticket",
+          "export_to_env": true,
+          "env_name": "CHANGE_TICKET",
+          "description": "Change ticket for start/stop operations."
+        },
+        "force": {
+          "type": "boolean",
+          "default": false,
+          "cli_name": "force",
+          "transform": "lower_bool",
+          "description": "Force start/stop when service health checks are stale."
+        },
+        "phase": {
+          "type": "enum",
+          "default": "regular",
+          "values": [
+            "regular",
+            "maintenance"
+          ],
+          "description": "Operational phase for this start/stop run."
+        },
+        "components": {
+          "type": "multi_enum",
+          "default": [],
+          "values": [
+            "engine",
+            "scheduler",
+            "api"
+          ],
+          "description": "Risk components to include."
+        }
+      },
       "remote_env_vars": {
         "APP_ENV": "{env}",
         "APP_LOC": "{loc}"
@@ -165,6 +201,17 @@
             "start": "./bin/risk-control start --env qa --profile qa",
             "stop": "./bin/risk-control stop --env qa --profile qa",
             "status": "./bin/risk-control status --env qa --profile qa"
+          },
+          "fields": {
+            "phase": {
+              "default": "maintenance"
+            }
+          },
+          "preset_params": {
+            "components": [
+              "engine",
+              "api"
+            ]
           },
           "remote_env_vars": {
             "APP_LOC": "qa-primary"
@@ -225,6 +272,25 @@
         "start": ".\\adapter.ps1 -Action Start -Env {env}",
         "stop": ".\\adapter.ps1 -Action Stop -Env {env}",
         "status": ".\\adapter.ps1 -Action Status -Env {env}"
+      },
+      "fields": {
+        "adapter_mode": {
+          "type": "enum",
+          "default": "normal",
+          "values": [
+            "normal",
+            "drain",
+            "replay"
+          ],
+          "description": "Windows adapter start/stop mode."
+        },
+        "notify": {
+          "type": "boolean",
+          "default": true,
+          "cli_name": "notify",
+          "transform": "lower_bool",
+          "description": "Send notification after adapter command completes."
+        }
       },
       "environments": {
         "qa": {

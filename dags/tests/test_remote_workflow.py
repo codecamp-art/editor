@@ -513,6 +513,113 @@ class RemoteWorkflowTest(unittest.TestCase):
 
         self.assertEqual(windows_command, ".\\publish.ps1 --publish_mode=full")
 
+    def test_start_stop_script_fields_render_as_args(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "schedules": {
+                    "start": "0 7 * * 1-5",
+                    "stop": "0 19 * * 1-5",
+                },
+                "host_groups": {
+                    "risk": {
+                        "type": "linux_script",
+                        "hosts": ["qa-risk-01.company.net"],
+                        "commands": {
+                            "start": "./bin/risk-control start",
+                            "stop": "./bin/risk-control stop",
+                            "status": "./bin/risk-control status",
+                        },
+                        "fields": {
+                            "change_ticket": {
+                                "type": "string",
+                                "default": "",
+                                "cli_name": "ticket",
+                                "export_to_env": True,
+                                "env_name": "CHANGE_TICKET",
+                                "description": "Change ticket",
+                            },
+                            "force": {
+                                "type": "boolean",
+                                "default": False,
+                                "cli_name": "force",
+                                "transform": "lower_bool",
+                                "description": "Force operation",
+                            },
+                            "phase": {
+                                "type": "enum",
+                                "default": "regular",
+                                "values": ["regular", "maintenance"],
+                                "description": "Operation phase",
+                            },
+                            "components": {
+                                "type": "multi_enum",
+                                "default": [],
+                                "values": ["engine", "scheduler", "api"],
+                                "description": "Components",
+                            },
+                        },
+                        "environments": {
+                            "qa": {
+                                "fields": {
+                                    "phase": {
+                                        "default": "maintenance",
+                                    },
+                                },
+                                "preset_params": {
+                                    "components": ["engine", "api"],
+                                },
+                                "hosts": ["qa-risk-01.company.net"],
+                            },
+                        },
+                    },
+                },
+                "tasks": [
+                    {"task_id": "risk", "host_group": "risk"},
+                ],
+            },
+            default_workflow_id="risk_control",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        airflow_fields = build_script_airflow_fields(plan)
+
+        self.assertEqual(workflow.actions, ("start", "stop"))
+        self.assertEqual(airflow_fields["phase"]["default"], "maintenance")
+        self.assertEqual(airflow_fields["components"]["default"], ["engine", "api"])
+
+        risk_task = plan.tasks[0]
+        risk_host = plan.hosts_by_task_id["risk"][0]
+        effective_task = apply_task_runtime_overrides(
+            risk_task,
+            risk_host.task_overrides,
+        )
+        validated_params = {
+            "change_ticket": "CHG-123",
+            "force": True,
+            "phase": "maintenance",
+            "components": ["engine", "api"],
+        }
+
+        start_command = build_remote_task_command(
+            task_spec=effective_task,
+            host_target=risk_host,
+            action="start",
+            validated_params=validated_params,
+        )
+        stop_command = build_remote_task_command(
+            task_spec=effective_task,
+            host_target=risk_host,
+            action="stop",
+            validated_params=validated_params,
+        )
+
+        self.assertIn("CHANGE_TICKET=CHG-123 ./bin/risk-control start", start_command)
+        self.assertIn("--ticket=CHG-123", start_command)
+        self.assertIn("--force=true", start_command)
+        self.assertIn("--phase=maintenance", start_command)
+        self.assertIn("--components=engine,api", start_command)
+        self.assertIn("CHANGE_TICKET=CHG-123 ./bin/risk-control stop", stop_command)
+        self.assertIn("--ticket=CHG-123", stop_command)
+
 
 if __name__ == "__main__":
     unittest.main()
