@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from common.config_loader import load_json_file
-from common.remote_script_workflow import register_remote_script_dags_from_json
+from workflow.remote_script_workflow import register_remote_script_dags_from_json
 
 
 REMOTE_SCRIPT_CONFIG_DIRS = (
