@@ -1,5 +1,5 @@
 {
-  "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates a complete self-contained system workflow config.",
+  "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates a complete self-contained remote workflow config.",
   "schedule_pairs": [
     {
       "start": "0 6 * * 1-5",

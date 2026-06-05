@@ -26,36 +26,6 @@ COMMON_FIELDS = {
 }
 
 
-SYSTEMD_CONTROL_FIELDS = {
-    "control_action": {
-        "type": "enum",
-        "default": "default",
-        "values": ["default", "start", "stop", "status"],
-        "description": "default runs the DAG's native action; status checks state only",
-        "include_in_cli": False,
-    },
-    "target_scope": {
-        "type": "enum",
-        "default": "workflow",
-        "values": ["workflow", "task_group", "task"],
-        "description": "Run the full workflow, one task group, or one task only",
-        "include_in_cli": False,
-    },
-    "target_task": {
-        "type": "string",
-        "default": "",
-        "description": "Required when target_scope is task",
-        "include_in_cli": False,
-    },
-    "target_task_group": {
-        "type": "string",
-        "default": "",
-        "description": "Required when target_scope is task_group",
-        "include_in_cli": False,
-    },
-}
-
-
 def merge_field_definitions(*field_dicts: dict) -> dict:
     merged: dict = {}
     for item in field_dicts:

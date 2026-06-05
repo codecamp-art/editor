@@ -149,7 +149,7 @@ class WorkflowSchedulePair:
 
 
 @dataclass(frozen=True)
-class SystemdWorkflowDefinition:
+class RemoteWorkflowDefinition:
     workflow_id: str
     description: str
     schedule_start: str | list[str] | tuple[str, ...] | None
@@ -161,7 +161,7 @@ class SystemdWorkflowDefinition:
     upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
     schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
     environments: dict[str, Any] | None = None
-    tags: tuple[str, ...] = ("systemd", "ssh")
+    tags: tuple[str, ...] = ("remote-workflow", "ssh")
     start_description: str = ""
     stop_description: str = ""
     start_tags: tuple[str, ...] = ()
@@ -303,7 +303,7 @@ def get_default_environment_topology(environments: dict[str, Any]) -> dict[str, 
     return default_topology
 
 
-def resolve_topology_for_env(workflow: SystemdWorkflowDefinition, current_env: str) -> dict:
+def resolve_topology_for_env(workflow: RemoteWorkflowDefinition, current_env: str) -> dict:
     environments = optional_json_object(workflow.environments, name="Workflow environments")
     default_topology = get_default_environment_topology(environments)
     env_topology = optional_json_object(
@@ -440,7 +440,7 @@ def apply_task_runtime_overrides(
     )
 
 
-def build_systemd_airflow_fields(
+def build_workflow_airflow_fields(
     *,
     extra_fields: dict,
     task_ids: tuple[str, ...],
@@ -1014,7 +1014,7 @@ def infer_systemd_scope(platform: str) -> str:
 
 def prepare_workflow_plan(
     *,
-    workflow: SystemdWorkflowDefinition,
+    workflow: RemoteWorkflowDefinition,
     topology: dict,
     current_env: str,
 ) -> WorkflowPlan:
@@ -1392,7 +1392,7 @@ def filter_enabled_dependencies(
     return tuple(dep for dep in dependencies if current_env in dep.enabled_in_envs)
 
 
-def build_action_description(workflow: SystemdWorkflowDefinition, action: str) -> str:
+def build_action_description(workflow: RemoteWorkflowDefinition, action: str) -> str:
     action_description = (
         workflow.start_description if action == "start" else workflow.stop_description
     )
@@ -1403,7 +1403,7 @@ def build_action_description(workflow: SystemdWorkflowDefinition, action: str) -
     return f"{workflow.description.rstrip()}\n\n{action_description.lstrip()}"
 
 
-def build_action_tags(workflow: SystemdWorkflowDefinition, action: str) -> tuple[str, ...]:
+def build_action_tags(workflow: RemoteWorkflowDefinition, action: str) -> tuple[str, ...]:
     action_tags = workflow.start_tags if action == "start" else workflow.stop_tags
     return unique_preserving_order((*workflow.tags, *action_tags))
 
@@ -1419,9 +1419,9 @@ def task_ids_for_logical_dependencies(
     return unique_preserving_order(task_ids)
 
 
-def create_systemd_dag(
+def create_workflow_dag(
     *,
-    workflow: SystemdWorkflowDefinition,
+    workflow: RemoteWorkflowDefinition,
     dag_id: str,
     action: str,
     schedule: str | list[str] | tuple[str, ...] | None,
@@ -1445,7 +1445,7 @@ def create_systemd_dag(
 
     task_ids = tuple(task_spec.task_id for task_spec in plan.tasks)
     group_ids = tuple(group_spec.group_id for group_spec in plan.groups)
-    airflow_fields = build_systemd_airflow_fields(
+    airflow_fields = build_workflow_airflow_fields(
         extra_fields=workflow.fields,
         task_ids=task_ids,
         task_group_ids=group_ids,
@@ -1902,11 +1902,11 @@ def action_metadata_from_config(data: dict, action: str) -> dict[str, Any]:
     )
 
 
-def build_systemd_workflow_definition_from_config(
+def build_workflow_definition_from_config(
     data: dict,
     *,
     default_workflow_id: str | None = None,
-) -> SystemdWorkflowDefinition:
+) -> RemoteWorkflowDefinition:
     schedule_pairs = build_schedule_pairs_from_config(data)
     upstream_dags = data.get("upstream_dags", {})
     start_metadata = action_metadata_from_config(data, "start")
@@ -1915,7 +1915,7 @@ def build_systemd_workflow_definition_from_config(
     if not workflow_id:
         raise ValueError("Workflow config must define workflow_id or be loaded from a JSON file.")
 
-    return SystemdWorkflowDefinition(
+    return RemoteWorkflowDefinition(
         workflow_id=workflow_id,
         description=data.get("description", ""),
         schedule_start=schedule_pairs[0].start if schedule_pairs else None,
@@ -1936,7 +1936,7 @@ def build_systemd_workflow_definition_from_config(
         ),
         schedule_pairs=schedule_pairs,
         environments=build_workflow_environments_from_config(data),
-        tags=tuple(data.get("tags") or ("systemd", "ssh")),
+        tags=tuple(data.get("tags") or ("remote-workflow", "ssh")),
         start_description=start_metadata.get(
             "description",
             data.get("start_description", ""),
@@ -1956,9 +1956,9 @@ def build_systemd_workflow_definition_from_config(
     )
 
 
-def load_systemd_workflow_definition_from_json(config_file: str | Path) -> SystemdWorkflowDefinition:
+def load_workflow_definition_from_json(config_file: str | Path) -> RemoteWorkflowDefinition:
     config_path = Path(config_file)
-    return build_systemd_workflow_definition_from_config(
+    return build_workflow_definition_from_config(
         load_json_file(config_path),
         default_workflow_id=config_path.stem,
     )
@@ -1966,6 +1966,15 @@ def load_systemd_workflow_definition_from_json(config_file: str | Path) -> Syste
 
 def default_dag_id_prefix(workflow_id: str) -> str:
     return workflow_id.replace("_", "-")
+
+
+def default_workflow_id_from_path(config_file: Path, config_root: Path | None = None) -> str:
+    if config_root is None:
+        return config_file.stem
+    relative_path = config_file.resolve().relative_to(config_root.resolve()).with_suffix("")
+    raw_id = "_".join(relative_path.parts)
+    safe_id = re.sub(r"[^A-Za-z0-9_]+", "_", raw_id).strip("_").lower()
+    return safe_id or config_file.stem
 
 
 def schedule_values(schedule: str | tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
@@ -2014,19 +2023,21 @@ def build_workflow_action_dag_id(
     return f"{workflow_prefix}-{action}"
 
 
-def register_systemd_dags_from_json(
+def register_workflow_dags_from_json(
     *,
     config_file: str | Path,
     global_namespace: dict,
+    config_root: str | Path | None = None,
 ) -> None:
     config_path = Path(config_file)
     if config_path.name.startswith("example_"):
         return
 
+    root_path = Path(config_root) if config_root is not None else None
     config = load_json_file(config_path)
-    workflow = build_systemd_workflow_definition_from_config(
+    workflow = build_workflow_definition_from_config(
         config,
-        default_workflow_id=config_path.stem,
+        default_workflow_id=default_workflow_id_from_path(config_path, root_path),
     )
     dag_id_prefix = config.get("dag_id_prefix", default_dag_id_prefix(workflow.workflow_id))
     dag_ids = config.get("dag_ids", {})
@@ -2037,7 +2048,7 @@ def register_systemd_dags_from_json(
     if not enabled_pairs:
         return
 
-    start_dag = create_systemd_dag(
+    start_dag = create_workflow_dag(
         workflow=workflow,
         dag_id=build_workflow_action_dag_id(
             action="start",
@@ -2049,7 +2060,7 @@ def register_systemd_dags_from_json(
         schedule=collect_schedule_values(enabled_pairs, "start"),
         source_file=config_file,
     )
-    stop_dag = create_systemd_dag(
+    stop_dag = create_workflow_dag(
         workflow=workflow,
         dag_id=build_workflow_action_dag_id(
             action="stop",
@@ -2066,13 +2077,15 @@ def register_systemd_dags_from_json(
     global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
 
 
-def register_systemd_dags_from_json_dir(
+def register_workflow_dags_from_json_dir(
     *,
     config_dir: str | Path,
     global_namespace: dict,
 ) -> None:
-    for config_file in sorted(Path(config_dir).glob("*.json")):
-        register_systemd_dags_from_json(
+    config_root = Path(config_dir)
+    for config_file in sorted(config_root.rglob("*.json")):
+        register_workflow_dags_from_json(
             config_file=config_file,
             global_namespace=global_namespace,
+            config_root=config_root,
         )
