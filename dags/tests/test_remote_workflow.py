@@ -244,14 +244,16 @@ class RemoteWorkflowTest(unittest.TestCase):
     def test_host_group_bulk_items_generate_task_group_and_tasks(self) -> None:
         workflow = build_workflow_definition_from_config(
             {
+                "generated_task_groups": {
+                    "shared_server": {
+                        "group_id": "shared_server_services",
+                        "tooltip": "Services and scripts on one server",
+                    },
+                },
                 "host_groups": {
                     "shared_server": {
                         "platform": "rhel8",
                         "hosts": ["prod-shared-01.company.net"],
-                        "task_group": {
-                            "group_id": "shared_server_services",
-                            "tooltip": "Services and scripts on one server",
-                        },
                         "service_name": [
                             {
                                 "task_id": "gateway",
@@ -277,6 +279,53 @@ class RemoteWorkflowTest(unittest.TestCase):
                                 },
                             },
                         ],
+                        "environments": {
+                            "prod": {
+                                "service_name": [
+                                    {
+                                        "task_id": "pricing",
+                                        "sudo_user": "pricing_prod",
+                                    }
+                                ],
+                                "commands": [
+                                    {
+                                        "task_id": "cache_warmup",
+                                        "working_dir": "/opt/cache/prod/current",
+                                    }
+                                ],
+                            },
+                            "dr": {
+                                "hosts": ["dr-shared-01.company.net"],
+                                "service_name": [
+                                    {
+                                        "task_id": "pricing",
+                                        "sudo_user": "pricing_dr",
+                                    },
+                                    {
+                                        "task_id": "dr_only",
+                                        "service_name": "dr-only.service",
+                                        "sudo_user": "drsvc",
+                                    },
+                                ],
+                                "commands": [
+                                    {
+                                        "task_id": "cache_warmup",
+                                        "working_dir": "/opt/cache/dr/current",
+                                    },
+                                    {
+                                        "task_id": "dr_replay_check",
+                                        "type": "linux_script",
+                                        "sudo_user": "replayops",
+                                        "working_dir": "/opt/replay/dr/current",
+                                        "commands": {
+                                            "start": "./replay-check start",
+                                            "stop": "./replay-check stop",
+                                            "status": "./replay-check status",
+                                        },
+                                    }
+                                ],
+                            },
+                        },
                     },
                 },
             },
@@ -288,7 +337,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(group.group_id, "shared_server_services")
         self.assertEqual(
             tuple(task.task_id for task in group.tasks),
-            ("gateway", "pricing", "cache_warmup"),
+            ("gateway", "pricing", "cache_warmup", "dr_only", "dr_replay_check"),
         )
 
         plan = workflow_plan_for_env(workflow, "prod")
@@ -300,6 +349,7 @@ class RemoteWorkflowTest(unittest.TestCase):
                 "cache_warmup": (),
             },
         )
+        self.assertNotIn("dr_only", plan.hosts_by_task_id)
 
         gateway_task = next(task for task in plan.tasks if task.task_id == "gateway")
         gateway_host = plan.hosts_by_task_id["gateway"][0]
@@ -314,6 +364,19 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertIn("gateway.service", gateway_command)
         self.assertIn("gwuser", gateway_command)
 
+        pricing_task = next(task for task in plan.tasks if task.task_id == "pricing")
+        pricing_host = plan.hosts_by_task_id["pricing"][0]
+        pricing_command = build_remote_task_command(
+            task_spec=apply_task_runtime_overrides(
+                pricing_task,
+                pricing_host.task_overrides,
+            ),
+            host_target=pricing_host,
+            action="start",
+        )
+        self.assertIn("pricing.service", pricing_command)
+        self.assertIn("pricing_prod", pricing_command)
+
         cache_task = next(task for task in plan.tasks if task.task_id == "cache_warmup")
         cache_host = plan.hosts_by_task_id["cache_warmup"][0]
         cache_command = build_remote_task_command(
@@ -326,6 +389,48 @@ class RemoteWorkflowTest(unittest.TestCase):
         )
         self.assertIn("./cache start", cache_command)
         self.assertIn("cacheuser", cache_command)
+        self.assertIn("/opt/cache/prod/current", cache_command)
+
+        dr_plan = workflow_plan_for_env(workflow, "dr")
+        self.assertIn("dr_only", dr_plan.hosts_by_task_id)
+        self.assertIn("dr_replay_check", dr_plan.hosts_by_task_id)
+        dr_only_task = next(task for task in dr_plan.tasks if task.task_id == "dr_only")
+        dr_only_host = dr_plan.hosts_by_task_id["dr_only"][0]
+        dr_only_command = build_remote_task_command(
+            task_spec=apply_task_runtime_overrides(
+                dr_only_task,
+                dr_only_host.task_overrides,
+            ),
+            host_target=dr_only_host,
+            action="start",
+        )
+        self.assertIn("dr-only.service", dr_only_command)
+        self.assertIn("drsvc", dr_only_command)
+
+        dr_cache_task = next(task for task in dr_plan.tasks if task.task_id == "cache_warmup")
+        dr_cache_host = dr_plan.hosts_by_task_id["cache_warmup"][0]
+        dr_cache_command = build_remote_task_command(
+            task_spec=apply_task_runtime_overrides(
+                dr_cache_task,
+                dr_cache_host.task_overrides,
+            ),
+            host_target=dr_cache_host,
+            action="start",
+        )
+        self.assertIn("/opt/cache/dr/current", dr_cache_command)
+
+        dr_replay_task = next(task for task in dr_plan.tasks if task.task_id == "dr_replay_check")
+        dr_replay_host = dr_plan.hosts_by_task_id["dr_replay_check"][0]
+        dr_replay_command = build_remote_task_command(
+            task_spec=apply_task_runtime_overrides(
+                dr_replay_task,
+                dr_replay_host.task_overrides,
+            ),
+            host_target=dr_replay_host,
+            action="start",
+        )
+        self.assertIn("./replay-check start", dr_replay_command)
+        self.assertIn("replayops", dr_replay_command)
 
     def test_run_workflow_uses_single_run_action_and_depends_on_graph(self) -> None:
         workflow = build_workflow_definition_from_config(

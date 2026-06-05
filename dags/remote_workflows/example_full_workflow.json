@@ -36,6 +36,18 @@
       ]
     }
   },
+  "generated_task_groups": {
+    "shared_app_server": {
+      "group_id": "shared_app_server_services",
+      "tooltip": "Multiple services and scripts on the same Linux server",
+      "start_depends_on": [
+        "gateway_rhel7"
+      ],
+      "stop_depends_on": [
+        "backend_services"
+      ]
+    }
+  },
   "host_groups": {
     "gateway": {
       "type": "systemd",
@@ -268,16 +280,6 @@
     },
     "shared_app_server": {
       "platform": "rhel8",
-      "task_group": {
-        "group_id": "shared_app_server_services",
-        "tooltip": "Multiple services and scripts on the same Linux server",
-        "start_depends_on": [
-          "gateway_rhel7"
-        ],
-        "stop_depends_on": [
-          "backend_services"
-        ]
-      },
       "services": [
         {
           "task_id": "order_api",
@@ -308,11 +310,51 @@
       ],
       "environments": {
         "prod": {
+          "services": [
+            {
+              "task_id": "position_api",
+              "sudo_user": "positionapp_prod"
+            }
+          ],
+          "scripts": [
+            {
+              "task_id": "warm_cache",
+              "working_dir": "/opt/cache/prod/current"
+            }
+          ],
           "hosts": [
             "prod-app-shared-01.company.net"
           ]
         },
         "dr": {
+          "services": [
+            {
+              "task_id": "position_api",
+              "sudo_user": "positionapp_dr"
+            },
+            {
+              "task_id": "dr_replay_api",
+              "service_name": "dr-replay-api.service",
+              "sudo_user": "replayapp"
+            }
+          ],
+          "scripts": [
+            {
+              "task_id": "warm_cache",
+              "working_dir": "/opt/cache/dr/current"
+            },
+            {
+              "task_id": "dr_replay_check",
+              "type": "linux_script",
+              "sudo_user": "replayops",
+              "working_dir": "/opt/replay/dr/current",
+              "commands": {
+                "start": "./replay-check start --env dr",
+                "stop": "./replay-check stop --env dr",
+                "status": "./replay-check status --env dr"
+              }
+            }
+          ],
           "hosts": [
             "dr-app-shared-01.company.net"
           ]
