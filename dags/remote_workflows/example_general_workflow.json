@@ -2,10 +2,15 @@
   "actions": [
     "run"
   ],
-  "runtime_envs": [
-    "prod",
-    "dr"
-  ],
+  "runtime_envs": {
+    "enabled_in_envs": [
+      "prod"
+    ],
+    "targets": [
+      "prod",
+      "dr"
+    ]
+  },
   "description": "# Daily Batch Workflow\n\nExample only. This file demonstrates a general remote workflow that runs tasks in dependency order without start, stop, or status controls.",
   "schedules": {
     "run": "15 9 * * 1-5"

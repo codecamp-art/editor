@@ -191,6 +191,7 @@ class RemoteWorkflowDefinition:
     schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
     actions: tuple[str, ...] = START_STOP_ACTIONS
     target_runtime_envs: tuple[str, ...] = ()
+    target_runtime_envs_enabled_in_envs: tuple[str, ...] = ()
     environments: dict[str, Any] | None = None
     tags: tuple[str, ...] = ("remote-workflow", "ssh")
     run_description: str = ""
@@ -675,17 +676,17 @@ def build_generated_task_group_from_host_group(
     if not task_configs:
         return None
 
-    task_group_config = task_group_config or host_group_config.get("task_group", {})
+    task_group_config = task_group_config or {}
     if task_group_config is None:
         task_group_config = {}
     if not isinstance(task_group_config, dict):
-        raise TypeError(f"host_group '{host_group_id}' task_group must be a JSON object.")
+        raise TypeError(f"generated_task_groups.{host_group_id} must be a JSON object.")
 
     group_config = {
         **task_group_config,
         "group_id": task_group_config.get(
             "group_id",
-            host_group_config.get("task_group_id", f"{host_group_id}_tasks"),
+            f"{host_group_id}_tasks",
         ),
         "tasks": list(task_configs),
     }
@@ -2679,17 +2680,41 @@ def normalize_workflow_actions(
     return unique_preserving_order(actions)
 
 
-def configured_target_runtime_envs(data: dict) -> tuple[str, ...]:
+def configured_runtime_envs(
+    data: dict,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     raw_envs = first_config_value(
         data,
         ("runtime_envs", "target_runtime_envs", "dag_runtime_envs"),
     )
     if raw_envs is None:
-        return ()
-    envs = normalize_string_tuple(raw_envs)
-    if not envs:
+        return (), ()
+
+    if isinstance(raw_envs, dict):
+        targets = normalize_string_tuple(
+            first_config_value(
+                raw_envs,
+                ("targets", "envs", "runtime_envs", "target_runtime_envs"),
+            )
+        )
+        enabled_in_envs = normalize_string_tuple(
+            first_config_value(
+                raw_envs,
+                ("enabled_in_envs", "airflow_envs", "active_in_envs"),
+                data.get("runtime_envs_enabled_in_envs", targets),
+            )
+        )
+    else:
+        targets = normalize_string_tuple(raw_envs)
+        enabled_in_envs = normalize_string_tuple(
+            data.get("runtime_envs_enabled_in_envs", targets)
+        )
+
+    if not targets:
         raise ValueError("runtime_envs must define at least one environment when provided.")
-    return envs
+    if not enabled_in_envs:
+        raise ValueError("runtime_envs enabled_in_envs must define at least one environment.")
+    return targets, enabled_in_envs
 
 
 def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
@@ -2741,6 +2766,7 @@ def build_workflow_definition_from_config(
 ) -> RemoteWorkflowDefinition:
     schedule_pairs = build_schedule_pairs_from_config(data)
     actions = normalize_workflow_actions(data, schedule_pairs)
+    target_runtime_envs, target_runtime_envs_enabled_in_envs = configured_runtime_envs(data)
     environments = build_workflow_environments_from_config(data)
     explicit_task_groups = tuple(
         build_task_group_spec_from_config(group_data)
@@ -2771,7 +2797,8 @@ def build_workflow_definition_from_config(
         upstream_dags_for_stop=upstream_dags_for_action(data, STOP_ACTION),
         schedule_pairs=schedule_pairs,
         actions=actions,
-        target_runtime_envs=configured_target_runtime_envs(data),
+        target_runtime_envs=target_runtime_envs,
+        target_runtime_envs_enabled_in_envs=target_runtime_envs_enabled_in_envs,
         environments=environments,
         tags=tuple(data.get("tags") or ("remote-workflow", "ssh")),
         run_description=run_metadata.get(
@@ -2910,8 +2937,23 @@ def build_workflow_action_dag_id(
     return default_dag_id_for_action(workflow_prefix, action)
 
 
-def effective_target_runtime_envs(workflow: RemoteWorkflowDefinition) -> tuple[str, ...]:
-    return workflow.target_runtime_envs or (get_current_env_name(),)
+def runtime_env_targets_are_enabled(
+    workflow: RemoteWorkflowDefinition,
+    current_env: str,
+) -> bool:
+    return (
+        bool(workflow.target_runtime_envs)
+        and current_env in workflow.target_runtime_envs_enabled_in_envs
+    )
+
+
+def effective_target_runtime_envs(
+    workflow: RemoteWorkflowDefinition,
+    current_env: str,
+) -> tuple[str, ...]:
+    if runtime_env_targets_are_enabled(workflow, current_env):
+        return workflow.target_runtime_envs
+    return (current_env,)
 
 
 def workflow_namespace_key(
@@ -2948,8 +2990,9 @@ def register_workflow_dags_from_json(
     dag_ids = dict(config.get("dag_ids", {}))
     if config.get("dag_id"):
         dag_ids.setdefault(RUN_ACTION, config["dag_id"])
-    target_envs = effective_target_runtime_envs(workflow)
-    include_env_in_dag_id = bool(workflow.target_runtime_envs)
+    current_env = get_current_env_name()
+    target_envs = effective_target_runtime_envs(workflow, current_env)
+    include_env_in_dag_id = runtime_env_targets_are_enabled(workflow, current_env)
     for target_env in target_envs:
         enabled_pairs = tuple(
             pair for pair in workflow.schedule_pairs if target_env in pair.enabled_in_envs

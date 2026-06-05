@@ -258,12 +258,10 @@ class RemoteWorkflowTest(unittest.TestCase):
                             {
                                 "task_id": "gateway",
                                 "service_name": "gateway.service",
-                                "sudo_user": "gwuser",
                             },
                             {
                                 "task_id": "pricing",
                                 "service_name": "pricing.service",
-                                "sudo_user": "pricing",
                                 "start_depends_on": ["gateway"],
                             },
                         ],
@@ -271,7 +269,6 @@ class RemoteWorkflowTest(unittest.TestCase):
                             {
                                 "task_id": "cache_warmup",
                                 "type": "linux_script",
-                                "sudo_user": "cacheuser",
                                 "commands": {
                                     "start": "./cache start",
                                     "stop": "./cache stop",
@@ -281,6 +278,7 @@ class RemoteWorkflowTest(unittest.TestCase):
                         ],
                         "environments": {
                             "prod": {
+                                "sudo_user": "shared_prod",
                                 "service_name": [
                                     {
                                         "task_id": "pricing",
@@ -296,6 +294,7 @@ class RemoteWorkflowTest(unittest.TestCase):
                             },
                             "dr": {
                                 "hosts": ["dr-shared-01.company.net"],
+                                "sudo_user": "shared_dr",
                                 "service_name": [
                                     {
                                         "task_id": "pricing",
@@ -362,7 +361,7 @@ class RemoteWorkflowTest(unittest.TestCase):
             action="start",
         )
         self.assertIn("gateway.service", gateway_command)
-        self.assertIn("gwuser", gateway_command)
+        self.assertIn("shared_prod", gateway_command)
 
         pricing_task = next(task for task in plan.tasks if task.task_id == "pricing")
         pricing_host = plan.hosts_by_task_id["pricing"][0]
@@ -388,7 +387,7 @@ class RemoteWorkflowTest(unittest.TestCase):
             action="start",
         )
         self.assertIn("./cache start", cache_command)
-        self.assertIn("cacheuser", cache_command)
+        self.assertIn("shared_prod", cache_command)
         self.assertIn("/opt/cache/prod/current", cache_command)
 
         dr_plan = workflow_plan_for_env(workflow, "dr")
@@ -551,7 +550,10 @@ class RemoteWorkflowTest(unittest.TestCase):
         from unittest.mock import patch
 
         config = {
-            "runtime_envs": ["prod", "dr"],
+            "runtime_envs": {
+                "enabled_in_envs": ["prod"],
+                "targets": ["prod", "dr"],
+            },
             "schedules": {
                 "start": "0 7 * * 1-5",
                 "stop": "0 19 * * 1-5",
@@ -580,20 +582,21 @@ class RemoteWorkflowTest(unittest.TestCase):
             config_path.write_text(json.dumps(config), encoding="utf-8")
             registered = {}
 
-            with patch(
-                "workflow.remote_workflow.create_workflow_dag",
-                side_effect=lambda **kwargs: {
-                    "dag_id": kwargs["dag_id"],
-                    "action": kwargs["action"],
-                    "schedule": kwargs["schedule"],
-                    "target_env": kwargs["target_env"],
-                },
-            ):
-                register_workflow_dags_from_json(
-                    config_file=config_path,
-                    global_namespace=registered,
-                    config_root=Path(tmp),
-                )
+            with patch("workflow.remote_workflow.get_current_env_name", return_value="prod"):
+                with patch(
+                    "workflow.remote_workflow.create_workflow_dag",
+                    side_effect=lambda **kwargs: {
+                        "dag_id": kwargs["dag_id"],
+                        "action": kwargs["action"],
+                        "schedule": kwargs["schedule"],
+                        "target_env": kwargs["target_env"],
+                    },
+                ):
+                    register_workflow_dags_from_json(
+                        config_file=config_path,
+                        global_namespace=registered,
+                        config_root=Path(tmp),
+                    )
 
         self.assertEqual(
             sorted(registered),
@@ -609,6 +612,61 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(registered["platform_dr_stop"]["dag_id"], "platform-dr-stop")
         self.assertEqual(registered["platform_dr_stop"]["target_env"], "dr")
 
+    def test_runtime_envs_are_ignored_when_current_airflow_env_is_not_enabled(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        config = {
+            "runtime_envs": {
+                "enabled_in_envs": ["prod"],
+                "targets": ["prod", "dr"],
+            },
+            "schedules": {
+                "start": "0 7 * * 1-5",
+                "stop": "0 19 * * 1-5",
+            },
+            "host_groups": {
+                "gateway": {
+                    "type": "systemd",
+                    "service_name": "gateway.service",
+                    "environments": {
+                        "qa": {
+                            "hosts": ["qa-gw-01.company.net"],
+                        },
+                    },
+                },
+            },
+            "tasks": [
+                {"task_id": "gateway", "host_group": "gateway"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "platform.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            registered = {}
+
+            with patch("workflow.remote_workflow.get_current_env_name", return_value="qa"):
+                with patch(
+                    "workflow.remote_workflow.create_workflow_dag",
+                    side_effect=lambda **kwargs: {
+                        "dag_id": kwargs["dag_id"],
+                        "action": kwargs["action"],
+                        "target_env": kwargs["target_env"],
+                    },
+                ):
+                    register_workflow_dags_from_json(
+                        config_file=config_path,
+                        global_namespace=registered,
+                        config_root=Path(tmp),
+                    )
+
+        self.assertEqual(sorted(registered), ["platform_start", "platform_stop"])
+        self.assertEqual(registered["platform_start"]["dag_id"], "platform-start")
+        self.assertEqual(registered["platform_start"]["target_env"], "qa")
+
     def test_register_run_workflow_can_target_multiple_runtime_envs(self) -> None:
         import json
         import tempfile
@@ -616,7 +674,10 @@ class RemoteWorkflowTest(unittest.TestCase):
         from unittest.mock import patch
 
         config = {
-            "runtime_envs": ["prod", "dr"],
+            "runtime_envs": {
+                "enabled_in_envs": ["prod"],
+                "targets": ["prod", "dr"],
+            },
             "actions": ["run"],
             "schedules": {
                 "run": "15 9 * * 1-5",
@@ -647,19 +708,20 @@ class RemoteWorkflowTest(unittest.TestCase):
             config_path.write_text(json.dumps(config), encoding="utf-8")
             registered = {}
 
-            with patch(
-                "workflow.remote_workflow.create_workflow_dag",
-                side_effect=lambda **kwargs: {
-                    "dag_id": kwargs["dag_id"],
-                    "action": kwargs["action"],
-                    "target_env": kwargs["target_env"],
-                },
-            ):
-                register_workflow_dags_from_json(
-                    config_file=config_path,
-                    global_namespace=registered,
-                    config_root=Path(tmp),
-                )
+            with patch("workflow.remote_workflow.get_current_env_name", return_value="prod"):
+                with patch(
+                    "workflow.remote_workflow.create_workflow_dag",
+                    side_effect=lambda **kwargs: {
+                        "dag_id": kwargs["dag_id"],
+                        "action": kwargs["action"],
+                        "target_env": kwargs["target_env"],
+                    },
+                ):
+                    register_workflow_dags_from_json(
+                        config_file=config_path,
+                        global_namespace=registered,
+                        config_root=Path(tmp),
+                    )
 
         self.assertEqual(sorted(registered), ["daily_dr_run", "daily_prod_run"])
         self.assertEqual(registered["daily_prod_run"]["dag_id"], "daily-prod")
