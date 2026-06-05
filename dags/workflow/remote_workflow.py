@@ -44,6 +44,9 @@ from common.ssh_hook import MSSSHHook, execute_ssh_command
 
 
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
+START_STOP_ACTIONS = ("start", "stop")
+RUN_ACTION = "run"
+SUPPORTED_WORKFLOW_ACTIONS = (*START_STOP_ACTIONS, RUN_ACTION)
 SUPPORTED_TASK_TYPES = {"systemd", "linux_script", "windows_script"}
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
@@ -140,9 +143,11 @@ class WorkflowTaskGroupSpec:
 @dataclass(frozen=True)
 class WorkflowSchedulePair:
     schedule_id: str
+    run: str | list[str] | tuple[str, ...] | None = None
     start: str | list[str] | tuple[str, ...] | None = None
     stop: str | list[str] | tuple[str, ...] | None = None
     dag_id_prefix: str | None = None
+    run_dag_id: str | None = None
     start_dag_id: str | None = None
     stop_dag_id: str | None = None
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
@@ -152,18 +157,23 @@ class WorkflowSchedulePair:
 class RemoteWorkflowDefinition:
     workflow_id: str
     description: str
+    schedule_run: str | list[str] | tuple[str, ...] | None
     schedule_start: str | list[str] | tuple[str, ...] | None
     schedule_stop: str | list[str] | tuple[str, ...] | None
     fields: dict
     tasks: tuple[WorkflowTaskSpec, ...] = ()
     task_groups: tuple[WorkflowTaskGroupSpec, ...] = ()
+    upstream_dags_for_run: tuple[ExternalDagDependency, ...] = ()
     upstream_dags_for_start: tuple[ExternalDagDependency, ...] = ()
     upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
     schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
+    actions: tuple[str, ...] = START_STOP_ACTIONS
     environments: dict[str, Any] | None = None
     tags: tuple[str, ...] = ("remote-workflow", "ssh")
+    run_description: str = ""
     start_description: str = ""
     stop_description: str = ""
+    run_tags: tuple[str, ...] = ()
     start_tags: tuple[str, ...] = ()
     stop_tags: tuple[str, ...] = ()
     owner: str | None = None
@@ -175,6 +185,7 @@ class WorkflowPlan:
     tasks: tuple[WorkflowTaskSpec, ...]
     groups: tuple[WorkflowTaskGroupSpec, ...]
     hosts_by_task_id: dict[str, tuple[HostTarget, ...]]
+    run_upstream_task_ids: dict[str, tuple[str, ...]]
     start_upstream_task_ids: dict[str, tuple[str, ...]]
     stop_upstream_task_ids: dict[str, tuple[str, ...]]
 
@@ -449,9 +460,9 @@ def build_workflow_airflow_fields(
     extra_fields: dict,
     task_ids: tuple[str, ...],
     task_group_ids: tuple[str, ...],
+    include_control_action: bool = True,
 ) -> dict:
-    return merge_field_definitions(
-        COMMON_FIELDS,
+    control_fields = (
         {
             "control_action": {
                 "type": "enum",
@@ -462,6 +473,14 @@ def build_workflow_airflow_fields(
                 ),
                 "include_in_cli": False,
             },
+        }
+        if include_control_action
+        else {}
+    )
+    return merge_field_definitions(
+        COMMON_FIELDS,
+        control_fields,
+        {
             "target_scope": {
                 "type": "enum",
                 "default": "workflow",
@@ -510,6 +529,12 @@ def build_workflow_airflow_fields(
 def resolve_requested_action(validated: dict, dag_action: str) -> str:
     requested = validated.get("control_action") or "default"
     return dag_action if requested == "default" else requested
+
+
+def allowed_runtime_actions_for_dag(dag_action: str) -> tuple[str, ...]:
+    if dag_action in START_STOP_ACTIONS:
+        return (dag_action, "status")
+    return (dag_action,)
 
 
 def normalize_target_selection(value: Any) -> tuple[str, ...]:
@@ -834,6 +859,7 @@ def validate_task_spec(
     task_spec: WorkflowTaskSpec,
     *,
     require_runtime_config: bool = True,
+    action: str | None = None,
 ) -> None:
     if task_spec.task_type not in SUPPORTED_TASK_TYPES:
         raise ValueError(
@@ -843,6 +869,11 @@ def validate_task_spec(
     validate_sudo_mode(task_spec.sudo_mode)
 
     if task_spec.task_type == "systemd":
+        if action and action not in {"start", "stop", "status"}:
+            raise ValueError(
+                f"Task '{task_spec.task_id}' has task_type systemd, which does not "
+                f"support action '{action}'."
+            )
         systemd_cfg = task_spec.systemd or {}
         platform = systemd_cfg.get("platform", task_spec.platform)
         if platform not in SUPPORTED_SYSTEMD_PLATFORMS:
@@ -856,7 +887,8 @@ def validate_task_spec(
     if task_spec.task_type in {"linux_script", "windows_script"}:
         commands = task_spec.commands or {}
         if require_runtime_config:
-            for action_name in ("start", "stop", "status"):
+            required_actions = (action,) if action else ("start", "stop", "status")
+            for action_name in required_actions:
                 if action_name not in commands:
                     raise ValueError(
                         f"Task '{task_spec.task_id}' must define commands.{action_name}."
@@ -870,19 +902,23 @@ def validate_task_spec(
 
 
 def task_dependency_ids(task_spec: WorkflowTaskSpec, action: str) -> tuple[str, ...]:
+    if action == RUN_ACTION:
+        return task_spec.depends_on
     if action == "start":
         return task_spec.start_depends_on or task_spec.depends_on
     if action == "stop":
         return task_spec.stop_depends_on
-    raise ValueError("action must be 'start' or 'stop'")
+    raise ValueError(f"action must be one of {SUPPORTED_WORKFLOW_ACTIONS}")
 
 
 def group_dependency_ids(group_spec: WorkflowTaskGroupSpec, action: str) -> tuple[str, ...]:
+    if action == RUN_ACTION:
+        return group_spec.depends_on
     if action == "start":
         return group_spec.start_depends_on or group_spec.depends_on
     if action == "stop":
         return group_spec.stop_depends_on
-    raise ValueError("action must be 'start' or 'stop'")
+    raise ValueError(f"action must be one of {SUPPORTED_WORKFLOW_ACTIONS}")
 
 
 def has_custom_stop_dependency_graph(
@@ -1111,6 +1147,13 @@ def prepare_workflow_plan(
         if any(task_spec.task_id in active_group_task_ids for task_spec in group_spec.tasks)
     ]
 
+    run_map = build_dependency_map(
+        tasks=tuple(active_tasks),
+        groups=tuple(active_groups),
+        defined_task_ids=defined_task_ids,
+        defined_group_ids=defined_group_ids,
+        action=RUN_ACTION,
+    )
     start_map = build_dependency_map(
         tasks=tuple(active_tasks),
         groups=tuple(active_groups),
@@ -1136,6 +1179,7 @@ def prepare_workflow_plan(
         tasks=tuple(active_tasks),
         groups=tuple(active_groups),
         hosts_by_task_id=hosts_by_task_id,
+        run_upstream_task_ids=run_map,
         start_upstream_task_ids=start_map,
         stop_upstream_task_ids=stop_map,
     )
@@ -1158,8 +1202,10 @@ def build_systemd_service_command(
 
     if action == "status":
         systemctl_args = ["status", service_name, "--no-pager"]
-    else:
+    elif action in {"start", "stop"}:
         systemctl_args = [action, service_name]
+    else:
+        raise ValueError(f"Systemd tasks do not support action '{action}'.")
 
     command_parts = ["systemctl"]
     if scope == "user":
@@ -1401,9 +1447,12 @@ def filter_enabled_dependencies(
 
 
 def build_action_description(workflow: RemoteWorkflowDefinition, action: str) -> str:
-    action_description = (
-        workflow.start_description if action == "start" else workflow.stop_description
-    )
+    action_descriptions = {
+        RUN_ACTION: workflow.run_description,
+        "start": workflow.start_description,
+        "stop": workflow.stop_description,
+    }
+    action_description = action_descriptions.get(action, "")
     if not action_description:
         return workflow.description
     if not workflow.description:
@@ -1412,7 +1461,12 @@ def build_action_description(workflow: RemoteWorkflowDefinition, action: str) ->
 
 
 def build_action_tags(workflow: RemoteWorkflowDefinition, action: str) -> tuple[str, ...]:
-    action_tags = workflow.start_tags if action == "start" else workflow.stop_tags
+    action_tags_by_action = {
+        RUN_ACTION: workflow.run_tags,
+        "start": workflow.start_tags,
+        "stop": workflow.stop_tags,
+    }
+    action_tags = action_tags_by_action.get(action, ())
     return unique_preserving_order((*workflow.tags, *action_tags))
 
 
@@ -1436,8 +1490,8 @@ def create_workflow_dag(
     source_file: str | Path | None = None,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ):
-    if action not in {"start", "stop"}:
-        raise ValueError("action must be 'start' or 'stop'")
+    if action not in SUPPORTED_WORKFLOW_ACTIONS:
+        raise ValueError(f"action must be one of {SUPPORTED_WORKFLOW_ACTIONS}")
 
     runtime_context = build_runtime_context(
         owner=workflow.owner or workflow.workflow_id,
@@ -1457,13 +1511,17 @@ def create_workflow_dag(
         extra_fields=workflow.fields,
         task_ids=task_ids,
         task_group_ids=group_ids,
+        include_control_action=action in START_STOP_ACTIONS,
     )
     airflow_params = build_airflow_params_from_fields(airflow_fields)
     executor_config = build_minimal_tenant_executor_config(runtime_context)
 
-    raw_upstream_dependencies = (
-        workflow.upstream_dags_for_start if action == "start" else workflow.upstream_dags_for_stop
-    )
+    upstream_dependencies_by_action = {
+        RUN_ACTION: workflow.upstream_dags_for_run,
+        "start": workflow.upstream_dags_for_start,
+        "stop": workflow.upstream_dags_for_stop,
+    }
+    raw_upstream_dependencies = upstream_dependencies_by_action[action]
     upstream_dependencies = filter_enabled_dependencies(raw_upstream_dependencies, current_env)
 
     @dag_decorator(
@@ -1483,9 +1541,10 @@ def create_workflow_dag(
             validated = validate_fields(raw_params, airflow_fields)
             selected_action = resolve_requested_action(validated, action)
 
-            if selected_action not in {action, "status"}:
+            allowed_runtime_actions = allowed_runtime_actions_for_dag(action)
+            if selected_action not in allowed_runtime_actions:
                 raise ValueError(
-                    f"DAG '{dag_id}' supports control_action '{action}' or 'status'. "
+                    f"DAG '{dag_id}' supports actions {allowed_runtime_actions}. "
                     f"Use the {selected_action} DAG for '{selected_action}'."
                 )
 
@@ -1577,7 +1636,7 @@ def create_workflow_dag(
                 task_spec_from_payload(task_payload),
                 host_target.task_overrides,
             )
-            validate_task_spec(task_spec)
+            validate_task_spec(task_spec, action=selected_action)
             command = build_remote_task_command(
                 task_spec=task_spec,
                 host_target=host_target,
@@ -1649,7 +1708,10 @@ def create_workflow_dag(
                 task_spec,
                 host_target.task_overrides,
             )
-            validate_task_spec(effective_task_spec)
+            validate_task_spec(
+                effective_task_spec,
+                action=RUN_ACTION if action == RUN_ACTION else None,
+            )
             return run_remote_task.override(
                 task_id=task_id,
                 executor_config=executor_config,
@@ -1679,9 +1741,12 @@ def create_workflow_dag(
                         get_taskflow_task_id(operation)
                     )
 
-        dependency_map = (
-            plan.start_upstream_task_ids if action == "start" else plan.stop_upstream_task_ids
-        )
+        dependency_maps_by_action = {
+            RUN_ACTION: plan.run_upstream_task_ids,
+            "start": plan.start_upstream_task_ids,
+            "stop": plan.stop_upstream_task_ids,
+        }
+        dependency_map = dependency_maps_by_action[action]
 
         def create_gate(
             task_spec: WorkflowTaskSpec,
@@ -1851,17 +1916,30 @@ def build_schedule_pair_from_config(data: dict, *, schedule_id: str) -> Workflow
     dag_ids = data.get("dag_ids", {})
     return WorkflowSchedulePair(
         schedule_id=schedule_id,
+        run=normalize_schedule_value(data.get("run", data.get("schedule_run"))),
         start=normalize_schedule_value(data.get("start", data.get("schedule_start"))),
         stop=normalize_schedule_value(data.get("stop", data.get("schedule_stop"))),
         dag_id_prefix=data.get("dag_id_prefix"),
+        run_dag_id=data.get("run_dag_id") or dag_ids.get("run"),
         start_dag_id=data.get("start_dag_id") or dag_ids.get("start"),
         stop_dag_id=data.get("stop_dag_id") or dag_ids.get("stop"),
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
     )
 
 
-def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, ...]:
+def normalize_schedules_config(data: dict) -> dict[str, Any]:
     schedules = data.get("schedules", {})
+    if schedules is None:
+        return {}
+    if isinstance(schedules, str):
+        return {RUN_ACTION: schedules}
+    if not isinstance(schedules, dict):
+        raise TypeError("schedules must be a JSON object, string, or null.")
+    return schedules
+
+
+def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, ...]:
+    schedules = normalize_schedules_config(data)
     raw_pairs = data.get("schedule_pairs") or schedules.get("pairs")
 
     if raw_pairs:
@@ -1878,10 +1956,105 @@ def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, 
     return (
         WorkflowSchedulePair(
             schedule_id="default",
+            run=normalize_schedule_value(
+                schedules.get(RUN_ACTION, data.get("schedule", data.get("schedule_run")))
+            ),
             start=normalize_schedule_value(schedules.get("start", data.get("schedule_start"))),
             stop=normalize_schedule_value(schedules.get("stop", data.get("schedule_stop"))),
         ),
     )
+
+
+def iter_runtime_config_blocks(data: dict) -> tuple[dict[str, Any], ...]:
+    blocks: list[dict[str, Any]] = []
+    host_groups = data.get("host_groups") or {}
+    if isinstance(host_groups, dict):
+        blocks.extend(
+            value for value in host_groups.values() if isinstance(value, dict)
+        )
+    blocks.extend(
+        task_data for task_data in data.get("tasks", []) if isinstance(task_data, dict)
+    )
+    for group_data in data.get("task_groups", []):
+        if not isinstance(group_data, dict):
+            continue
+        blocks.extend(
+            task_data
+            for task_data in group_data.get("tasks", [])
+            if isinstance(task_data, dict)
+        )
+    return tuple(blocks)
+
+
+def config_uses_start_stop_action(
+    data: dict,
+    schedule_pairs: tuple[WorkflowSchedulePair, ...],
+) -> bool:
+    schedules = normalize_schedules_config(data)
+    upstream_dags = data.get("upstream_dags") or {}
+    dag_metadata = data.get("dag_metadata") or data.get("dag_overrides") or {}
+    return (
+        data.get("schedule_start") is not None
+        or data.get("schedule_stop") is not None
+        or "start" in schedules
+        or "stop" in schedules
+        or any(pair.start is not None or pair.stop is not None for pair in schedule_pairs)
+        or data.get("upstream_dags_for_start") is not None
+        or data.get("upstream_dags_for_stop") is not None
+        or (isinstance(upstream_dags, dict) and ("start" in upstream_dags or "stop" in upstream_dags))
+        or (isinstance(dag_metadata, dict) and ("start" in dag_metadata or "stop" in dag_metadata))
+    )
+
+
+def config_uses_run_action(data: dict, schedule_pairs: tuple[WorkflowSchedulePair, ...]) -> bool:
+    schedules = normalize_schedules_config(data)
+    upstream_dags = data.get("upstream_dags", {})
+    dag_metadata = data.get("dag_metadata") or data.get("dag_overrides") or {}
+    if (
+        data.get("schedule") is not None
+        or data.get("schedule_run") is not None
+        or RUN_ACTION in schedules
+        or any(pair.run is not None for pair in schedule_pairs)
+        or data.get("upstream_dags_for_run") is not None
+        or (isinstance(upstream_dags, dict) and RUN_ACTION in upstream_dags)
+        or isinstance(upstream_dags, list)
+        or (isinstance(dag_metadata, dict) and RUN_ACTION in dag_metadata)
+    ):
+        return True
+
+    for block in iter_runtime_config_blocks(data):
+        commands = block.get("commands")
+        if isinstance(commands, dict) and RUN_ACTION in commands:
+            return True
+    return False
+
+
+def normalize_workflow_actions(
+    data: dict,
+    schedule_pairs: tuple[WorkflowSchedulePair, ...],
+) -> tuple[str, ...]:
+    raw_actions = data.get("actions", data.get("workflow_actions"))
+    if raw_actions is None:
+        if (
+            config_uses_run_action(data, schedule_pairs)
+            and not config_uses_start_stop_action(data, schedule_pairs)
+        ):
+            return (RUN_ACTION,)
+        return START_STOP_ACTIONS
+
+    actions = normalize_string_tuple(raw_actions)
+    if not actions:
+        raise ValueError("actions must define at least one workflow action.")
+
+    unsupported_actions = [
+        action for action in actions if action not in SUPPORTED_WORKFLOW_ACTIONS
+    ]
+    if unsupported_actions:
+        raise ValueError(
+            f"actions contains unsupported values {unsupported_actions}; "
+            f"supported actions are {SUPPORTED_WORKFLOW_ACTIONS}."
+        )
+    return unique_preserving_order(actions)
 
 
 def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
@@ -1910,13 +2083,30 @@ def action_metadata_from_config(data: dict, action: str) -> dict[str, Any]:
     )
 
 
+def upstream_dags_for_action(data: dict, action: str) -> tuple[ExternalDagDependency, ...]:
+    upstream_dags = data.get("upstream_dags") or {}
+    legacy_key = f"upstream_dags_for_{action}"
+    if isinstance(upstream_dags, list):
+        raw_dependencies = upstream_dags if action == RUN_ACTION else []
+    elif isinstance(upstream_dags, dict):
+        raw_dependencies = upstream_dags.get(action, data.get(legacy_key, []))
+    else:
+        raise TypeError("upstream_dags must be a JSON object, list, or null.")
+
+    return tuple(
+        build_external_dependency_from_config(dep_data)
+        for dep_data in raw_dependencies
+    )
+
+
 def build_workflow_definition_from_config(
     data: dict,
     *,
     default_workflow_id: str | None = None,
 ) -> RemoteWorkflowDefinition:
     schedule_pairs = build_schedule_pairs_from_config(data)
-    upstream_dags = data.get("upstream_dags", {})
+    actions = normalize_workflow_actions(data, schedule_pairs)
+    run_metadata = action_metadata_from_config(data, RUN_ACTION)
     start_metadata = action_metadata_from_config(data, "start")
     stop_metadata = action_metadata_from_config(data, "stop")
     workflow_id = data.get("workflow_id") or default_workflow_id
@@ -1926,6 +2116,7 @@ def build_workflow_definition_from_config(
     return RemoteWorkflowDefinition(
         workflow_id=workflow_id,
         description=data.get("description", ""),
+        schedule_run=schedule_pairs[0].run if schedule_pairs else None,
         schedule_start=schedule_pairs[0].start if schedule_pairs else None,
         schedule_stop=schedule_pairs[0].stop if schedule_pairs else None,
         fields=data.get("fields") or {},
@@ -1934,17 +2125,17 @@ def build_workflow_definition_from_config(
             build_task_group_spec_from_config(group_data)
             for group_data in data.get("task_groups", [])
         ),
-        upstream_dags_for_start=tuple(
-            build_external_dependency_from_config(dep_data)
-            for dep_data in upstream_dags.get("start", data.get("upstream_dags_for_start", []))
-        ),
-        upstream_dags_for_stop=tuple(
-            build_external_dependency_from_config(dep_data)
-            for dep_data in upstream_dags.get("stop", data.get("upstream_dags_for_stop", []))
-        ),
+        upstream_dags_for_run=upstream_dags_for_action(data, RUN_ACTION),
+        upstream_dags_for_start=upstream_dags_for_action(data, "start"),
+        upstream_dags_for_stop=upstream_dags_for_action(data, "stop"),
         schedule_pairs=schedule_pairs,
+        actions=actions,
         environments=build_workflow_environments_from_config(data),
         tags=tuple(data.get("tags") or ("remote-workflow", "ssh")),
+        run_description=run_metadata.get(
+            "description",
+            data.get("run_description", ""),
+        ),
         start_description=start_metadata.get(
             "description",
             data.get("start_description", ""),
@@ -1952,6 +2143,9 @@ def build_workflow_definition_from_config(
         stop_description=stop_metadata.get(
             "description",
             data.get("stop_description", ""),
+        ),
+        run_tags=normalize_string_tuple(
+            run_metadata.get("tags", data.get("run_tags", ()))
         ),
         start_tags=normalize_string_tuple(
             start_metadata.get("tags", data.get("start_tags", ()))
@@ -1997,11 +2191,20 @@ def collect_schedule_values(
     pairs: tuple[WorkflowSchedulePair, ...],
     action: str,
 ) -> str | tuple[str, ...] | None:
+    def schedule_for_action(pair: WorkflowSchedulePair) -> str | tuple[str, ...] | list[str] | None:
+        if action == RUN_ACTION:
+            return pair.run
+        if action == "start":
+            return pair.start
+        if action == "stop":
+            return pair.stop
+        raise ValueError(f"action must be one of {SUPPORTED_WORKFLOW_ACTIONS}")
+
     values = unique_preserving_order(
         [
             value
             for pair in pairs
-            for value in schedule_values(pair.start if action == "start" else pair.stop)
+            for value in schedule_values(schedule_for_action(pair))
         ]
     )
     if not values:
@@ -2024,10 +2227,17 @@ def build_workflow_action_dag_id(
 
     if len(enabled_pairs) == 1:
         pair = enabled_pairs[0]
-        explicit_dag_id = pair.start_dag_id if action == "start" else pair.stop_dag_id
+        explicit_dag_ids = {
+            RUN_ACTION: pair.run_dag_id,
+            "start": pair.start_dag_id,
+            "stop": pair.stop_dag_id,
+        }
+        explicit_dag_id = explicit_dag_ids.get(action)
         if explicit_dag_id:
             return explicit_dag_id
 
+    if action == RUN_ACTION:
+        return workflow_prefix
     return f"{workflow_prefix}-{action}"
 
 
@@ -2048,7 +2258,9 @@ def register_workflow_dags_from_json(
         default_workflow_id=default_workflow_id_from_path(config_path, root_path),
     )
     dag_id_prefix = config.get("dag_id_prefix", default_dag_id_prefix(workflow.workflow_id))
-    dag_ids = config.get("dag_ids", {})
+    dag_ids = dict(config.get("dag_ids", {}))
+    if config.get("dag_id"):
+        dag_ids.setdefault(RUN_ACTION, config["dag_id"])
     current_env = get_current_env_name()
     enabled_pairs = tuple(
         pair for pair in workflow.schedule_pairs if current_env in pair.enabled_in_envs
@@ -2056,33 +2268,20 @@ def register_workflow_dags_from_json(
     if not enabled_pairs:
         return
 
-    start_dag = create_workflow_dag(
-        workflow=workflow,
-        dag_id=build_workflow_action_dag_id(
-            action="start",
-            workflow_prefix=dag_id_prefix,
-            enabled_pairs=enabled_pairs,
-            top_level_dag_ids=dag_ids,
-        ),
-        action="start",
-        schedule=collect_schedule_values(enabled_pairs, "start"),
-        source_file=config_file,
-    )
-    stop_dag = create_workflow_dag(
-        workflow=workflow,
-        dag_id=build_workflow_action_dag_id(
-            action="stop",
-            workflow_prefix=dag_id_prefix,
-            enabled_pairs=enabled_pairs,
-            top_level_dag_ids=dag_ids,
-        ),
-        action="stop",
-        schedule=collect_schedule_values(enabled_pairs, "stop"),
-        source_file=config_file,
-    )
-
-    global_namespace[f"{workflow.workflow_id}_start"] = start_dag
-    global_namespace[f"{workflow.workflow_id}_stop"] = stop_dag
+    for action in workflow.actions:
+        action_dag = create_workflow_dag(
+            workflow=workflow,
+            dag_id=build_workflow_action_dag_id(
+                action=action,
+                workflow_prefix=dag_id_prefix,
+                enabled_pairs=enabled_pairs,
+                top_level_dag_ids=dag_ids,
+            ),
+            action=action,
+            schedule=collect_schedule_values(enabled_pairs, action),
+            source_file=config_file,
+        )
+        global_namespace[f"{workflow.workflow_id}_{action}"] = action_dag
 
 
 def register_workflow_dags_from_json_dir(

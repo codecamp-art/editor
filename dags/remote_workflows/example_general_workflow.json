@@ -1,0 +1,103 @@
+{
+  "actions": [
+    "run"
+  ],
+  "description": "# Daily Batch Workflow\n\nExample only. This file demonstrates a general remote workflow that runs tasks in dependency order without start, stop, or status controls.",
+  "schedules": {
+    "run": "15 9 * * 1-5"
+  },
+  "command_timeout_seconds": 1800,
+  "tags": [
+    "remote-workflow",
+    "batch",
+    "example"
+  ],
+  "dag_metadata": {
+    "run": {
+      "description": "Run DAG: executes the configured task dependency graph.",
+      "tags": [
+        "run"
+      ]
+    }
+  },
+  "host_groups": {
+    "extractor": {
+      "type": "linux_script",
+      "sudo_user": "batch_{env}",
+      "working_dir": "/opt/batch/{env}/current",
+      "commands": {
+        "run": "./bin/extract-orders --env {env}"
+      },
+      "environments": {
+        "dev": {
+          "sudo_user": "batch_dev",
+          "hosts": [
+            "dev-batch-01.company.net"
+          ]
+        },
+        "qa": {
+          "sudo_user": "batch_qa",
+          "commands": {
+            "run": "./bin/extract-orders --env qa --sample-size 1000"
+          },
+          "hosts": [
+            "qa-batch-01.company.net"
+          ]
+        },
+        "prod": {
+          "sudo_user": "batch",
+          "hosts": [
+            "prod-batch-01.company.net",
+            "prod-batch-02.company.net"
+          ]
+        }
+      }
+    },
+    "publisher": {
+      "type": "windows_script",
+      "windows_shell": "powershell",
+      "working_dir": "D:\\Apps\\BatchPublisher",
+      "commands": {
+        "run": ".\\publish.ps1 -Env {env}"
+      },
+      "environments": {
+        "qa": {
+          "working_dir": "D:\\Apps\\BatchPublisherQa",
+          "hosts": [
+            "qa-win-batch-01.company.net"
+          ]
+        },
+        "prod": {
+          "hosts": [
+            "prod-win-batch-01.company.net"
+          ]
+        }
+      }
+    }
+  },
+  "tasks": [
+    {
+      "task_id": "extract_orders",
+      "host_group": "extractor"
+    },
+    {
+      "task_id": "publish_orders",
+      "host_group": "publisher",
+      "depends_on": [
+        "extract_orders"
+      ]
+    }
+  ],
+  "upstream_dags": {
+    "run": [
+      {
+        "dag_id": "reference-data-refresh",
+        "task_id": "end",
+        "enabled_in_envs": [
+          "qa",
+          "prod"
+        ]
+      }
+    ]
+  }
+}
