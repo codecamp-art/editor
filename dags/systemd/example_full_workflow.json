@@ -18,6 +18,20 @@
     "remote-workflow",
     "example"
   ],
+  "dag_metadata": {
+    "start": {
+      "description": "Start DAG: runs start order and honors upstream start dependencies.",
+      "tags": [
+        "start"
+      ]
+    },
+    "stop": {
+      "description": "Stop DAG: runs the configured stop order, or the reversed start order when no stop dependencies are defined.",
+      "tags": [
+        "stop"
+      ]
+    }
+  },
   "host_groups": {
     "gateway": {
       "type": "systemd",

@@ -141,6 +141,10 @@ class SystemdWorkflowDefinition:
     schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
     environments: dict[str, Any] | None = None
     tags: tuple[str, ...] = ("systemd", "ssh")
+    start_description: str = ""
+    stop_description: str = ""
+    start_tags: tuple[str, ...] = ()
+    stop_tags: tuple[str, ...] = ()
     owner: str | None = None
     command_timeout_seconds: int = 1800
 
@@ -1374,6 +1378,22 @@ def filter_enabled_dependencies(
     return tuple(dep for dep in dependencies if current_env in dep.enabled_in_envs)
 
 
+def build_action_description(workflow: SystemdWorkflowDefinition, action: str) -> str:
+    action_description = (
+        workflow.start_description if action == "start" else workflow.stop_description
+    )
+    if not action_description:
+        return workflow.description
+    if not workflow.description:
+        return action_description
+    return f"{workflow.description.rstrip()}\n\n{action_description.lstrip()}"
+
+
+def build_action_tags(workflow: SystemdWorkflowDefinition, action: str) -> tuple[str, ...]:
+    action_tags = workflow.start_tags if action == "start" else workflow.stop_tags
+    return unique_preserving_order((*workflow.tags, *action_tags))
+
+
 def task_ids_for_logical_dependencies(
     *,
     logical_upstream_ids: tuple[str, ...],
@@ -1426,9 +1446,9 @@ def create_systemd_dag(
 
     @dag_decorator(
         dag_id=dag_id,
-        description=workflow.description,
+        description=build_action_description(workflow, action),
         schedule=schedule,
-        tags=list(workflow.tags),
+        tags=list(build_action_tags(workflow, action)),
         timezone=runtime_context["timezone"],
         params=airflow_params,
         owner=runtime_context["owner"],
@@ -1884,6 +1904,20 @@ def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
     return deep_merge_dicts({"defaults": flat_topology}, environments)
 
 
+def action_metadata_from_config(data: dict, action: str) -> dict[str, Any]:
+    metadata = data.get("dag_metadata") or data.get("dag_overrides") or {}
+    if metadata is None:
+        return {}
+    if not isinstance(metadata, dict):
+        raise TypeError("dag_metadata must be a JSON object.")
+    action_metadata = metadata.get(action, {})
+    if action_metadata is None:
+        return {}
+    if not isinstance(action_metadata, dict):
+        raise TypeError(f"dag_metadata.{action} must be a JSON object.")
+    return action_metadata
+
+
 def build_systemd_workflow_definition_from_config(
     data: dict,
     *,
@@ -1891,6 +1925,8 @@ def build_systemd_workflow_definition_from_config(
 ) -> SystemdWorkflowDefinition:
     schedule_pairs = build_schedule_pairs_from_config(data)
     upstream_dags = data.get("upstream_dags", {})
+    start_metadata = action_metadata_from_config(data, "start")
+    stop_metadata = action_metadata_from_config(data, "stop")
     workflow_id = data.get("workflow_id") or default_workflow_id
     if not workflow_id:
         raise ValueError("Workflow config must define workflow_id or be loaded from a JSON file.")
@@ -1917,6 +1953,20 @@ def build_systemd_workflow_definition_from_config(
         schedule_pairs=schedule_pairs,
         environments=build_workflow_environments_from_config(data),
         tags=tuple(data.get("tags") or ("systemd", "ssh")),
+        start_description=start_metadata.get(
+            "description",
+            data.get("start_description", ""),
+        ),
+        stop_description=stop_metadata.get(
+            "description",
+            data.get("stop_description", ""),
+        ),
+        start_tags=normalize_string_tuple(
+            start_metadata.get("tags", data.get("start_tags", ()))
+        ),
+        stop_tags=normalize_string_tuple(
+            stop_metadata.get("tags", data.get("stop_tags", ()))
+        ),
         owner=data.get("owner"),
         command_timeout_seconds=int(data.get("command_timeout_seconds", 1800)),
     )
