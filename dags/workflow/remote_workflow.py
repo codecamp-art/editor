@@ -57,6 +57,7 @@ LINUX_SCRIPT_TASK_TYPE = "linux_script"
 WINDOWS_SCRIPT_TASK_TYPE = "windows_script"
 SCRIPT_TASK_TYPES = {LINUX_SCRIPT_TASK_TYPE, WINDOWS_SCRIPT_TASK_TYPE}
 SUPPORTED_TASK_TYPES = {SYSTEMD_TASK_TYPE, *SCRIPT_TASK_TYPES}
+REMOTE_COMMAND_ACTIONS = (*SUPPORTED_WORKFLOW_ACTIONS, STATUS_ACTION)
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
 HOST_GROUP_ONLY_RUNTIME_KEYS = ("remote_env_vars", "windows_shell")
@@ -70,6 +71,14 @@ TOPOLOGY_METADATA_KEYS = (
     "host_group_defaults",
     "host_groups",
     "variables",
+)
+HOST_GROUP_BULK_TASK_KEYS = (
+    "service_name",
+    "service_names",
+    "services",
+    "commands",
+    "scripts",
+    "processes",
 )
 RUNTIME_OVERRIDE_KEYS = (
     "task_type",
@@ -181,6 +190,7 @@ class RemoteWorkflowDefinition:
     upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
     schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
     actions: tuple[str, ...] = START_STOP_ACTIONS
+    target_runtime_envs: tuple[str, ...] = ()
     environments: dict[str, Any] | None = None
     tags: tuple[str, ...] = ("remote-workflow", "ssh")
     run_description: str = ""
@@ -406,6 +416,161 @@ def apply_host_group_env_overrides(
     return deep_merge_dicts(base_config, env_config)
 
 
+def task_id_from_service_name(service_name: str) -> str:
+    base_name = str(service_name).split("/")[-1]
+    if base_name.endswith(".service"):
+        base_name = base_name[:-len(".service")]
+    return sanitize_task_id(base_name)
+
+
+def host_group_bulk_items(host_group_config: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    items: list[dict[str, Any]] = []
+
+    def append_items(raw_items: Any, *, item_kind: str) -> None:
+        if raw_items is None:
+            return
+        if not isinstance(raw_items, list):
+            raise TypeError(f"host_group.{item_kind} must be a list when provided.")
+        for raw_item in raw_items:
+            if isinstance(raw_item, str):
+                if item_kind not in {"service_name", "service_names", "services"}:
+                    raise TypeError(f"host_group.{item_kind} entries must be JSON objects.")
+                items.append(
+                    {
+                        "type": SYSTEMD_TASK_TYPE,
+                        "service_name": raw_item,
+                    }
+                )
+                continue
+            if not isinstance(raw_item, dict):
+                raise TypeError(
+                    f"host_group.{item_kind} entries must be strings or JSON objects."
+                )
+            item = dict(raw_item)
+            if item_kind in {"service_name", "service_names", "services"}:
+                item.setdefault("type", SYSTEMD_TASK_TYPE)
+                item["service_name"] = item.get("service_name", item.get("name"))
+            elif item_kind in {"commands", "scripts"}:
+                item.setdefault("type", LINUX_SCRIPT_TASK_TYPE)
+            items.append(item)
+
+    for item_kind in HOST_GROUP_BULK_TASK_KEYS:
+        raw_items = host_group_config.get(item_kind)
+        if item_kind in {"service_name", "commands"} and not isinstance(raw_items, list):
+            raw_items = None
+        append_items(raw_items, item_kind=item_kind)
+    return tuple(items)
+
+
+def command_map_from_bulk_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(item.get("commands"), dict):
+        return item["commands"]
+
+    commands = {
+        action: item[action]
+        for action in REMOTE_COMMAND_ACTIONS
+        if action in item
+    }
+    if "command" in item:
+        commands.setdefault(RUN_ACTION, item["command"])
+    return commands or None
+
+
+def task_config_from_bulk_item(
+    *,
+    host_group_id: str,
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    task_type = item.get("task_type", item.get("type"))
+    service_name = item.get("service_name") or item.get("name")
+    commands = command_map_from_bulk_item(item)
+
+    if task_type is None:
+        task_type = SYSTEMD_TASK_TYPE if service_name else LINUX_SCRIPT_TASK_TYPE
+
+    task_id = item.get("task_id") or item.get("id")
+    if not task_id:
+        if service_name:
+            task_id = task_id_from_service_name(service_name)
+        else:
+            raise ValueError(
+                f"Bulk task in host_group '{host_group_id}' must define task_id."
+            )
+
+    task_config = {
+        key: value
+        for key, value in item.items()
+        if key not in {"id", "name", "command", *REMOTE_COMMAND_ACTIONS}
+    }
+    task_config.update(
+        {
+            "task_id": task_id,
+            "host_group": host_group_id,
+            "type": task_type,
+        }
+    )
+    if service_name:
+        task_config["service_name"] = service_name
+    if commands is not None:
+        task_config["commands"] = commands
+    return task_config
+
+
+def build_generated_task_group_from_host_group(
+    host_group_id: str,
+    host_group_config: dict[str, Any],
+) -> WorkflowTaskGroupSpec | None:
+    bulk_items = host_group_bulk_items(host_group_config)
+    if not bulk_items:
+        return None
+
+    task_group_config = host_group_config.get("task_group", {})
+    if task_group_config is None:
+        task_group_config = {}
+    if not isinstance(task_group_config, dict):
+        raise TypeError(f"host_group '{host_group_id}' task_group must be a JSON object.")
+
+    group_config = {
+        **task_group_config,
+        "group_id": task_group_config.get(
+            "group_id",
+            host_group_config.get("task_group_id", f"{host_group_id}_tasks"),
+        ),
+        "tasks": [
+            task_config_from_bulk_item(host_group_id=host_group_id, item=item)
+            for item in bulk_items
+        ],
+    }
+    return build_task_group_spec_from_config(group_config)
+
+
+def iter_host_groups_for_generated_tasks(environments: dict[str, Any]) -> tuple[tuple[str, dict], ...]:
+    default_topology = get_default_environment_topology(environments)
+    host_groups = optional_json_object(
+        default_topology.get("host_groups"),
+        name="Workflow default host_groups",
+    )
+    return tuple(
+        (host_group_id, host_group_config)
+        for host_group_id, host_group_config in host_groups.items()
+        if isinstance(host_group_config, dict)
+    )
+
+
+def build_generated_task_groups_from_environments(
+    environments: dict[str, Any],
+) -> tuple[WorkflowTaskGroupSpec, ...]:
+    generated_groups: list[WorkflowTaskGroupSpec] = []
+    for host_group_id, host_group_config in iter_host_groups_for_generated_tasks(environments):
+        group_spec = build_generated_task_group_from_host_group(
+            host_group_id,
+            host_group_config,
+        )
+        if group_spec is not None:
+            generated_groups.append(group_spec)
+    return tuple(generated_groups)
+
+
 def reject_host_group_only_runtime_keys(
     config: dict[str, Any],
     *,
@@ -438,7 +603,7 @@ def reject_host_group_only_runtime_keys(
 def extract_systemd_overrides(config: dict[str, Any]) -> dict[str, Any]:
     systemd_overrides = dict(config.get("systemd") or {})
     for key in ("platform", "service_name"):
-        if key in config:
+        if key in config and not isinstance(config[key], list):
             systemd_overrides[key] = config[key]
     return systemd_overrides
 
@@ -456,6 +621,8 @@ def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
 
     for key in RUNTIME_OVERRIDE_KEYS:
         if key in config:
+            if key == "commands" and isinstance(config[key], list):
+                continue
             overrides[key] = config[key]
 
     return overrides
@@ -1375,7 +1542,7 @@ def build_systemd_service_command(
     platform = systemd_cfg.get("platform", task_spec.platform)
     scope = infer_systemd_scope(platform)
     service_name = systemd_cfg["service_name"]
-    sudo_user = host_target.sudo_user or task_spec.sudo_user
+    sudo_user = task_spec.sudo_user or host_target.sudo_user
 
     if platform not in SUPPORTED_SYSTEMD_PLATFORMS:
         raise ValueError(f"Unsupported systemd platform '{platform}'.")
@@ -1546,7 +1713,7 @@ def build_remote_task_command(
         task_spec=task_spec,
         validated_params=validated_params,
     )
-    sudo_user = host_target.sudo_user or task_spec.sudo_user
+    sudo_user = task_spec.sudo_user or host_target.sudo_user
     if task_spec.task_type == LINUX_SCRIPT_TASK_TYPE:
         return build_linux_shell_command(
             raw_command=commands[action],
@@ -1747,6 +1914,7 @@ def create_workflow_dag(
     dag_id: str,
     action: str,
     schedule: str | list[str] | tuple[str, ...] | None,
+    target_env: str | None = None,
     source_file: str | Path | None = None,
     runtime_env_file: str | Path = DEFAULT_RUNTIME_ENV_FILE,
 ):
@@ -1756,7 +1924,7 @@ def create_workflow_dag(
         owner=workflow.owner or workflow.workflow_id,
         config_file=runtime_env_file,
     )
-    current_env = get_current_env_name()
+    current_env = target_env or get_current_env_name()
     topology = resolve_topology_for_env(workflow, current_env)
     plan = prepare_workflow_plan(
         workflow=workflow,
@@ -2225,9 +2393,11 @@ def iter_runtime_config_blocks(data: dict) -> tuple[dict[str, Any], ...]:
     blocks: list[dict[str, Any]] = []
     host_groups = data.get("host_groups") or {}
     if isinstance(host_groups, dict):
-        blocks.extend(
-            value for value in host_groups.values() if isinstance(value, dict)
-        )
+        for value in host_groups.values():
+            if not isinstance(value, dict):
+                continue
+            blocks.append(value)
+            blocks.extend(host_group_bulk_items(value))
     blocks.extend(
         task_data for task_data in data.get("tasks", []) if isinstance(task_data, dict)
     )
@@ -2319,6 +2489,19 @@ def normalize_workflow_actions(
     return unique_preserving_order(actions)
 
 
+def configured_target_runtime_envs(data: dict) -> tuple[str, ...]:
+    raw_envs = first_config_value(
+        data,
+        ("runtime_envs", "target_runtime_envs", "dag_runtime_envs"),
+    )
+    if raw_envs is None:
+        return ()
+    envs = normalize_string_tuple(raw_envs)
+    if not envs:
+        raise ValueError("runtime_envs must define at least one environment when provided.")
+    return envs
+
+
 def build_workflow_environments_from_config(data: dict) -> dict[str, Any]:
     environments = optional_json_object(
         data.get("environments") or data.get("topologies"),
@@ -2368,6 +2551,12 @@ def build_workflow_definition_from_config(
 ) -> RemoteWorkflowDefinition:
     schedule_pairs = build_schedule_pairs_from_config(data)
     actions = normalize_workflow_actions(data, schedule_pairs)
+    environments = build_workflow_environments_from_config(data)
+    explicit_task_groups = tuple(
+        build_task_group_spec_from_config(group_data)
+        for group_data in data.get("task_groups", [])
+    )
+    generated_task_groups = build_generated_task_groups_from_environments(environments)
     run_metadata = action_metadata_from_config(data, RUN_ACTION)
     start_metadata = action_metadata_from_config(data, START_ACTION)
     stop_metadata = action_metadata_from_config(data, STOP_ACTION)
@@ -2383,16 +2572,14 @@ def build_workflow_definition_from_config(
         schedule_stop=schedule_pairs[0].stop if schedule_pairs else None,
         fields=data.get("fields") or {},
         tasks=tuple(build_task_spec_from_config(task_data) for task_data in data.get("tasks", [])),
-        task_groups=tuple(
-            build_task_group_spec_from_config(group_data)
-            for group_data in data.get("task_groups", [])
-        ),
+        task_groups=(*explicit_task_groups, *generated_task_groups),
         upstream_dags_for_run=upstream_dags_for_action(data, RUN_ACTION),
         upstream_dags_for_start=upstream_dags_for_action(data, START_ACTION),
         upstream_dags_for_stop=upstream_dags_for_action(data, STOP_ACTION),
         schedule_pairs=schedule_pairs,
         actions=actions,
-        environments=build_workflow_environments_from_config(data),
+        target_runtime_envs=configured_target_runtime_envs(data),
+        environments=environments,
         tags=tuple(data.get("tags") or ("remote-workflow", "ssh")),
         run_description=run_metadata.get(
             "description",
@@ -2477,6 +2664,13 @@ def default_dag_id_for_action(workflow_prefix: str, action: str) -> str:
     return f"{workflow_prefix}-{action}"
 
 
+def default_env_dag_id_for_action(workflow_prefix: str, target_env: str, action: str) -> str:
+    require_workflow_action(action)
+    if action == RUN_ACTION:
+        return f"{workflow_prefix}-{target_env}"
+    return f"{workflow_prefix}-{target_env}-{action}"
+
+
 def collect_schedule_values(
     pairs: tuple[WorkflowSchedulePair, ...],
     action: str,
@@ -2501,7 +2695,15 @@ def build_workflow_action_dag_id(
     workflow_prefix: str,
     enabled_pairs: tuple[WorkflowSchedulePair, ...],
     top_level_dag_ids: dict,
+    target_env: str | None = None,
+    include_env_in_dag_id: bool = False,
 ) -> str:
+    if include_env_in_dag_id and target_env:
+        env_dag_ids = top_level_dag_ids.get(target_env)
+        if isinstance(env_dag_ids, dict) and env_dag_ids.get(action):
+            return env_dag_ids[action]
+        return default_env_dag_id_for_action(workflow_prefix, target_env, action)
+
     top_level_dag_id = top_level_dag_ids.get(action)
     if top_level_dag_id:
         return top_level_dag_id
@@ -2513,6 +2715,24 @@ def build_workflow_action_dag_id(
             return explicit_dag_id
 
     return default_dag_id_for_action(workflow_prefix, action)
+
+
+def effective_target_runtime_envs(workflow: RemoteWorkflowDefinition) -> tuple[str, ...]:
+    return workflow.target_runtime_envs or (get_current_env_name(),)
+
+
+def workflow_namespace_key(
+    *,
+    workflow_id: str,
+    action: str,
+    target_env: str,
+    include_env: bool,
+) -> str:
+    parts = [workflow_id]
+    if include_env:
+        parts.append(target_env)
+    parts.append(action)
+    return "_".join(sanitize_task_id(part) for part in parts)
 
 
 def register_workflow_dags_from_json(
@@ -2535,27 +2755,39 @@ def register_workflow_dags_from_json(
     dag_ids = dict(config.get("dag_ids", {}))
     if config.get("dag_id"):
         dag_ids.setdefault(RUN_ACTION, config["dag_id"])
-    current_env = get_current_env_name()
-    enabled_pairs = tuple(
-        pair for pair in workflow.schedule_pairs if current_env in pair.enabled_in_envs
-    )
-    if not enabled_pairs:
-        return
-
-    for action in workflow.actions:
-        action_dag = create_workflow_dag(
-            workflow=workflow,
-            dag_id=build_workflow_action_dag_id(
-                action=action,
-                workflow_prefix=dag_id_prefix,
-                enabled_pairs=enabled_pairs,
-                top_level_dag_ids=dag_ids,
-            ),
-            action=action,
-            schedule=collect_schedule_values(enabled_pairs, action),
-            source_file=config_file,
+    target_envs = effective_target_runtime_envs(workflow)
+    include_env_in_dag_id = bool(workflow.target_runtime_envs)
+    for target_env in target_envs:
+        enabled_pairs = tuple(
+            pair for pair in workflow.schedule_pairs if target_env in pair.enabled_in_envs
         )
-        global_namespace[f"{workflow.workflow_id}_{action}"] = action_dag
+        if not enabled_pairs:
+            continue
+
+        for action in workflow.actions:
+            action_dag = create_workflow_dag(
+                workflow=workflow,
+                dag_id=build_workflow_action_dag_id(
+                    action=action,
+                    workflow_prefix=dag_id_prefix,
+                    enabled_pairs=enabled_pairs,
+                    top_level_dag_ids=dag_ids,
+                    target_env=target_env,
+                    include_env_in_dag_id=include_env_in_dag_id,
+                ),
+                action=action,
+                schedule=collect_schedule_values(enabled_pairs, action),
+                target_env=target_env,
+                source_file=config_file,
+            )
+            global_namespace[
+                workflow_namespace_key(
+                    workflow_id=workflow.workflow_id,
+                    action=action,
+                    target_env=target_env,
+                    include_env=include_env_in_dag_id,
+                )
+            ] = action_dag
 
 
 def register_workflow_dags_from_json_dir(

@@ -1,5 +1,9 @@
 {
   "description": "# Example Platform Start/Stop\n\nExample only. This file demonstrates a complete self-contained remote workflow config.",
+  "runtime_envs": [
+    "prod",
+    "dr"
+  ],
   "schedule_pairs": [
     {
       "start": "0 6 * * 1-5",
@@ -259,6 +263,59 @@
           "variables": {
             "backup_service_suffix": "-dr"
           }
+        }
+      }
+    },
+    "shared_app_server": {
+      "platform": "rhel8",
+      "task_group": {
+        "group_id": "shared_app_server_services",
+        "tooltip": "Multiple services and scripts on the same Linux server",
+        "start_depends_on": [
+          "gateway_rhel7"
+        ],
+        "stop_depends_on": [
+          "backend_services"
+        ]
+      },
+      "services": [
+        {
+          "task_id": "order_api",
+          "service_name": "order-api.service",
+          "sudo_user": "orderapp"
+        },
+        {
+          "task_id": "position_api",
+          "service_name": "position-api.service",
+          "sudo_user": "positionapp",
+          "start_depends_on": [
+            "order_api"
+          ]
+        }
+      ],
+      "scripts": [
+        {
+          "task_id": "warm_cache",
+          "type": "linux_script",
+          "sudo_user": "cacheops",
+          "working_dir": "/opt/cache/{env}/current",
+          "commands": {
+            "start": "./cache-control start --env {env}",
+            "stop": "./cache-control stop --env {env}",
+            "status": "./cache-control status --env {env}"
+          }
+        }
+      ],
+      "environments": {
+        "prod": {
+          "hosts": [
+            "prod-app-shared-01.company.net"
+          ]
+        },
+        "dr": {
+          "hosts": [
+            "dr-app-shared-01.company.net"
+          ]
         }
       }
     },
