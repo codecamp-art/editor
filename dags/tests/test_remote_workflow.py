@@ -460,6 +460,97 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertIn("./replay-check start", dr_replay_command)
         self.assertIn("replayops", dr_replay_command)
 
+    def test_missing_env_target_and_dependency_are_skipped(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "app_servers": {
+                        "platform": "rhel8",
+                        "services": [
+                            {
+                                "id": "app_{host_id}",
+                                "service_name": "app.service",
+                            },
+                        ],
+                        "environments": {
+                            "dev": {
+                                "hosts": [
+                                    {
+                                        "host": "dev-app-01.company.net",
+                                        "host_id": "one",
+                                    },
+                                ],
+                            },
+                            "qa": {
+                                "hosts": [
+                                    {
+                                        "host": "qa-app-01.company.net",
+                                        "host_id": "one",
+                                    },
+                                    {
+                                        "host": "qa-app-02.company.net",
+                                        "host_id": "two",
+                                    },
+                                ],
+                                "services": [
+                                    {
+                                        "id": "qa_only_{host_id}",
+                                        "service_name": "qa-only.service",
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                },
+                "task_groups": [
+                    {
+                        "group_id": "app_services",
+                        "tasks": [
+                            {
+                                "target": "app_one",
+                                "start_depends_on": ["app_two"],
+                            },
+                            {
+                                "target": "app_two",
+                            },
+                        ],
+                    },
+                    {
+                        "group_id": "qa_only_services",
+                        "tasks": [
+                            {
+                                "target": "qa_only_two",
+                            },
+                        ],
+                    },
+                ],
+            },
+            default_workflow_id="app",
+        )
+
+        dev_plan = workflow_plan_for_env(workflow, "dev")
+        self.assertEqual(tuple(task.task_id for task in dev_plan.tasks), ("app_one",))
+        self.assertEqual(tuple(group.group_id for group in dev_plan.groups), ("app_services",))
+        self.assertEqual(dev_plan.start_upstream_task_ids, {"app_one": ()})
+
+        qa_plan = workflow_plan_for_env(workflow, "qa")
+        self.assertEqual(
+            tuple(task.task_id for task in qa_plan.tasks),
+            ("app_one", "app_two", "qa_only_two"),
+        )
+        self.assertEqual(
+            tuple(group.group_id for group in qa_plan.groups),
+            ("app_services", "qa_only_services"),
+        )
+        self.assertEqual(
+            qa_plan.start_upstream_task_ids,
+            {
+                "app_one": ("app_two",),
+                "app_two": (),
+                "qa_only_two": (),
+            },
+        )
+
     def test_legacy_host_group_task_group_field_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "no longer supports task_group"):
             build_workflow_definition_from_config(

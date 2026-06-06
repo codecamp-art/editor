@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="520" viewBox="0 0 1260 520">
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#7b8794" /></marker>
+<filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#8090a5" flood-opacity="0.22"/></filter>
+</defs>
+<rect width="100%" height="100%" fill="#f7f9fc"/>
+<text x="38" y="42" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#172033">example_general_workflow - RUN DAG</text>
+<text x="38" y="69" font-family="Arial, sans-serif" font-size="13" fill="#5d6b7a">Target env: prod | Logical Airflow Graph View preview</text>
+<rect x="332" y="142.5" width="226" height="234.0" rx="10" fill="#f2f6ff" stroke="#7e9ed6" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="344" y="164.5" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#7e9ed6">extractors</text>
+<path d="M 540.0 212.5 C 585.0 212.5, 585.0 267.5, 624.0 267.5" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 540.0 322.5 C 585.0 322.5, 585.0 267.5, 624.0 267.5" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 162.0 267.5 C 256.0 267.5, 256.0 212.5, 344.0 212.5" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 162.0 267.5 C 256.0 267.5, 256.0 322.5, 344.0 322.5" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 820.0 267.5 C 865.0 267.5, 865.0 267.5, 904.0 267.5" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="70" y="241.5" width="92" height="52" rx="22" fill="#d8f3dc" stroke="#c7d0dd" filter="url(#shadow)"/>
+<text x="116.0" y="272.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#172033">start</text>
+<rect x="910" y="241.5" width="92" height="52" rx="22" fill="#fde2e4" stroke="#c7d0dd" filter="url(#shadow)"/>
+<text x="956.0" y="272.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#172033">end</text>
+<rect x="630" y="233.5" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="725.0" y="256.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">publish_orders</text>
+<text x="725.0" y="287.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">linux_script | 1 host</text>
+<rect x="350" y="178.5" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="445.0" y="195.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">extract_orders_prod</text>
+<text x="445.0" y="211.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">batch_01</text>
+<text x="445.0" y="232.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">linux_script | 1 host</text>
+<rect x="350" y="288.5" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="445.0" y="305.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">extract_orders_prod</text>
+<text x="445.0" y="321.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">batch_02</text>
+<text x="445.0" y="342.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">linux_script | 1 host</text>
+</svg>

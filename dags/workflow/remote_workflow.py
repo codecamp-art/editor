@@ -1904,12 +1904,7 @@ def prepare_workflow_plan(
             group_tasks.append(resolved_task)
 
         if not group_tasks:
-            if resolved_group.optional:
-                continue
-            raise ValueError(
-                f"Task group '{resolved_group.group_id}' has no enabled tasks in env "
-                f"'{current_env}'."
-            )
+            continue
 
         active_groups.append(replace(resolved_group, tasks=tuple(group_tasks)))
         active_tasks.extend(group_tasks)

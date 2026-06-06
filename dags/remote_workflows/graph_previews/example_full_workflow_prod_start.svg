@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2380" height="665" viewBox="0 0 2380 665">
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#7b8794" /></marker>
+<filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#8090a5" flood-opacity="0.22"/></filter>
+</defs>
+<rect width="100%" height="100%" fill="#f7f9fc"/>
+<text x="38" y="42" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#172033">example_full_workflow - START DAG</text>
+<text x="38" y="69" font-family="Arial, sans-serif" font-size="13" fill="#5d6b7a">Target env: prod | Logical Airflow Graph View preview</text>
+<rect x="612" y="105.0" width="506" height="454.0" rx="10" fill="#f2f6ff" stroke="#7e9ed6" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="624" y="127.0" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#7e9ed6">shared_app_services</text>
+<rect x="1172" y="270.0" width="506" height="124.0" rx="10" fill="#f2f6ff" stroke="#7e9ed6" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="1184" y="292.0" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#7e9ed6">backend_services</text>
+<rect x="1732" y="270.0" width="226" height="124.0" rx="10" fill="#f2f6ff" stroke="#7e9ed6" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="1744" y="292.0" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#7e9ed6">windows_jobs</text>
+<path d="M 162.0 340.0 C 256.0 340.0, 256.0 340.0, 344.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 540.0 340.0 C 585.0 340.0, 585.0 175.0, 624.0 175.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 540.0 340.0 C 585.0 340.0, 585.0 285.0, 624.0 285.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 820.0 175.0 C 865.0 175.0, 865.0 285.0, 904.0 285.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 820.0 285.0 C 865.0 285.0, 865.0 395.0, 904.0 395.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 540.0 340.0 C 585.0 340.0, 585.0 395.0, 624.0 395.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 540.0 340.0 C 585.0 340.0, 585.0 505.0, 624.0 505.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 1100.0 285.0 C 1145.0 285.0, 1145.0 340.0, 1184.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 1100.0 395.0 C 1145.0 395.0, 1145.0 340.0, 1184.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 820.0 395.0 C 1005.0 395.0, 1005.0 340.0, 1184.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 820.0 505.0 C 1005.0 505.0, 1005.0 340.0, 1184.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 1380.0 340.0 C 1425.0 340.0, 1425.0 340.0, 1464.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 1660.0 340.0 C 1705.0 340.0, 1705.0 340.0, 1744.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 1940.0 340.0 C 1985.0 340.0, 1985.0 340.0, 2024.0 340.0" fill="none" stroke="#7b8794" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="70" y="314.0" width="92" height="52" rx="22" fill="#d8f3dc" stroke="#c7d0dd" filter="url(#shadow)"/>
+<text x="116.0" y="345.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#172033">start</text>
+<rect x="2030" y="314.0" width="92" height="52" rx="22" fill="#fde2e4" stroke="#c7d0dd" filter="url(#shadow)"/>
+<text x="2076.0" y="345.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#172033">end</text>
+<rect x="350" y="306.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="445.0" y="329.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">gateway_rhel7</text>
+<text x="445.0" y="360.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">systemd | 2 hosts</text>
+<rect x="630" y="141.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="725.0" y="164.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">order_api_prod_app_01</text>
+<text x="725.0" y="195.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">systemd | 1 host</text>
+<rect x="630" y="251.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="725.0" y="274.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">order_api_prod_app_02</text>
+<text x="725.0" y="305.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">systemd | 1 host</text>
+<rect x="910" y="251.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="1005.0" y="268.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">position_api_prod_app</text>
+<text x="1005.0" y="284.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">01</text>
+<text x="1005.0" y="305.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">systemd | 1 host</text>
+<rect x="910" y="361.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="1005.0" y="378.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">position_api_prod_app</text>
+<text x="1005.0" y="394.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">02</text>
+<text x="1005.0" y="415.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">systemd | 1 host</text>
+<rect x="630" y="361.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="725.0" y="384.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">warm_cache_prod_app_01</text>
+<text x="725.0" y="415.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">linux_script | 1 host</text>
+<rect x="630" y="471.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="725.0" y="494.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">warm_cache_prod_app_02</text>
+<text x="725.0" y="525.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">linux_script | 1 host</text>
+<rect x="1190" y="306.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="1285.0" y="329.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">risk_control</text>
+<text x="1285.0" y="360.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">linux_script | 1 host</text>
+<rect x="1470" y="306.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="1565.0" y="329.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">ha_backup</text>
+<text x="1565.0" y="360.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">systemd | 1 host</text>
+<rect x="1750" y="306.0" width="190" height="68" rx="8" fill="#ffffff" stroke="#5f728a" stroke-width="1.3" filter="url(#shadow)"/>
+<text x="1845.0" y="329.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#172033">windows_adapter</text>
+<text x="1845.0" y="360.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#5d6b7a">linux_script | 1 host</text>
+</svg>
