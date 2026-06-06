@@ -30,13 +30,10 @@
     }
   },
   "host_groups": {
-    "extractor": {
+    "batch_linux_hosts": {
       "type": "linux_script",
       "sudo_user": "batch_{env}",
       "working_dir": "/opt/batch/{env}/current",
-      "commands": {
-        "run": "./bin/extract-orders --env {env}"
-      },
       "fields": {
         "business_date": {
           "type": "string",
@@ -74,11 +71,22 @@
           "description": "Desk filters."
         }
       },
+      "scripts": [
+        {
+          "id": "extract_orders_{host_id}",
+          "commands": {
+            "run": "./bin/extract-orders --env {env}"
+          }
+        }
+      ],
       "environments": {
         "dev": {
           "sudo_user": "batch_dev",
           "hosts": [
-            "dev-batch-01.company.net"
+            {
+              "host": "dev-batch-01.company.net",
+              "host_id": "dev_batch_01"
+            }
           ]
         },
         "qa": {
@@ -99,35 +107,61 @@
               "rates"
             ]
           },
-          "commands": {
-            "run": "./bin/extract-orders --env qa --sample-size 1000"
-          },
+          "scripts": [
+            {
+              "id": "extract_orders_{host_id}",
+              "commands": {
+                "run": "./bin/extract-orders --env qa --sample-size 1000"
+              }
+            }
+          ],
           "hosts": [
-            "qa-batch-01.company.net"
+            {
+              "host": "qa-batch-01.company.net",
+              "host_id": "qa_batch_01"
+            }
           ]
         },
         "prod": {
           "sudo_user": "batch",
           "hosts": [
-            "prod-batch-01.company.net",
-            "prod-batch-02.company.net"
+            {
+              "hosts": [
+                {
+                  "host": "prod-batch-01.company.net",
+                  "host_id": "prod_batch_01"
+                },
+                {
+                  "host": "prod-batch-02.company.net",
+                  "host_id": "prod_batch_02"
+                }
+              ]
+            }
           ]
         },
         "dr": {
           "sudo_user": "batch_dr",
           "hosts": [
-            "dr-batch-01.company.net"
+            {
+              "host": "dr-batch-01.company.net",
+              "host_id": "dr_batch_01"
+            }
           ]
         }
       }
     },
-    "publisher": {
+    "batch_windows_hosts": {
       "type": "windows_script",
       "windows_shell": "powershell",
       "working_dir": "D:\\Apps\\BatchPublisher",
-      "commands": {
-        "run": ".\\publish.ps1 -Env {env}"
-      },
+      "scripts": [
+        {
+          "id": "publish_orders",
+          "commands": {
+            "run": ".\\publish.ps1 -Env {env}"
+          }
+        }
+      ],
       "fields": {
         "publish_mode": {
           "type": "enum",
@@ -150,33 +184,46 @@
         "qa": {
           "working_dir": "D:\\Apps\\BatchPublisherQa",
           "hosts": [
-            "qa-win-batch-01.company.net"
+            {
+              "host": "qa-win-batch-01.company.net"
+            }
           ]
         },
         "prod": {
           "hosts": [
-            "prod-win-batch-01.company.net"
+            {
+              "host": "prod-win-batch-01.company.net"
+            }
           ]
         },
         "dr": {
           "working_dir": "D:\\Apps\\BatchPublisherDr",
           "hosts": [
-            "dr-win-batch-01.company.net"
+            {
+              "host": "dr-win-batch-01.company.net"
+            }
           ]
         }
       }
     }
   },
+  "task_groups": [
+    {
+      "group_id": "extractors",
+      "tasks": [
+        {
+          "targets": [
+            "extract_orders_*"
+          ]
+        }
+      ]
+    }
+  ],
   "tasks": [
     {
-      "task_id": "extract_orders",
-      "host_group": "extractor"
-    },
-    {
-      "task_id": "publish_orders",
-      "host_group": "publisher",
+      "target": "publish_orders",
       "depends_on": [
-        "extract_orders"
+        "extractors"
       ]
     }
   ],

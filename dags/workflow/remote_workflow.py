@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -50,14 +51,14 @@ STOP_ACTION = "stop"
 STATUS_ACTION = "status"
 START_STOP_ACTIONS = (START_ACTION, STOP_ACTION)
 RUN_ACTION = "run"
-SUPPORTED_WORKFLOW_ACTIONS = (*START_STOP_ACTIONS, RUN_ACTION)
+SUPPORTED_WORKFLOW_ACTIONS = (*START_STOP_ACTIONS, STATUS_ACTION, RUN_ACTION)
 SUPPORTED_SYSTEMD_ACTIONS = (*START_STOP_ACTIONS, STATUS_ACTION)
 SYSTEMD_TASK_TYPE = "systemd"
 LINUX_SCRIPT_TASK_TYPE = "linux_script"
 WINDOWS_SCRIPT_TASK_TYPE = "windows_script"
 SCRIPT_TASK_TYPES = {LINUX_SCRIPT_TASK_TYPE, WINDOWS_SCRIPT_TASK_TYPE}
 SUPPORTED_TASK_TYPES = {SYSTEMD_TASK_TYPE, *SCRIPT_TASK_TYPES}
-REMOTE_COMMAND_ACTIONS = (*SUPPORTED_WORKFLOW_ACTIONS, STATUS_ACTION)
+REMOTE_COMMAND_ACTIONS = SUPPORTED_WORKFLOW_ACTIONS
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
 HOST_GROUP_ONLY_RUNTIME_KEYS = ("remote_env_vars", "windows_shell")
@@ -80,11 +81,7 @@ HOST_GROUP_BULK_TASK_KEYS = (
     "scripts",
     "processes",
 )
-HOST_GROUP_ENV_METADATA_KEYS = (
-    "hosts",
-    "variables",
-    "environments",
-)
+TASK_TARGET_KEYS = ("target", "target_id", "targets", "target_ids")
 RUNTIME_OVERRIDE_KEYS = (
     "task_type",
     "type",
@@ -173,10 +170,12 @@ class WorkflowSchedulePair:
     run: str | list[str] | tuple[str, ...] | None = None
     start: str | list[str] | tuple[str, ...] | None = None
     stop: str | list[str] | tuple[str, ...] | None = None
+    status: str | list[str] | tuple[str, ...] | None = None
     dag_id_prefix: str | None = None
     run_dag_id: str | None = None
     start_dag_id: str | None = None
     stop_dag_id: str | None = None
+    status_dag_id: str | None = None
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
 
 
@@ -193,6 +192,7 @@ class RemoteWorkflowDefinition:
     upstream_dags_for_run: tuple[ExternalDagDependency, ...] = ()
     upstream_dags_for_start: tuple[ExternalDagDependency, ...] = ()
     upstream_dags_for_stop: tuple[ExternalDagDependency, ...] = ()
+    upstream_dags_for_status: tuple[ExternalDagDependency, ...] = ()
     schedule_pairs: tuple[WorkflowSchedulePair, ...] = ()
     actions: tuple[str, ...] = START_STOP_ACTIONS
     target_runtime_envs: tuple[str, ...] = ()
@@ -202,9 +202,11 @@ class RemoteWorkflowDefinition:
     run_description: str = ""
     start_description: str = ""
     stop_description: str = ""
+    status_description: str = ""
     run_tags: tuple[str, ...] = ()
     start_tags: tuple[str, ...] = ()
     stop_tags: tuple[str, ...] = ()
+    status_tags: tuple[str, ...] = ()
     owner: str | None = None
     command_timeout_seconds: int = 1800
 
@@ -264,13 +266,16 @@ def workflow_action_value(
     run: Any,
     start: Any,
     stop: Any,
+    status: Any = None,
 ) -> Any:
     require_workflow_action(action)
     if action == RUN_ACTION:
         return run
     if action == START_ACTION:
         return start
-    return stop
+    if action == STOP_ACTION:
+        return stop
+    return status
 
 
 def dependency_fields_from_config(
@@ -469,7 +474,9 @@ def host_group_bulk_items(host_group_config: dict[str, Any]) -> tuple[dict[str, 
             item = dict(raw_item)
             if item_kind in {"service_name", "service_names", "services"}:
                 item.setdefault("type", SYSTEMD_TASK_TYPE)
-                item["service_name"] = item.get("service_name", item.get("name"))
+                service_name = item.get("service_name", item.get("name"))
+                if service_name:
+                    item["service_name"] = service_name
             elif item_kind in {"commands", "scripts"}:
                 item.setdefault("type", LINUX_SCRIPT_TASK_TYPE)
             items.append(item)
@@ -512,19 +519,6 @@ def task_override_config_from_bulk_item(item: dict[str, Any]) -> dict[str, Any]:
     return override_config
 
 
-def common_task_override_from_host_group_env(env_config: dict[str, Any]) -> dict[str, Any]:
-    override_config: dict[str, Any] = {}
-    for key, value in env_config.items():
-        if key in HOST_GROUP_ENV_METADATA_KEYS or value is None:
-            continue
-        if key in {"service_names", "services", "scripts", "processes"}:
-            continue
-        if key in {"service_name", "commands"} and isinstance(value, list):
-            continue
-        override_config[key] = value
-    return task_override_config_from_bulk_item(override_config)
-
-
 def task_config_from_bulk_item(
     *,
     host_group_id: str,
@@ -557,6 +551,363 @@ def task_config_from_bulk_item(
     if commands is not None:
         task_config["commands"] = commands
     return task_config
+
+
+def target_host_group_id(target_id: str) -> str:
+    return f"__target_{sanitize_task_id(target_id)}"
+
+
+def item_list_identity(item: dict[str, Any], *, item_kind: str, index: int) -> str:
+    explicit_id = item.get("id") or item.get("task_id")
+    if explicit_id:
+        return str(explicit_id)
+    service_name = item.get("service_name") or item.get("name")
+    if service_name:
+        return f"service:{service_name}"
+    return f"{item_kind}:{index}"
+
+
+def merge_bulk_items_by_identity(
+    base_items: tuple[dict[str, Any], ...],
+    override_items: tuple[dict[str, Any], ...],
+    *,
+    item_kind: str,
+) -> tuple[dict[str, Any], ...]:
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for index, item in enumerate((*base_items, *override_items)):
+        identity = item_list_identity(item, item_kind=item_kind, index=index)
+        if identity not in merged:
+            order.append(identity)
+            merged[identity] = dict(item)
+            continue
+        merged[identity] = deep_merge_dicts(merged[identity], item)
+    return tuple(merged[identity] for identity in order)
+
+
+def merged_host_group_bulk_items(
+    base_config: dict[str, Any],
+    override_config: dict[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    override_config = override_config or {}
+    items: list[dict[str, Any]] = []
+    for item_kind in HOST_GROUP_BULK_TASK_KEYS:
+        base_items = host_group_bulk_items({item_kind: base_config.get(item_kind)})
+        override_items = host_group_bulk_items({item_kind: override_config.get(item_kind)})
+        items.extend(
+            merge_bulk_items_by_identity(
+                base_items,
+                override_items,
+                item_kind=item_kind,
+            )
+        )
+    return tuple(items)
+
+
+def host_entry_identity(entry: dict[str, Any], *, index: int) -> str:
+    explicit_id = entry.get("id") or entry.get("host_id")
+    if explicit_id and "{" not in str(explicit_id):
+        return str(explicit_id)
+    return str(entry.get("host") or entry.get("hostname") or explicit_id or f"host_{index + 1}")
+
+
+def normalize_host_entry(raw_entry: Any) -> dict[str, Any]:
+    if isinstance(raw_entry, str):
+        return {"host": raw_entry}
+    if not isinstance(raw_entry, dict):
+        raise TypeError("host_groups.hosts entries must be strings or JSON objects.")
+    return dict(raw_entry)
+
+
+def expand_host_entries(raw_hosts: Any) -> tuple[dict[str, Any], ...]:
+    if raw_hosts is None:
+        return ()
+    if not isinstance(raw_hosts, list):
+        raise TypeError("host_groups.hosts must be a list when provided.")
+
+    entries: list[dict[str, Any]] = []
+    for raw_entry in raw_hosts:
+        entry = normalize_host_entry(raw_entry)
+        nested_hosts = entry.get("hosts")
+        if nested_hosts is None:
+            entries.append(entry)
+            continue
+        shared = {
+            key: value
+            for key, value in entry.items()
+            if key != "hosts"
+        }
+        if not isinstance(nested_hosts, list):
+            raise TypeError("nested host entry hosts must be a list.")
+        for nested_host in nested_hosts:
+            entries.append(deep_merge_dicts(shared, normalize_host_entry(nested_host)))
+    return tuple(entries)
+
+
+def merge_host_entries(
+    base_entries: tuple[dict[str, Any], ...],
+    override_entries: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for index, entry in enumerate((*base_entries, *override_entries)):
+        identity = host_entry_identity(entry, index=index)
+        if identity not in merged:
+            order.append(identity)
+            merged[identity] = dict(entry)
+            continue
+        merged[identity] = deep_merge_dicts(merged[identity], entry)
+    return tuple(merged[identity] for identity in order)
+
+
+def host_group_runtime_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    excluded = {
+        "hosts",
+        "host",
+        "hostname",
+        "host_id",
+        "id",
+        "variables",
+        "environments",
+    }
+    defaults: dict[str, Any] = {}
+    for key, value in config.items():
+        if value is None or key in excluded:
+            continue
+        if key in HOST_GROUP_BULK_TASK_KEYS:
+            if key in {"commands", "service_name"} and not isinstance(value, list):
+                defaults[key] = value
+            continue
+        defaults[key] = value
+    return defaults
+
+
+def host_entry_runtime_defaults(entry: dict[str, Any]) -> dict[str, Any]:
+    excluded = {
+        "hosts",
+        "host",
+        "hostname",
+        "host_id",
+        "id",
+        "variables",
+    }
+    defaults: dict[str, Any] = {}
+    for key, value in entry.items():
+        if value is None or key in excluded:
+            continue
+        if key in HOST_GROUP_BULK_TASK_KEYS:
+            if key in {"commands", "service_name"} and not isinstance(value, list):
+                defaults[key] = value
+            continue
+        defaults[key] = value
+    return defaults
+
+
+def host_connection_config(entry: dict[str, Any]) -> dict[str, Any]:
+    connection_keys = {
+        "host",
+        "hostname",
+        "sudo_user",
+        "ssh_user",
+        "ssh_conn_id",
+        "ssh_username_env_var",
+        "ssh_password_env_var",
+        "enable_kerberos",
+        "enabled",
+        "enabled_in_envs",
+        "variables",
+    }
+    return {
+        key: value
+        for key, value in entry.items()
+        if key in connection_keys and value is not None
+    }
+
+
+def tokens_for_inventory_host(
+    *,
+    current_env: str,
+    group_config: dict[str, Any],
+    host_entry: dict[str, Any],
+) -> dict[str, str]:
+    tokens = {"env": current_env, "loc": get_current_loc_name()}
+    tokens.update({str(key): str(value) for key, value in group_config.get("variables", {}).items()})
+    tokens.update({str(key): str(value) for key, value in host_entry.get("variables", {}).items()})
+    host = render_template_value(
+        host_entry.get("host") or host_entry.get("hostname") or "",
+        tokens,
+    )
+    tokens.update(
+        {
+            "host": str(host),
+            "hostname": str(host),
+        }
+    )
+    raw_host_id = host_entry.get("host_id") or host_entry.get("id") or sanitize_task_id(str(host))
+    host_id = render_template_value(raw_host_id, tokens)
+    tokens["host_id"] = sanitize_task_id(str(host_id))
+    return tokens
+
+
+def target_id_from_inventory_item(
+    *,
+    item: dict[str, Any],
+    item_index: int,
+    tokens: dict[str, str],
+) -> str:
+    raw_id = item.get("id") or item.get("task_id")
+    if raw_id is None:
+        service_name = item.get("service_name") or item.get("name")
+        if service_name:
+            raw_id = f"{task_id_from_service_name(str(service_name))}_{{host_id}}"
+        else:
+            raw_id = f"{item.get('type', LINUX_SCRIPT_TASK_TYPE)}_{item_index + 1}_{{host_id}}"
+    return sanitize_task_id(str(render_template_value(raw_id, tokens)))
+
+
+def merge_target_task_config(
+    *,
+    task_configs_by_id: dict[str, dict[str, Any]],
+    target_id: str,
+    current_env: str,
+    env_task_config: dict[str, Any],
+) -> None:
+    if target_id not in task_configs_by_id:
+        task_configs_by_id[target_id] = {
+            "task_id": target_id,
+            "host_group": target_host_group_id(target_id),
+            "enabled_in_envs": [current_env],
+            "env_overrides": {
+                current_env: env_task_config,
+            },
+        }
+        return
+
+    task_config = task_configs_by_id[target_id]
+    merge_enabled_in_env(task_config, current_env)
+    merge_task_env_override(task_config, current_env, env_task_config)
+
+
+def add_target_host_group_env(
+    *,
+    environments: dict[str, Any],
+    target_id: str,
+    current_env: str,
+    host_config: dict[str, Any],
+) -> None:
+    default_topology = environments.setdefault("defaults", {})
+    host_groups = default_topology.setdefault("host_groups", {})
+    host_group_id = target_host_group_id(target_id)
+    target_group = host_groups.setdefault(host_group_id, {"environments": {}})
+    env_config = target_group.setdefault("environments", {}).setdefault(
+        current_env,
+        {"hosts": []},
+    )
+    env_config.setdefault("hosts", []).append(host_config)
+
+
+def build_remote_target_task_configs(
+    environments: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    task_configs_by_id: dict[str, dict[str, Any]] = {}
+
+    for host_group_id, host_group_config in iter_inventory_host_groups(environments):
+        legacy_keys = [key for key in ("task_group", "task_group_id") if key in host_group_config]
+        if legacy_keys:
+            raise ValueError(
+                f"host_group '{host_group_id}' no longer supports {', '.join(legacy_keys)}; "
+                "compose targets in tasks or task_groups instead."
+            )
+
+        base_group_config = {
+            key: value
+            for key, value in host_group_config.items()
+            if key != "environments"
+        }
+        env_configs = host_group_environment_configs(
+            environments=environments,
+            host_group_id=host_group_id,
+            host_group_config=host_group_config,
+        )
+        for current_env, env_group_config in env_configs:
+            env_common_runtime = host_group_runtime_defaults(env_group_config)
+            env_items_by_identity = {
+                item_list_identity(item, item_kind="env", index=index): item
+                for index, item in enumerate(host_group_bulk_items(env_group_config))
+            }
+            group_config = deep_merge_dicts(
+                {
+                    key: value
+                    for key, value in base_group_config.items()
+                    if key not in HOST_GROUP_BULK_TASK_KEYS and key != "hosts"
+                },
+                {
+                    key: value
+                    for key, value in env_group_config.items()
+                    if key not in HOST_GROUP_BULK_TASK_KEYS and key != "hosts"
+                },
+            )
+            group_items = merged_host_group_bulk_items(base_group_config, env_group_config)
+            host_entries = merge_host_entries(
+                expand_host_entries(base_group_config.get("hosts")),
+                expand_host_entries(env_group_config.get("hosts")),
+            )
+
+            for host_entry in host_entries:
+                tokens = tokens_for_inventory_host(
+                    current_env=current_env,
+                    group_config=group_config,
+                    host_entry=host_entry,
+                )
+                host_items = merged_host_group_bulk_items({}, host_entry)
+                items = merge_bulk_items_by_identity(
+                    group_items,
+                    host_items,
+                    item_kind="host",
+                )
+                if not items:
+                    continue
+
+                host_config = render_template_value(host_connection_config(host_entry), tokens)
+                for item_index, item in enumerate(items):
+                    item_identity = item_list_identity(
+                        item,
+                        item_kind="host",
+                        index=item_index,
+                    )
+                    item_config = deep_merge_dicts(
+                        host_group_runtime_defaults(group_config),
+                        host_entry_runtime_defaults(host_entry),
+                        item,
+                        env_common_runtime,
+                        env_items_by_identity.get(item_identity),
+                    )
+                    rendered_item = render_template_value(item_config, tokens)
+                    target_id = target_id_from_inventory_item(
+                        item=rendered_item,
+                        item_index=item_index,
+                        tokens=tokens,
+                    )
+                    env_task_config = task_config_from_bulk_item(
+                        host_group_id=target_host_group_id(target_id),
+                        item=rendered_item,
+                    )
+                    env_task_config.pop("task_id", None)
+                    env_task_config.pop("host_group", None)
+                    add_target_host_group_env(
+                        environments=environments,
+                        target_id=target_id,
+                        current_env=current_env,
+                        host_config=host_config,
+                    )
+                    merge_target_task_config(
+                        task_configs_by_id=task_configs_by_id,
+                        target_id=target_id,
+                        current_env=current_env,
+                        env_task_config=env_task_config,
+                    )
+
+    return task_configs_by_id
 
 
 def environment_names_from_workflow_environments(
@@ -634,96 +985,7 @@ def merge_task_env_override(
     task_config["env_overrides"] = env_overrides
 
 
-def task_configs_from_host_group_bulk_items(
-    *,
-    environments: dict[str, Any],
-    host_group_id: str,
-    host_group_config: dict[str, Any],
-) -> tuple[dict[str, Any], ...]:
-    task_configs_by_id: dict[str, dict[str, Any]] = {}
-
-    for item in host_group_bulk_items(host_group_config):
-        task_config = task_config_from_bulk_item(
-            host_group_id=host_group_id,
-            item=item,
-        )
-        task_configs_by_id[task_config["task_id"]] = task_config
-
-    for env_name, env_config in host_group_environment_configs(
-        environments=environments,
-        host_group_id=host_group_id,
-        host_group_config=host_group_config,
-    ):
-        common_override = common_task_override_from_host_group_env(env_config)
-        if common_override:
-            for task_config in task_configs_by_id.values():
-                merge_task_env_override(task_config, env_name, common_override)
-
-        for item in host_group_bulk_items(env_config):
-            task_id = bulk_item_task_id(host_group_id, item)
-            item_override = task_override_config_from_bulk_item(item)
-            env_override = deep_merge_dicts(common_override, item_override)
-            if task_id in task_configs_by_id:
-                merge_task_env_override(
-                    task_configs_by_id[task_id],
-                    env_name,
-                    env_override,
-                )
-                continue
-
-            task_config = task_config_from_bulk_item(
-                host_group_id=host_group_id,
-                item=item,
-            )
-            task_configs_by_id[task_id] = task_config
-            merge_enabled_in_env(task_config, env_name)
-            merge_task_env_override(
-                task_config,
-                env_name,
-                env_override,
-            )
-
-    return tuple(task_configs_by_id.values())
-
-
-def build_generated_task_group_from_host_group(
-    *,
-    environments: dict[str, Any],
-    host_group_id: str,
-    host_group_config: dict[str, Any],
-    task_group_config: dict[str, Any] | None = None,
-) -> WorkflowTaskGroupSpec | None:
-    task_configs = task_configs_from_host_group_bulk_items(
-        environments=environments,
-        host_group_id=host_group_id,
-        host_group_config=host_group_config,
-    )
-    if not task_configs:
-        return None
-
-    legacy_keys = [key for key in ("task_group", "task_group_id") if key in host_group_config]
-    if legacy_keys:
-        raise ValueError(
-            f"host_group '{host_group_id}' no longer supports {', '.join(legacy_keys)}; "
-            "define task group metadata in generated_task_groups."
-        )
-
-    task_group_config = task_group_config or {}
-    if not isinstance(task_group_config, dict):
-        raise TypeError(f"generated_task_groups.{host_group_id} must be a JSON object.")
-
-    group_config = {
-        **task_group_config,
-        "group_id": task_group_config.get(
-            "group_id",
-            f"{host_group_id}_tasks",
-        ),
-        "tasks": list(task_configs),
-    }
-    return build_task_group_spec_from_config(group_config)
-
-
-def iter_host_groups_for_generated_tasks(environments: dict[str, Any]) -> tuple[tuple[str, dict], ...]:
+def iter_inventory_host_groups(environments: dict[str, Any]) -> tuple[tuple[str, dict], ...]:
     default_topology = get_default_environment_topology(environments)
     host_groups = optional_json_object(
         default_topology.get("host_groups"),
@@ -734,62 +996,6 @@ def iter_host_groups_for_generated_tasks(environments: dict[str, Any]) -> tuple[
         for host_group_id, host_group_config in host_groups.items()
         if isinstance(host_group_config, dict)
     )
-
-
-def generated_task_group_configs_from_workflow(data: dict) -> dict[str, dict[str, Any]]:
-    raw_configs = first_config_value(
-        data,
-        ("generated_task_groups", "host_group_task_groups"),
-        {},
-    )
-    if raw_configs is None:
-        return {}
-    if isinstance(raw_configs, dict):
-        return {
-            str(host_group_id): optional_json_object(
-                config,
-                name=f"generated_task_groups.{host_group_id}",
-            )
-            for host_group_id, config in raw_configs.items()
-        }
-    if isinstance(raw_configs, list):
-        configs_by_host_group: dict[str, dict[str, Any]] = {}
-        for index, config in enumerate(raw_configs):
-            config = optional_json_object(
-                config,
-                name=f"generated_task_groups[{index}]",
-            )
-            host_group_id = config.get("host_group") or config.get("host_group_id")
-            if not host_group_id:
-                raise ValueError(
-                    f"generated_task_groups[{index}] must define host_group."
-                )
-            configs_by_host_group[str(host_group_id)] = {
-                key: value
-                for key, value in config.items()
-                if key not in {"host_group", "host_group_id"}
-            }
-        return configs_by_host_group
-    raise TypeError("generated_task_groups must be a JSON object, list, or null.")
-
-
-def build_generated_task_groups_from_environments(
-    *,
-    data: dict,
-    environments: dict[str, Any],
-) -> tuple[WorkflowTaskGroupSpec, ...]:
-    task_group_configs = generated_task_group_configs_from_workflow(data)
-    generated_groups: list[WorkflowTaskGroupSpec] = []
-    for host_group_id, host_group_config in iter_host_groups_for_generated_tasks(environments):
-        group_spec = build_generated_task_group_from_host_group(
-            environments=environments,
-            host_group_id=host_group_id,
-            host_group_config=host_group_config,
-            task_group_config=task_group_configs.get(host_group_id),
-        )
-        if group_spec is not None:
-            generated_groups.append(group_spec)
-    return tuple(generated_groups)
 
 
 def reject_host_group_only_runtime_keys(
@@ -1464,6 +1670,8 @@ def dependency_ids_for_action(
         return start_depends_on or depends_on
     if action == STOP_ACTION:
         return stop_depends_on
+    if action == STATUS_ACTION:
+        return ()
     raise ValueError(f"action must be one of {SUPPORTED_WORKFLOW_ACTIONS}")
 
 
@@ -2076,6 +2284,7 @@ def build_action_description(workflow: RemoteWorkflowDefinition, action: str) ->
         run=workflow.run_description,
         start=workflow.start_description,
         stop=workflow.stop_description,
+        status=workflow.status_description,
     )
     if not action_description:
         return workflow.description
@@ -2090,6 +2299,7 @@ def build_action_tags(workflow: RemoteWorkflowDefinition, action: str) -> tuple[
         run=workflow.run_tags,
         start=workflow.start_tags,
         stop=workflow.stop_tags,
+        status=workflow.status_tags,
     )
     return unique_preserving_order((*workflow.tags, *action_tags))
 
@@ -2103,6 +2313,7 @@ def workflow_upstream_dags_for_action(
         run=workflow.upstream_dags_for_run,
         start=workflow.upstream_dags_for_start,
         stop=workflow.upstream_dags_for_stop,
+        status=workflow.upstream_dags_for_status,
     )
 
 
@@ -2115,6 +2326,7 @@ def plan_dependency_map_for_action(
         run=plan.run_upstream_task_ids,
         start=plan.start_upstream_task_ids,
         stop=plan.stop_upstream_task_ids,
+        status={task_spec.task_id: () for task_spec in plan.tasks},
     )
 
 
@@ -2356,9 +2568,14 @@ def create_workflow_dag(
                 task_spec,
                 host_target.task_overrides,
             )
+            validation_action = (
+                action
+                if action in (RUN_ACTION, STATUS_ACTION)
+                else None
+            )
             validate_task_spec(
                 effective_task_spec,
-                action=RUN_ACTION if action == RUN_ACTION else None,
+                action=validation_action,
             )
             return run_remote_task.override(
                 task_id=task_id,
@@ -2489,11 +2706,17 @@ def build_external_dependency_from_config(data: dict) -> ExternalDagDependency:
     )
 
 
-def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> WorkflowTaskSpec:
-    reject_host_group_only_runtime_keys(
-        data,
-        scope=f"Task '{data.get('task_id', '<unknown>')}'",
-    )
+def build_task_spec_from_config(
+    data: dict,
+    *,
+    group_id: str | None = None,
+    allow_host_group_runtime_keys: bool = False,
+) -> WorkflowTaskSpec:
+    if not allow_host_group_runtime_keys:
+        reject_host_group_only_runtime_keys(
+            data,
+            scope=f"Task '{data.get('task_id', '<unknown>')}'",
+        )
     task_type = data.get("task_type", data.get("type", SYSTEMD_TASK_TYPE))
     depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(data)
     return WorkflowTaskSpec(
@@ -2529,11 +2752,116 @@ def build_task_spec_from_config(data: dict, *, group_id: str | None = None) -> W
     )
 
 
-def build_task_group_spec_from_config(data: dict) -> WorkflowTaskGroupSpec:
+def task_target_selectors_from_config(data: dict[str, Any]) -> tuple[str, ...]:
+    raw_targets = first_config_value(data, TASK_TARGET_KEYS)
+    return normalize_string_tuple(raw_targets)
+
+
+def resolve_task_target_ids(
+    selectors: tuple[str, ...],
+    target_task_configs: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    resolved: list[str] = []
+    target_ids = tuple(target_task_configs)
+    for selector in selectors:
+        if any(char in selector for char in "*?["):
+            matches = [target_id for target_id in target_ids if fnmatchcase(target_id, selector)]
+            if not matches:
+                raise ValueError(f"target selector '{selector}' did not match any host target.")
+            resolved.extend(matches)
+            continue
+        if selector not in target_task_configs:
+            raise ValueError(f"target '{selector}' is not defined in host_groups.")
+        resolved.append(selector)
+    return unique_preserving_order(resolved)
+
+
+def task_id_for_target_reference(
+    *,
+    raw_task_id: str | None,
+    target_id: str,
+    multiple_targets: bool,
+) -> str:
+    if not raw_task_id:
+        return target_id
+    if "{target_id}" in raw_task_id or "{target}" in raw_task_id:
+        return str(
+            render_template_value(
+                raw_task_id,
+                {
+                    "target_id": target_id,
+                    "target": target_id,
+                },
+            )
+        )
+    if multiple_targets:
+        return f"{raw_task_id}_{target_id}"
+    return raw_task_id
+
+
+def expand_task_specs_from_config(
+    data: dict[str, Any],
+    *,
+    target_task_configs: dict[str, dict[str, Any]],
+    group_id: str | None = None,
+) -> tuple[WorkflowTaskSpec, ...]:
+    selectors = task_target_selectors_from_config(data)
+    if not selectors:
+        return (build_task_spec_from_config(data, group_id=group_id),)
+
+    target_ids = resolve_task_target_ids(selectors, target_task_configs)
+    overlay_config = {
+        key: value
+        for key, value in data.items()
+        if key not in TASK_TARGET_KEYS and key != "host_group"
+    }
+    task_specs: list[WorkflowTaskSpec] = []
+    multiple_targets = len(target_ids) > 1
+    for target_id in target_ids:
+        task_config = deep_merge_dicts(target_task_configs[target_id], overlay_config)
+        task_config["task_id"] = task_id_for_target_reference(
+            raw_task_id=overlay_config.get("task_id"),
+            target_id=target_id,
+            multiple_targets=multiple_targets,
+        )
+        task_specs.append(
+            build_task_spec_from_config(
+                task_config,
+                group_id=group_id,
+                allow_host_group_runtime_keys=True,
+            )
+        )
+    return tuple(task_specs)
+
+
+def build_task_specs_from_config(
+    raw_tasks: list[dict[str, Any]],
+    *,
+    target_task_configs: dict[str, dict[str, Any]],
+    group_id: str | None = None,
+) -> tuple[WorkflowTaskSpec, ...]:
+    specs: list[WorkflowTaskSpec] = []
+    for task_data in raw_tasks:
+        specs.extend(
+            expand_task_specs_from_config(
+                task_data,
+                target_task_configs=target_task_configs,
+                group_id=group_id,
+            )
+        )
+    return tuple(specs)
+
+
+def build_task_group_spec_from_config(
+    data: dict,
+    *,
+    target_task_configs: dict[str, dict[str, Any]] | None = None,
+) -> WorkflowTaskGroupSpec:
     reject_host_group_only_runtime_keys(
         data,
         scope=f"Task group '{data.get('group_id', '<unknown>')}'",
     )
+    target_task_configs = target_task_configs or {}
     group_id = data["group_id"]
     depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(data)
     return WorkflowTaskGroupSpec(
@@ -2546,9 +2874,10 @@ def build_task_group_spec_from_config(data: dict) -> WorkflowTaskGroupSpec:
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),
         env_overrides=data.get("env_overrides"),
-        tasks=tuple(
-            build_task_spec_from_config(task_data, group_id=group_id)
-            for task_data in data.get("tasks", [])
+        tasks=build_task_specs_from_config(
+            data.get("tasks", []),
+            target_task_configs=target_task_configs,
+            group_id=group_id,
         ),
     )
 
@@ -2560,10 +2889,12 @@ def build_schedule_pair_from_config(data: dict, *, schedule_id: str) -> Workflow
         run=normalize_schedule_value(data.get("run", data.get("schedule_run"))),
         start=normalize_schedule_value(data.get(START_ACTION, data.get("schedule_start"))),
         stop=normalize_schedule_value(data.get(STOP_ACTION, data.get("schedule_stop"))),
+        status=normalize_schedule_value(data.get(STATUS_ACTION, data.get("schedule_status"))),
         dag_id_prefix=data.get("dag_id_prefix"),
         run_dag_id=data.get("run_dag_id") or dag_ids.get("run"),
         start_dag_id=data.get("start_dag_id") or dag_ids.get(START_ACTION),
         stop_dag_id=data.get("stop_dag_id") or dag_ids.get(STOP_ACTION),
+        status_dag_id=data.get("status_dag_id") or dag_ids.get(STATUS_ACTION),
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
     )
 
@@ -2606,6 +2937,9 @@ def build_schedule_pairs_from_config(data: dict) -> tuple[WorkflowSchedulePair, 
             stop=normalize_schedule_value(
                 schedules.get(STOP_ACTION, data.get("schedule_stop"))
             ),
+            status=normalize_schedule_value(
+                schedules.get(STATUS_ACTION, data.get("schedule_status"))
+            ),
         ),
     )
 
@@ -2619,6 +2953,22 @@ def iter_runtime_config_blocks(data: dict) -> tuple[dict[str, Any], ...]:
                 continue
             blocks.append(value)
             blocks.extend(host_group_bulk_items(value))
+            for host_entry in expand_host_entries(value.get("hosts")):
+                blocks.append(host_entry)
+                blocks.extend(host_group_bulk_items(host_entry))
+                blocks.extend(host_group_bulk_items(value))
+            for env_config in optional_json_object(
+                value.get("environments"),
+                name="host_group.environments",
+            ).values():
+                if not isinstance(env_config, dict):
+                    continue
+                blocks.append(env_config)
+                blocks.extend(host_group_bulk_items(env_config))
+                for host_entry in expand_host_entries(env_config.get("hosts")):
+                    blocks.append(host_entry)
+                    blocks.extend(host_group_bulk_items(host_entry))
+                    blocks.extend(host_group_bulk_items(env_config))
     blocks.extend(
         task_data for task_data in data.get("tasks", []) if isinstance(task_data, dict)
     )
@@ -2659,6 +3009,29 @@ def config_uses_start_stop_action(
     )
 
 
+def config_uses_status_action(
+    data: dict,
+    schedule_pairs: tuple[WorkflowSchedulePair, ...],
+) -> bool:
+    schedules = normalize_schedules_config(data)
+    upstream_dags = data.get("upstream_dags") or {}
+    dag_metadata = data.get("dag_metadata") or data.get("dag_overrides") or {}
+    return (
+        data.get("schedule_status") is not None
+        or STATUS_ACTION in schedules
+        or any(pair.status is not None for pair in schedule_pairs)
+        or data.get("upstream_dags_for_status") is not None
+        or (
+            isinstance(upstream_dags, dict)
+            and STATUS_ACTION in upstream_dags
+        )
+        or (
+            isinstance(dag_metadata, dict)
+            and STATUS_ACTION in dag_metadata
+        )
+    )
+
+
 def config_uses_run_action(data: dict, schedule_pairs: tuple[WorkflowSchedulePair, ...]) -> bool:
     schedules = normalize_schedules_config(data)
     upstream_dags = data.get("upstream_dags", {})
@@ -2688,12 +3061,19 @@ def normalize_workflow_actions(
 ) -> tuple[str, ...]:
     raw_actions = data.get("actions", data.get("workflow_actions"))
     if raw_actions is None:
+        uses_start_stop = config_uses_start_stop_action(data, schedule_pairs)
+        uses_status = config_uses_status_action(data, schedule_pairs)
         if (
             config_uses_run_action(data, schedule_pairs)
-            and not config_uses_start_stop_action(data, schedule_pairs)
+            and not uses_start_stop
+            and not uses_status
         ):
             return (RUN_ACTION,)
-        return START_STOP_ACTIONS
+        if uses_start_stop:
+            return (*START_STOP_ACTIONS, STATUS_ACTION)
+        if uses_status:
+            return (STATUS_ACTION,)
+        return (*START_STOP_ACTIONS, STATUS_ACTION)
 
     actions = normalize_string_tuple(raw_actions)
     if not actions:
@@ -2773,17 +3153,18 @@ def build_workflow_definition_from_config(
     schedule_pairs = build_schedule_pairs_from_config(data)
     actions = normalize_workflow_actions(data, schedule_pairs)
     environments = build_workflow_environments_from_config(data)
+    target_task_configs = build_remote_target_task_configs(environments)
     explicit_task_groups = tuple(
-        build_task_group_spec_from_config(group_data)
+        build_task_group_spec_from_config(
+            group_data,
+            target_task_configs=target_task_configs,
+        )
         for group_data in data.get("task_groups", [])
-    )
-    generated_task_groups = build_generated_task_groups_from_environments(
-        data=data,
-        environments=environments,
     )
     run_metadata = action_metadata_from_config(data, RUN_ACTION)
     start_metadata = action_metadata_from_config(data, START_ACTION)
     stop_metadata = action_metadata_from_config(data, STOP_ACTION)
+    status_metadata = action_metadata_from_config(data, STATUS_ACTION)
     workflow_id = data.get("workflow_id") or default_workflow_id
     if not workflow_id:
         raise ValueError("Workflow config must define workflow_id or be loaded from a JSON file.")
@@ -2795,11 +3176,15 @@ def build_workflow_definition_from_config(
         schedule_start=schedule_pairs[0].start if schedule_pairs else None,
         schedule_stop=schedule_pairs[0].stop if schedule_pairs else None,
         fields=data.get("fields") or {},
-        tasks=tuple(build_task_spec_from_config(task_data) for task_data in data.get("tasks", [])),
-        task_groups=(*explicit_task_groups, *generated_task_groups),
+        tasks=build_task_specs_from_config(
+            data.get("tasks", []),
+            target_task_configs=target_task_configs,
+        ),
+        task_groups=explicit_task_groups,
         upstream_dags_for_run=upstream_dags_for_action(data, RUN_ACTION),
         upstream_dags_for_start=upstream_dags_for_action(data, START_ACTION),
         upstream_dags_for_stop=upstream_dags_for_action(data, STOP_ACTION),
+        upstream_dags_for_status=upstream_dags_for_action(data, STATUS_ACTION),
         schedule_pairs=schedule_pairs,
         actions=actions,
         target_runtime_envs=configured_target_runtime_envs(data),
@@ -2818,6 +3203,10 @@ def build_workflow_definition_from_config(
             "description",
             data.get("stop_description", ""),
         ),
+        status_description=status_metadata.get(
+            "description",
+            data.get("status_description", ""),
+        ),
         run_tags=normalize_string_tuple(
             run_metadata.get("tags", data.get("run_tags", ()))
         ),
@@ -2826,6 +3215,9 @@ def build_workflow_definition_from_config(
         ),
         stop_tags=normalize_string_tuple(
             stop_metadata.get("tags", data.get("stop_tags", ()))
+        ),
+        status_tags=normalize_string_tuple(
+            status_metadata.get("tags", data.get("status_tags", ()))
         ),
         owner=data.get("owner"),
         command_timeout_seconds=int(data.get("command_timeout_seconds", 1800)),
@@ -2870,6 +3262,7 @@ def schedule_for_action(
         run=pair.run,
         start=pair.start,
         stop=pair.stop,
+        status=pair.status,
     )
 
 
@@ -2879,6 +3272,7 @@ def explicit_dag_id_for_action(pair: WorkflowSchedulePair, action: str) -> str |
         run=pair.run_dag_id,
         start=pair.start_dag_id,
         stop=pair.stop_dag_id,
+        status=pair.status_dag_id,
     )
 
 
@@ -2979,8 +3373,6 @@ def register_workflow_dags_from_json(
     config_root: str | Path | None = None,
 ) -> None:
     config_path = Path(config_file)
-    if config_path.name.startswith("example_"):
-        return
 
     root_path = Path(config_root) if config_root is not None else None
     config = load_json_file(config_path)

@@ -241,34 +241,27 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(task_spec.systemd["platform"], "rhel7")
         self.assertEqual(task_spec.systemd["service_name"], "gateway-qa.service")
 
-    def test_host_group_bulk_items_generate_task_group_and_tasks(self) -> None:
+    def test_host_group_targets_can_be_composed_into_task_group(self) -> None:
         workflow = build_workflow_definition_from_config(
             {
-                "generated_task_groups": {
-                    "shared_server": {
-                        "group_id": "shared_server_services",
-                        "tooltip": "Services and scripts on one server",
-                    },
-                },
                 "host_groups": {
                     "shared_server": {
                         "platform": "rhel8",
-                        "hosts": ["prod-shared-01.company.net"],
-                        "service_name": [
+                        "services": [
                             {
-                                "task_id": "gateway",
+                                "id": "gateway",
                                 "service_name": "gateway.service",
                                 "sudo_user": "gateway_base",
                             },
                             {
-                                "task_id": "pricing",
+                                "id": "pricing",
                                 "service_name": "pricing.service",
                                 "start_depends_on": ["gateway"],
                             },
                         ],
-                        "commands": [
+                        "scripts": [
                             {
-                                "task_id": "cache_warmup",
+                                "id": "cache_warmup",
                                 "type": "linux_script",
                                 "commands": {
                                     "start": "./cache start",
@@ -280,40 +273,56 @@ class RemoteWorkflowTest(unittest.TestCase):
                         "environments": {
                             "prod": {
                                 "sudo_user": "shared_prod",
-                                "service_name": [
+                                "commands": {
+                                    "start": "./cache start --prod",
+                                    "stop": "./cache stop --prod",
+                                    "status": "./cache status --prod",
+                                },
+                                "hosts": [
                                     {
-                                        "task_id": "pricing",
+                                        "host": "prod-shared-01.company.net",
+                                        "host_id": "shared_prod_01",
+                                    }
+                                ],
+                                "services": [
+                                    {
+                                        "id": "pricing",
                                         "sudo_user": "pricing_prod",
                                     }
                                 ],
-                                "commands": [
+                                "scripts": [
                                     {
-                                        "task_id": "cache_warmup",
+                                        "id": "cache_warmup",
                                         "working_dir": "/opt/cache/prod/current",
                                     }
                                 ],
                             },
                             "dr": {
                                 "sudo_user": "shared_dr",
-                                "hosts": ["dr-shared-01.company.net"],
-                                "service_name": [
+                                "hosts": [
                                     {
-                                        "task_id": "pricing",
+                                        "host": "dr-shared-01.company.net",
+                                        "host_id": "shared_dr_01",
+                                    }
+                                ],
+                                "services": [
+                                    {
+                                        "id": "pricing",
                                         "sudo_user": "pricing_dr",
                                     },
                                     {
-                                        "task_id": "dr_only",
+                                        "id": "dr_only",
                                         "service_name": "dr-only.service",
                                         "sudo_user": "drsvc",
                                     },
                                 ],
-                                "commands": [
+                                "scripts": [
                                     {
-                                        "task_id": "cache_warmup",
+                                        "id": "cache_warmup",
                                         "working_dir": "/opt/cache/dr/current",
                                     },
                                     {
-                                        "task_id": "dr_replay_check",
+                                        "id": "dr_replay_check",
                                         "type": "linux_script",
                                         "sudo_user": "replayops",
                                         "working_dir": "/opt/replay/dr/current",
@@ -328,6 +337,23 @@ class RemoteWorkflowTest(unittest.TestCase):
                         },
                     },
                 },
+                "task_groups": [
+                    {
+                        "group_id": "shared_server_services",
+                        "tooltip": "Services and scripts on one server",
+                        "tasks": [
+                            {
+                                "targets": [
+                                    "gateway",
+                                    "pricing",
+                                    "cache_warmup",
+                                    "dr_only",
+                                    "dr_replay_check",
+                                ],
+                            }
+                        ],
+                    }
+                ],
             },
             default_workflow_id="shared",
         )
@@ -388,7 +414,7 @@ class RemoteWorkflowTest(unittest.TestCase):
             host_target=cache_host,
             action="start",
         )
-        self.assertIn("./cache start", cache_command)
+        self.assertIn("./cache start --prod", cache_command)
         self.assertIn("shared_prod", cache_command)
         self.assertIn("/opt/cache/prod/current", cache_command)
 
@@ -619,13 +645,16 @@ class RemoteWorkflowTest(unittest.TestCase):
             sorted(registered),
             [
                 "platform_dr_start",
+                "platform_dr_status",
                 "platform_dr_stop",
                 "platform_prod_start",
+                "platform_prod_status",
                 "platform_prod_stop",
             ],
         )
         self.assertEqual(registered["platform_prod_start"]["dag_id"], "platform-prod-start")
         self.assertEqual(registered["platform_prod_start"]["target_env"], "prod")
+        self.assertEqual(registered["platform_prod_status"]["dag_id"], "platform-prod-status")
         self.assertEqual(registered["platform_dr_stop"]["dag_id"], "platform-dr-stop")
         self.assertEqual(registered["platform_dr_stop"]["target_env"], "dr")
 
@@ -677,7 +706,7 @@ class RemoteWorkflowTest(unittest.TestCase):
                         config_root=Path(tmp),
                     )
 
-        self.assertEqual(sorted(registered), ["platform_start", "platform_stop"])
+        self.assertEqual(sorted(registered), ["platform_start", "platform_status", "platform_stop"])
         self.assertEqual(registered["platform_start"]["dag_id"], "platform-start")
         self.assertEqual(registered["platform_start"]["target_env"], "qa")
 
@@ -804,7 +833,7 @@ class RemoteWorkflowTest(unittest.TestCase):
             default_workflow_id="start_stop_batch",
         )
 
-        self.assertEqual(workflow.actions, ("start", "stop"))
+        self.assertEqual(workflow.actions, ("start", "stop", "status"))
 
     def test_script_fields_are_env_overridable_and_render_as_args(self) -> None:
         workflow = build_workflow_definition_from_config(
@@ -1008,7 +1037,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         plan = workflow_plan_for_env(workflow, "qa")
         airflow_fields = build_script_airflow_fields(plan)
 
-        self.assertEqual(workflow.actions, ("start", "stop"))
+        self.assertEqual(workflow.actions, ("start", "stop", "status"))
         self.assertEqual(airflow_fields["phase"]["default"], "maintenance")
         self.assertEqual(airflow_fields["components"]["default"], ["engine", "api"])
 

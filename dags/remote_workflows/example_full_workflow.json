@@ -35,138 +35,210 @@
       ]
     },
     "stop": {
-      "description": "Stop DAG: runs the configured stop order, or the reversed start order when no stop dependencies are defined.",
+      "description": "Stop DAG: runs explicit stop dependencies, or reversed start order when stop dependencies are not defined.",
       "tags": [
         "stop"
       ]
-    }
-  },
-  "generated_task_groups": {
-    "shared_app_server": {
-      "group_id": "shared_app_server_services",
-      "tooltip": "Multiple services and scripts on the same Linux server",
-      "start_depends_on": [
-        "gateway_rhel7"
-      ],
-      "stop_depends_on": [
-        "backend_services"
+    },
+    "status": {
+      "description": "Status DAG: checks configured service and script status without waiting on workflow dependencies.",
+      "tags": [
+        "status"
       ]
     }
   },
   "host_groups": {
-    "gateway": {
-      "type": "systemd",
+    "gateway_hosts": {
       "platform": "rhel7",
-      "service_name": "gateway{gateway_service_suffix}.service",
       "variables": {
         "gateway_service_suffix": ""
       },
       "environments": {
         "dev": {
           "sudo_user": "gwuser_dev",
-          "hosts": [
-            "dev-gw-01.company.net"
-          ],
           "variables": {
             "gateway_service_suffix": "-dev"
-          }
+          },
+          "hosts": [
+            {
+              "host": "dev-gw-01.company.net",
+              "services": [
+                {
+                  "id": "gateway",
+                  "service_name": "gateway{gateway_service_suffix}.service"
+                }
+              ]
+            }
+          ]
         },
         "qa": {
           "sudo_user": "gwuser_qa",
           "platform": "rhel8",
-          "service_name": "gateway-qa-user.service",
-          "hosts": [
-            "qa-gw-01.company.net",
-            "qa-gw-02.company.net"
-          ],
           "variables": {
             "gateway_service_suffix": "-qa"
-          }
+          },
+          "hosts": [
+            {
+              "host": "qa-gw-01.company.net",
+              "services": [
+                {
+                  "id": "gateway",
+                  "service_name": "gateway{gateway_service_suffix}.service"
+                }
+              ]
+            },
+            {
+              "host": "qa-gw-02.company.net",
+              "services": [
+                {
+                  "id": "gateway",
+                  "service_name": "gateway{gateway_service_suffix}.service"
+                }
+              ]
+            }
+          ]
         },
         "prod": {
           "sudo_user": "gwuser",
           "hosts": [
             {
-              "host": "prod-gw-01.company.net",
-              "sudo_user": "gwuser_primary"
-            },
-            {
-              "host": "prod-gw-02.company.net",
-              "sudo_user": "gwuser_secondary",
-              "platform": "rhel8",
-              "service_name": "gateway-secondary.service"
+              "hosts": [
+                {
+                  "host": "prod-gw-01.company.net",
+                  "sudo_user": "gwuser_primary"
+                },
+                {
+                  "host": "prod-gw-02.company.net",
+                  "sudo_user": "gwuser_secondary"
+                }
+              ],
+              "services": [
+                {
+                  "id": "gateway",
+                  "service_name": "gateway.service"
+                }
+              ]
             }
           ]
         },
         "dr": {
           "sudo_user": "gwuser_dr",
-          "hosts": [
-            "dr-gw-01.company.net"
-          ],
           "variables": {
             "gateway_service_suffix": "-dr"
-          }
+          },
+          "hosts": [
+            {
+              "host": "dr-gw-01.company.net",
+              "services": [
+                {
+                  "id": "gateway",
+                  "service_name": "gateway{gateway_service_suffix}.service"
+                }
+              ]
+            }
+          ]
         }
       }
     },
-    "pricing": {
-      "type": "systemd",
+    "shared_app_hosts": {
       "platform": "rhel8",
-      "service_name": "pricing{pricing_service_suffix}.service",
-      "variables": {
-        "pricing_service_suffix": ""
-      },
+      "services": [
+        {
+          "id": "order_api_{host_id}",
+          "service_name": "order-api.service"
+        },
+        {
+          "id": "position_api_{host_id}",
+          "service_name": "position-api.service"
+        }
+      ],
+      "scripts": [
+        {
+          "id": "warm_cache_{host_id}",
+          "type": "linux_script",
+          "working_dir": "/opt/cache/{env}/current",
+          "commands": {
+            "start": "./cache-control start --env {env}",
+            "stop": "./cache-control stop --env {env}",
+            "status": "./cache-control status --env {env}"
+          }
+        }
+      ],
       "environments": {
-        "dev": {
-          "sudo_user": "pricing_dev",
-          "hosts": [
-            "dev-pricing-01.company.net"
-          ],
-          "variables": {
-            "pricing_service_suffix": "-dev"
-          }
-        },
-        "qa": {
-          "sudo_user": "pricing_qa",
-          "hosts": [
-            "qa-pricing-01.company.net"
-          ],
-          "variables": {
-            "pricing_service_suffix": "-qa"
-          }
-        },
         "prod": {
-          "sudo_user": "pricing",
+          "sudo_user": "shared_app_prod",
           "hosts": [
-            "prod-pricing-01.company.net",
-            "prod-pricing-02.company.net"
+            {
+              "hosts": [
+                {
+                  "host": "prod-app-shared-01.company.net",
+                  "host_id": "prod_app_01"
+                },
+                {
+                  "host": "prod-app-shared-02.company.net",
+                  "host_id": "prod_app_02"
+                }
+              ]
+            }
           ],
-          "variables": {
-            "pricing_service_suffix": "-prod"
-          }
+          "services": [
+            {
+              "id": "position_api_{host_id}",
+              "sudo_user": "positionapp_prod"
+            }
+          ],
+          "scripts": [
+            {
+              "id": "warm_cache_{host_id}",
+              "working_dir": "/opt/cache/prod/current"
+            }
+          ]
         },
         "dr": {
-          "sudo_user": "pricing_dr",
+          "sudo_user": "shared_app_dr",
           "hosts": [
-            "dr-pricing-01.company.net"
+            {
+              "host": "dr-app-shared-01.company.net",
+              "host_id": "dr_app_01"
+            }
           ],
-          "variables": {
-            "pricing_service_suffix": "-dr"
-          }
+          "services": [
+            {
+              "id": "position_api_{host_id}",
+              "sudo_user": "positionapp_dr"
+            },
+            {
+              "id": "dr_replay_api_{host_id}",
+              "service_name": "dr-replay-api.service",
+              "sudo_user": "replayapp"
+            }
+          ],
+          "scripts": [
+            {
+              "id": "warm_cache_{host_id}",
+              "working_dir": "/opt/cache/dr/current"
+            },
+            {
+              "id": "dr_replay_check_{host_id}",
+              "type": "linux_script",
+              "sudo_user": "replayops",
+              "working_dir": "/opt/replay/dr/current",
+              "commands": {
+                "start": "./replay-check start --env dr",
+                "stop": "./replay-check stop --env dr",
+                "status": "./replay-check status --env dr"
+              }
+            }
+          ]
         }
       }
     },
-    "risk": {
+    "risk_hosts": {
       "type": "linux_script",
       "sudo_user": "risk_{env}",
       "working_dir": "{risk_root}/{env}/current",
       "variables": {
         "risk_root": "/opt/risk"
-      },
-      "commands": {
-        "start": "./bin/risk-control start --env {env}",
-        "stop": "./bin/risk-control stop --env {env}",
-        "status": "./bin/risk-control status --env {env}"
       },
       "fields": {
         "change_ticket": {
@@ -208,11 +280,23 @@
         "APP_ENV": "{env}",
         "APP_LOC": "{loc}"
       },
+      "scripts": [
+        {
+          "id": "risk_control",
+          "commands": {
+            "start": "./bin/risk-control start --env {env}",
+            "stop": "./bin/risk-control stop --env {env}",
+            "status": "./bin/risk-control status --env {env}"
+          }
+        }
+      ],
       "environments": {
         "dev": {
           "sudo_user": "risk_dev",
           "hosts": [
-            "dev-risk-01.company.net"
+            {
+              "host": "dev-risk-01.company.net"
+            }
           ]
         },
         "qa": {
@@ -238,7 +322,9 @@
             "APP_LOC": "qa-primary"
           },
           "hosts": [
-            "qa-risk-01.company.net"
+            {
+              "host": "qa-risk-01.company.net"
+            }
           ]
         },
         "prod": {
@@ -247,21 +333,29 @@
             "APP_LOC": "prod-primary"
           },
           "hosts": [
-            "prod-risk-01.company.net"
+            {
+              "host": "prod-risk-01.company.net"
+            }
           ]
         },
         "dr": {
           "sudo_user": "risk_dr",
           "hosts": [
-            "dr-risk-01.company.net"
+            {
+              "host": "dr-risk-01.company.net"
+            }
           ]
         }
       }
     },
-    "backup": {
-      "type": "systemd",
+    "backup_hosts": {
       "platform": "rhel8",
-      "service_name": "ha-backup{backup_service_suffix}.service",
+      "services": [
+        {
+          "id": "ha_backup",
+          "service_name": "ha-backup{backup_service_suffix}.service"
+        }
+      ],
       "variables": {
         "backup_service_suffix": ""
       },
@@ -269,112 +363,29 @@
         "prod": {
           "sudo_user": "backup",
           "hosts": [
-            "prod-backup-01.company.net"
+            {
+              "host": "prod-backup-01.company.net"
+            }
           ]
         },
         "dr": {
           "sudo_user": "backup_dr",
-          "hosts": [
-            "dr-backup-01.company.net"
-          ],
           "variables": {
             "backup_service_suffix": "-dr"
-          }
-        }
-      }
-    },
-    "shared_app_server": {
-      "platform": "rhel8",
-      "services": [
-        {
-          "task_id": "order_api",
-          "service_name": "order-api.service"
-        },
-        {
-          "task_id": "position_api",
-          "service_name": "position-api.service",
-          "start_depends_on": [
-            "order_api"
-          ]
-        }
-      ],
-      "scripts": [
-        {
-          "task_id": "warm_cache",
-          "type": "linux_script",
-          "working_dir": "/opt/cache/{env}/current",
-          "commands": {
-            "start": "./cache-control start --env {env}",
-            "stop": "./cache-control stop --env {env}",
-            "status": "./cache-control status --env {env}"
-          }
-        }
-      ],
-      "environments": {
-        "prod": {
-          "sudo_user": "shared_app_prod",
-          "services": [
-            {
-              "task_id": "position_api",
-              "sudo_user": "positionapp_prod"
-            }
-          ],
-          "scripts": [
-            {
-              "task_id": "warm_cache",
-              "working_dir": "/opt/cache/prod/current"
-            }
-          ],
+          },
           "hosts": [
-            "prod-app-shared-01.company.net"
-          ]
-        },
-        "dr": {
-          "sudo_user": "shared_app_dr",
-          "services": [
             {
-              "task_id": "position_api",
-              "sudo_user": "positionapp_dr"
-            },
-            {
-              "task_id": "dr_replay_api",
-              "service_name": "dr-replay-api.service",
-              "sudo_user": "replayapp"
+              "host": "dr-backup-01.company.net"
             }
-          ],
-          "scripts": [
-            {
-              "task_id": "warm_cache",
-              "working_dir": "/opt/cache/dr/current"
-            },
-            {
-              "task_id": "dr_replay_check",
-              "type": "linux_script",
-              "sudo_user": "replayops",
-              "working_dir": "/opt/replay/dr/current",
-              "commands": {
-                "start": "./replay-check start --env dr",
-                "stop": "./replay-check stop --env dr",
-                "status": "./replay-check status --env dr"
-              }
-            }
-          ],
-          "hosts": [
-            "dr-app-shared-01.company.net"
           ]
         }
       }
     },
-    "windows_adapter": {
+    "windows_adapter_hosts": {
       "type": "windows_script",
       "windows_shell": "powershell",
       "remote_env_vars": {
         "APP_ENV": "{env}"
-      },
-      "commands": {
-        "start": ".\\adapter.ps1 -Action Start -Env {env}",
-        "stop": ".\\adapter.ps1 -Action Stop -Env {env}",
-        "status": ".\\adapter.ps1 -Action Status -Env {env}"
       },
       "fields": {
         "adapter_mode": {
@@ -395,11 +406,23 @@
           "description": "Send notification after adapter command completes."
         }
       },
+      "scripts": [
+        {
+          "id": "windows_adapter",
+          "commands": {
+            "start": ".\\adapter.ps1 -Action Start -Env {env}",
+            "stop": ".\\adapter.ps1 -Action Stop -Env {env}",
+            "status": ".\\adapter.ps1 -Action Status -Env {env}"
+          }
+        }
+      ],
       "environments": {
         "qa": {
           "working_dir": "D:\\Apps\\AdapterQa",
           "hosts": [
-            "qa-win-adapter-01.company.net"
+            {
+              "host": "qa-win-adapter-01.company.net"
+            }
           ]
         },
         "prod": {
@@ -410,7 +433,9 @@
             "status": ".\\adapter.ps1 -Action Status -Env prod -Cluster primary"
           },
           "hosts": [
-            "prod-win-adapter-01.company.net"
+            {
+              "host": "prod-win-adapter-01.company.net"
+            }
           ]
         }
       }
@@ -418,43 +443,66 @@
   },
   "tasks": [
     {
-      "task_id": "gateway_rhel7",
-      "host_group": "gateway"
+      "target": "gateway",
+      "task_id": "gateway_rhel7"
     }
   ],
   "task_groups": [
     {
-      "group_id": "backend_services",
-      "tooltip": "RHEL8 services and Linux scripts with internal dependencies",
+      "group_id": "shared_app_services",
+      "tooltip": "Services and scripts on the same Linux app servers",
       "start_depends_on": [
         "gateway_rhel7"
       ],
-      "stop_depends_on": [
-        "windows_jobs"
-      ],
       "tasks": [
         {
-          "task_id": "pricing_rhel8",
-          "host_group": "pricing",
-          "stop_depends_on": [
-            "risk_linux_script"
+          "targets": [
+            "order_api_*"
           ]
         },
         {
-          "task_id": "risk_linux_script",
-          "host_group": "risk",
+          "target": "position_api_prod_app_01",
           "start_depends_on": [
-            "pricing_rhel8"
-          ],
+            "order_api_prod_app_01"
+          ]
+        },
+        {
+          "target": "position_api_prod_app_02",
+          "start_depends_on": [
+            "order_api_prod_app_02"
+          ]
+        },
+        {
+          "target": "position_api_dr_app_01",
+          "start_depends_on": [
+            "order_api_dr_app_01"
+          ]
+        },
+        {
+          "targets": [
+            "warm_cache_*",
+            "dr_replay_*"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "backend_services",
+      "tooltip": "Risk and backup dependencies",
+      "start_depends_on": [
+        "shared_app_services"
+      ],
+      "tasks": [
+        {
+          "target": "risk_control",
           "stop_depends_on": [
             "ha_backup"
           ]
         },
         {
-          "task_id": "ha_backup",
-          "host_group": "backup",
+          "target": "ha_backup",
           "start_depends_on": [
-            "risk_linux_script"
+            "risk_control"
           ]
         }
       ]
@@ -465,13 +513,9 @@
       "start_depends_on": [
         "backend_services"
       ],
-      "stop_depends_on": [
-        "gateway_rhel7"
-      ],
       "tasks": [
         {
-          "task_id": "windows_adapter",
-          "host_group": "windows_adapter"
+          "target": "windows_adapter"
         }
       ]
     }
