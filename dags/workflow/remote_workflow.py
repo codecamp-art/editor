@@ -567,43 +567,6 @@ def item_list_identity(item: dict[str, Any], *, item_kind: str, index: int) -> s
     return f"{item_kind}:{index}"
 
 
-def merge_bulk_items_by_identity(
-    base_items: tuple[dict[str, Any], ...],
-    override_items: tuple[dict[str, Any], ...],
-    *,
-    item_kind: str,
-) -> tuple[dict[str, Any], ...]:
-    merged: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    for index, item in enumerate((*base_items, *override_items)):
-        identity = item_list_identity(item, item_kind=item_kind, index=index)
-        if identity not in merged:
-            order.append(identity)
-            merged[identity] = dict(item)
-            continue
-        merged[identity] = deep_merge_dicts(merged[identity], item)
-    return tuple(merged[identity] for identity in order)
-
-
-def merged_host_group_bulk_items(
-    base_config: dict[str, Any],
-    override_config: dict[str, Any] | None,
-) -> tuple[dict[str, Any], ...]:
-    override_config = override_config or {}
-    items: list[dict[str, Any]] = []
-    for item_kind in HOST_GROUP_BULK_TASK_KEYS:
-        base_items = host_group_bulk_items({item_kind: base_config.get(item_kind)})
-        override_items = host_group_bulk_items({item_kind: override_config.get(item_kind)})
-        items.extend(
-            merge_bulk_items_by_identity(
-                base_items,
-                override_items,
-                item_kind=item_kind,
-            )
-        )
-    return tuple(items)
-
-
 def host_entry_identity(entry: dict[str, Any], *, index: int) -> str:
     explicit_id = entry.get("id") or entry.get("host_id")
     if explicit_id and "{" not in str(explicit_id):
@@ -788,6 +751,17 @@ def merge_target_task_config(
     merge_task_env_override(task_config, current_env, env_task_config)
 
 
+def items_by_identity(
+    items: tuple[dict[str, Any], ...],
+    *,
+    item_kind: str,
+) -> dict[str, dict[str, Any]]:
+    return {
+        item_list_identity(item, item_kind=item_kind, index=index): item
+        for index, item in enumerate(items)
+    }
+
+
 def add_target_host_group_env(
     *,
     environments: dict[str, Any],
@@ -830,11 +804,16 @@ def build_remote_target_task_configs(
             host_group_config=host_group_config,
         )
         for current_env, env_group_config in env_configs:
-            env_common_runtime = host_group_runtime_defaults(env_group_config)
-            env_items_by_identity = {
-                item_list_identity(item, item_kind="env", index=index): item
-                for index, item in enumerate(host_group_bulk_items(env_group_config))
-            }
+            base_defaults = host_group_runtime_defaults(base_group_config)
+            env_defaults = host_group_runtime_defaults(env_group_config)
+            base_items_by_identity = items_by_identity(
+                host_group_bulk_items(base_group_config),
+                item_kind="base",
+            )
+            env_items_by_identity = items_by_identity(
+                host_group_bulk_items(env_group_config),
+                item_kind="env",
+            )
             group_config = deep_merge_dicts(
                 {
                     key: value
@@ -847,7 +826,6 @@ def build_remote_target_task_configs(
                     if key not in HOST_GROUP_BULK_TASK_KEYS and key != "hosts"
                 },
             )
-            group_items = merged_host_group_bulk_items(base_group_config, env_group_config)
             host_entries = merge_host_entries(
                 expand_host_entries(base_group_config.get("hosts")),
                 expand_host_entries(env_group_config.get("hosts")),
@@ -859,28 +837,36 @@ def build_remote_target_task_configs(
                     group_config=group_config,
                     host_entry=host_entry,
                 )
-                host_items = merged_host_group_bulk_items({}, host_entry)
-                items = merge_bulk_items_by_identity(
-                    group_items,
-                    host_items,
+                host_defaults = host_entry_runtime_defaults(host_entry)
+                host_items_by_identity = items_by_identity(
+                    host_group_bulk_items(host_entry),
                     item_kind="host",
                 )
-                if not items:
+                item_identities = unique_preserving_order(
+                    [
+                        *base_items_by_identity,
+                        *env_items_by_identity,
+                        *host_items_by_identity,
+                    ]
+                )
+                if not item_identities:
                     continue
 
-                host_config = render_template_value(host_connection_config(host_entry), tokens)
-                for item_index, item in enumerate(items):
-                    item_identity = item_list_identity(
-                        item,
-                        item_kind="host",
-                        index=item_index,
+                host_connection = render_template_value(
+                    host_connection_config(host_entry),
+                    tokens,
+                )
+                for item_index, item_identity in enumerate(item_identities):
+                    common_item_config = deep_merge_dicts(
+                        base_defaults,
+                        base_items_by_identity.get(item_identity),
+                        env_defaults,
+                        env_items_by_identity.get(item_identity),
                     )
                     item_config = deep_merge_dicts(
-                        host_group_runtime_defaults(group_config),
-                        host_entry_runtime_defaults(host_entry),
-                        item,
-                        env_common_runtime,
-                        env_items_by_identity.get(item_identity),
+                        common_item_config,
+                        host_defaults,
+                        host_items_by_identity.get(item_identity),
                     )
                     rendered_item = render_template_value(item_config, tokens)
                     target_id = target_id_from_inventory_item(
@@ -888,12 +874,28 @@ def build_remote_target_task_configs(
                         item_index=item_index,
                         tokens=tokens,
                     )
+                    task_item_config = (
+                        item_config
+                        if item_identity not in base_items_by_identity
+                        and item_identity not in env_items_by_identity
+                        else common_item_config
+                    )
+                    rendered_task_item = render_template_value(task_item_config, tokens)
                     env_task_config = task_config_from_bulk_item(
                         host_group_id=target_host_group_id(target_id),
-                        item=rendered_item,
+                        item=rendered_task_item,
                     )
                     env_task_config.pop("task_id", None)
                     env_task_config.pop("host_group", None)
+                    host_config = deep_merge_dicts(
+                        host_connection,
+                        host_connection_config(rendered_item),
+                        {
+                            "task_overrides": task_override_config_from_bulk_item(
+                                rendered_item,
+                            ),
+                        },
+                    )
                     add_target_host_group_env(
                         environments=environments,
                         target_id=target_id,
@@ -1076,6 +1078,18 @@ def apply_task_runtime_overrides(
     return replace(
         task_spec,
         task_type=rendered.get("task_type", rendered.get("type", task_spec.task_type)),
+        sudo_user=rendered.get("sudo_user", task_spec.sudo_user),
+        ssh_user=rendered.get("ssh_user", task_spec.ssh_user),
+        ssh_conn_id=rendered.get("ssh_conn_id", task_spec.ssh_conn_id),
+        ssh_username_env_var=rendered.get(
+            "ssh_username_env_var",
+            task_spec.ssh_username_env_var,
+        ),
+        ssh_password_env_var=rendered.get(
+            "ssh_password_env_var",
+            task_spec.ssh_password_env_var,
+        ),
+        enable_kerberos=rendered.get("enable_kerberos", task_spec.enable_kerberos),
         platform=rendered.get("platform", task_spec.platform),
         systemd=merged_systemd or None,
         commands=merged_commands or None,
@@ -1572,8 +1586,16 @@ def resolve_hosts_for_task(
         host = entry.get("host") or entry.get("hostname")
         if not host:
             raise ValueError(f"Host object in '{task_spec.host_group}' must define host.")
+        explicit_task_overrides = optional_json_object(
+            entry.get("task_overrides"),
+            name=f"Host entry task_overrides in '{task_spec.host_group}'",
+        )
         task_overrides = render_template_value(
-            deep_merge_dicts(default_task_overrides, extract_task_runtime_overrides(entry)),
+            deep_merge_dicts(
+                default_task_overrides,
+                extract_task_runtime_overrides(entry),
+                explicit_task_overrides,
+            ),
             entry_tokens,
         )
 
@@ -2790,7 +2812,7 @@ def task_id_for_target_reference(
             )
         )
     if multiple_targets:
-        return f"{raw_task_id}_{target_id}"
+        return target_id
     return raw_task_id
 
 

@@ -460,6 +460,236 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertIn("./replay-check start", dr_replay_command)
         self.assertIn("replayops", dr_replay_command)
 
+    def test_host_group_targets_render_host_variables_and_layered_overrides(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "sybase_drtp": {
+                        "sudo_user": "top_{host_id}",
+                        "platform": "rhel8",
+                        "working_dir": "/opt/base",
+                        "remote_env_vars": {"LEVEL": "base"},
+                        "services": [
+                            {
+                                "id": "sybase_drtp",
+                                "service_name": "sybase_drtp.service",
+                            },
+                            {
+                                "id": "sybase_dms",
+                                "service_name": "sybase_dms.service",
+                            },
+                            {
+                                "id": "risksvr",
+                                "service_name": "risksvr.service",
+                            },
+                            {
+                                "id": "monsvr",
+                                "service_name": "monsvr.service",
+                            },
+                            {
+                                "id": "zk_{host_id}_{zk_name}",
+                                "sudo_user": "zk_{host_id}",
+                                "service_name": "zk_{host_id}_{zk_name}.service",
+                            },
+                        ],
+                        "environments": {
+                            "qa": {
+                                "sudo_user": "qa_{host_id}",
+                                "platform": "rhel7",
+                                "working_dir": "/opt/qa",
+                                "remote_env_vars": {"LEVEL": "qa"},
+                                "hosts": [
+                                    {
+                                        "host": "qa-db-01.company.net",
+                                        "host_id": "1",
+                                        "variables": {"zk_name": "alpha"},
+                                    },
+                                    {
+                                        "host": "qa-db-02.company.net",
+                                        "host_id": "2",
+                                        "variables": {"zk_name": "beta"},
+                                        "sudo_user": "host_{host_id}",
+                                        "platform": "rhel8",
+                                        "working_dir": "/opt/host_{host_id}",
+                                        "remote_env_vars": {"HOST": "host_{host_id}"},
+                                    },
+                                ],
+                                "services": [
+                                    {
+                                        "id": "zk_{host_id}_{zk_name}",
+                                        "service_name": "zk_{host_id}_{zk_name}_qa.service",
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                },
+                "tasks": [
+                    {
+                        "targets": [
+                            "sybase_drtp",
+                            "sybase_dms",
+                            "risksvr",
+                            "monsvr",
+                            "zk_1_alpha",
+                            "zk_2_beta",
+                        ],
+                    }
+                ],
+            },
+            default_workflow_id="sybase",
+        )
+
+        plan = workflow_plan_for_env(workflow, "qa")
+
+        self.assertEqual(
+            tuple(task.task_id for task in plan.tasks),
+            (
+                "sybase_drtp",
+                "sybase_dms",
+                "risksvr",
+                "monsvr",
+                "zk_1_alpha",
+                "zk_2_beta",
+            ),
+        )
+        self.assertEqual(
+            sum(len(hosts) for hosts in plan.hosts_by_task_id.values()),
+            10,
+        )
+
+        sybase_task = next(task for task in plan.tasks if task.task_id == "sybase_drtp")
+        sybase_hosts = plan.hosts_by_task_id["sybase_drtp"]
+        sybase_host_one = apply_task_runtime_overrides(
+            sybase_task,
+            sybase_hosts[0].task_overrides,
+        )
+        sybase_host_two = apply_task_runtime_overrides(
+            sybase_task,
+            sybase_hosts[1].task_overrides,
+        )
+
+        self.assertEqual(sybase_host_one.sudo_user, "qa_1")
+        self.assertEqual(sybase_host_one.platform, "rhel7")
+        self.assertEqual(sybase_host_one.working_dir, "/opt/qa")
+        self.assertEqual(sybase_host_two.sudo_user, "host_2")
+        self.assertEqual(sybase_host_two.platform, "rhel8")
+        self.assertEqual(sybase_host_two.working_dir, "/opt/host_2")
+        self.assertEqual(sybase_host_two.remote_env_vars["HOST"], "host_2")
+
+        sybase_host_one_command = build_remote_task_command(
+            task_spec=sybase_host_one,
+            host_target=sybase_hosts[0],
+            action="start",
+        )
+        sybase_host_two_command = build_remote_task_command(
+            task_spec=sybase_host_two,
+            host_target=sybase_hosts[1],
+            action="start",
+        )
+
+        self.assertIn("qa_1", sybase_host_one_command)
+        self.assertIn("host_2", sybase_host_two_command)
+
+        zk_two_task = next(task for task in plan.tasks if task.task_id == "zk_2_beta")
+        zk_two_host = plan.hosts_by_task_id["zk_2_beta"][0]
+        zk_two_effective = apply_task_runtime_overrides(
+            zk_two_task,
+            zk_two_host.task_overrides,
+        )
+
+        self.assertEqual(zk_two_effective.sudo_user, "host_2")
+        self.assertEqual(zk_two_effective.systemd["service_name"], "zk_2_beta_qa.service")
+        self.assertEqual(zk_two_effective.platform, "rhel8")
+        self.assertEqual(zk_two_effective.working_dir, "/opt/host_2")
+
+    def test_targets_expand_to_selectable_task_ids_in_tasks_and_task_groups(self) -> None:
+        task_group_workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "zookeeper": {
+                        "services": [
+                            {"id": "zk_1", "service_name": "zk-1.service"},
+                            {"id": "zk_2", "service_name": "zk-2.service"},
+                            {"id": "zk_3", "service_name": "zk-3.service"},
+                        ],
+                        "environments": {
+                            "qa": {"hosts": ["qa-zk-01.company.net"]},
+                        },
+                    },
+                },
+                "task_groups": [
+                    {
+                        "group_id": "zk",
+                        "tasks": [
+                            {
+                                "task_id": "zk",
+                                "targets": ["zk_1", "zk_2", "zk_3"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            default_workflow_id="zk",
+        )
+
+        self.assertEqual(
+            tuple(task.task_id for task in task_group_workflow.task_groups[0].tasks),
+            ("zk_1", "zk_2", "zk_3"),
+        )
+
+        top_level_workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "risk": {
+                        "services": [
+                            {"id": "risk_a", "service_name": "risk-a.service"},
+                            {"id": "risk_b", "service_name": "risk-b.service"},
+                        ],
+                        "environments": {
+                            "qa": {"hosts": ["qa-risk-01.company.net"]},
+                        },
+                    },
+                },
+                "tasks": [
+                    {
+                        "task_id": "risk",
+                        "targets": ["risk_a", "risk_b"],
+                    }
+                ],
+            },
+            default_workflow_id="risk",
+        )
+
+        self.assertEqual(
+            tuple(task.task_id for task in top_level_workflow.tasks),
+            ("risk_a", "risk_b"),
+        )
+
+        same_name_workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "risk": {
+                        "services": [
+                            {"id": "risk_a", "service_name": "risk-a.service"},
+                        ],
+                        "environments": {
+                            "qa": {"hosts": ["qa-risk-01.company.net"]},
+                        },
+                    },
+                },
+                "tasks": [
+                    {
+                        "task_id": "risk_a",
+                        "target": "risk_a",
+                    }
+                ],
+            },
+            default_workflow_id="risk_single",
+        )
+
+        self.assertEqual(same_name_workflow.tasks[0].task_id, "risk_a")
+
     def test_missing_env_target_and_dependency_are_skipped(self) -> None:
         workflow = build_workflow_definition_from_config(
             {
