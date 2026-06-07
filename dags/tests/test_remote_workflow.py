@@ -123,11 +123,18 @@ from workflow.remote_workflow import (  # noqa: E402
     trigger_rule_satisfied,
     validate_task_spec,
 )
-from workflow.remote_workflow_graph import (  # noqa: E402
-    workflow_graph_svgs,
-    workflow_plan_to_svg,
-)
-from workflow.remote_workflow_validation import validate_workflow_json_file  # noqa: E402
+try:
+    from .remote_workflow_graph import (  # noqa: E402
+        workflow_graph_svgs,
+        workflow_plan_to_svg,
+    )
+    from .remote_workflow_validation import validate_workflow_json_file  # noqa: E402
+except ImportError:  # pragma: no cover - supports direct test file execution.
+    from remote_workflow_graph import (  # noqa: E402
+        workflow_graph_svgs,
+        workflow_plan_to_svg,
+    )
+    from remote_workflow_validation import validate_workflow_json_file  # noqa: E402
 
 
 def workflow_plan_for_env(workflow, env: str):

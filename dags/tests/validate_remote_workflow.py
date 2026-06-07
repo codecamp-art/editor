@@ -151,15 +151,18 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    dags_dir = Path(__file__).resolve().parent
-    if str(dags_dir) not in sys.path:
-        sys.path.insert(0, str(dags_dir))
+    tests_dir = Path(__file__).resolve().parent
+    dags_dir = tests_dir.parent
+    for import_path in (dags_dir, tests_dir):
+        import_path_text = str(import_path)
+        if import_path_text not in sys.path:
+            sys.path.insert(0, import_path_text)
 
     install_airflow_validation_stubs()
     install_runtime_stubs()
 
-    from workflow.remote_workflow_graph import write_workflow_graph_svg  # noqa: WPS433
-    from workflow.remote_workflow_validation import (  # noqa: WPS433
+    from remote_workflow_graph import write_workflow_graph_svg  # noqa: WPS433
+    from remote_workflow_validation import (  # noqa: WPS433
         validate_workflow_json_file,
         workflow_execution_warnings,
     )

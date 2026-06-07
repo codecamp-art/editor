@@ -17,7 +17,11 @@ from workflow.remote_workflow import (
     require_workflow_action,
     sanitize_task_id,
 )
-from workflow.remote_workflow_validation import validate_workflow_json_file
+
+try:
+    from .remote_workflow_validation import validate_workflow_json_file
+except ImportError:  # pragma: no cover - supports direct script execution.
+    from remote_workflow_validation import validate_workflow_json_file
 
 
 NODE_WIDTH = 190
