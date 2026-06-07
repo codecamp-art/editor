@@ -16,6 +16,12 @@
     "run": "15 9 * * 1-5"
   },
   "command_timeout_seconds": 1800,
+  "runtime_defaults": {
+    "sudo_mode": "non_interactive",
+    "remote_execution_mode": "auto",
+    "systemd_run_scope": "system",
+    "systemd_unit_prefix": "batch-workflow"
+  },
   "tags": [
     "remote-workflow",
     "batch",
@@ -74,6 +80,7 @@
       "scripts": [
         {
           "id": "extract_orders_{host_id}",
+          "systemd_unit_prefix": "extract-orders",
           "commands": {
             "run": "./bin/extract-orders --env {env}"
           }
@@ -91,6 +98,7 @@
         },
         "qa": {
           "sudo_user": "batch_qa",
+          "systemd_runtime_max_seconds": 1200,
           "fields": {
             "region": {
               "default": "emea",
@@ -129,7 +137,8 @@
               "hosts": [
                 {
                   "host": "prod-batch-01.company.net",
-                  "host_id": "prod_batch_01"
+                  "host_id": "prod_batch_01",
+                  "systemd_unit_prefix": "extract-orders-primary"
                 },
                 {
                   "host": "prod-batch-02.company.net",

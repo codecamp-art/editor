@@ -39,6 +39,8 @@ from common.field_schema import (
 from common.remote_command import (
     build_env_exports,
     build_sudo_bash_command,
+    build_systemd_run_command,
+    build_systemd_unit_name,
     shell_join,
     split_extra_args,
     validate_sudo_mode,
@@ -62,6 +64,11 @@ SUPPORTED_TASK_TYPES = {SYSTEMD_TASK_TYPE, *SCRIPT_TASK_TYPES}
 REMOTE_COMMAND_ACTIONS = SUPPORTED_WORKFLOW_ACTIONS
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
+DEFAULT_SUDO_MODE = "non_interactive"
+DEFAULT_REMOTE_EXECUTION_MODE = "auto"
+SUPPORTED_REMOTE_EXECUTION_MODES = {"auto", "foreground", "systemd_run"}
+SYSTEMD_RUN_SCOPE_AUTO = "auto"
+SUPPORTED_SYSTEMD_RUN_SCOPES = {SYSTEMD_RUN_SCOPE_AUTO, "system", "user"}
 DEFAULT_TRIGGER_RULE = "all_success"
 SUPPORTED_TRIGGER_RULES = {
     "all_success",
@@ -114,8 +121,20 @@ RUNTIME_OVERRIDE_KEYS = (
     "remote_env_vars",
     "preset_params",
     "sudo_mode",
+    "remote_execution_mode",
+    "systemd_run_scope",
+    "systemd_unit_prefix",
+    "systemd_runtime_max_seconds",
     "command_timeout_seconds",
     "windows_shell",
+)
+GLOBAL_RUNTIME_DEFAULT_KEYS = (
+    "sudo_mode",
+    "remote_execution_mode",
+    "systemd_run_scope",
+    "systemd_unit_prefix",
+    "systemd_runtime_max_seconds",
+    "command_timeout_seconds",
 )
 
 
@@ -169,7 +188,11 @@ class WorkflowTaskSpec:
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     optional: bool = False
     enabled: bool = True
-    sudo_mode: str = "login"
+    sudo_mode: str = DEFAULT_SUDO_MODE
+    remote_execution_mode: str = DEFAULT_REMOTE_EXECUTION_MODE
+    systemd_run_scope: str = SYSTEMD_RUN_SCOPE_AUTO
+    systemd_unit_prefix: str | None = None
+    systemd_runtime_max_seconds: int | None = None
     command_timeout_seconds: int | None = None
     windows_shell: str = "powershell"
     env_overrides: dict[str, dict[str, Any]] | None = None
@@ -283,6 +306,48 @@ def first_config_value(data: dict[str, Any], keys: tuple[str, ...], default: Any
 def require_workflow_action(action: str) -> None:
     if action not in SUPPORTED_WORKFLOW_ACTIONS:
         raise ValueError(f"action must be one of {SUPPORTED_WORKFLOW_ACTIONS}")
+
+
+def normalize_remote_execution_mode(value: Any) -> str:
+    mode = str(value or DEFAULT_REMOTE_EXECUTION_MODE).strip()
+    if mode not in SUPPORTED_REMOTE_EXECUTION_MODES:
+        raise ValueError(
+            "remote_execution_mode must be one of "
+            f"{sorted(SUPPORTED_REMOTE_EXECUTION_MODES)}; got '{mode}'."
+        )
+    return mode
+
+
+def normalize_systemd_run_scope(value: Any) -> str:
+    scope = str(value or SYSTEMD_RUN_SCOPE_AUTO).strip()
+    if scope not in SUPPORTED_SYSTEMD_RUN_SCOPES:
+        raise ValueError(
+            f"systemd_run_scope must be one of {sorted(SUPPORTED_SYSTEMD_RUN_SCOPES)}; "
+            f"got '{scope}'."
+        )
+    return scope
+
+
+def normalize_runtime_defaults(data: dict[str, Any]) -> dict[str, Any]:
+    raw_defaults = optional_json_object(
+        data.get("runtime_defaults"),
+        name="runtime_defaults",
+    )
+    defaults = {
+        key: value
+        for key, value in raw_defaults.items()
+        if key in GLOBAL_RUNTIME_DEFAULT_KEYS and value is not None
+    }
+    for key in GLOBAL_RUNTIME_DEFAULT_KEYS:
+        if key in data and data[key] is not None:
+            defaults[key] = data[key]
+    defaults.setdefault("sudo_mode", DEFAULT_SUDO_MODE)
+    defaults.setdefault("remote_execution_mode", DEFAULT_REMOTE_EXECUTION_MODE)
+    defaults.setdefault("systemd_run_scope", SYSTEMD_RUN_SCOPE_AUTO)
+    normalize_remote_execution_mode(defaults["remote_execution_mode"])
+    normalize_systemd_run_scope(defaults["systemd_run_scope"])
+    validate_sudo_mode(defaults["sudo_mode"])
+    return defaults
 
 
 def is_start_stop_action(action: str) -> bool:
@@ -585,8 +650,6 @@ def host_group_bulk_items(host_group_config: dict[str, Any]) -> tuple[dict[str, 
                 service_name = item.get("service_name", item.get("name"))
                 if service_name:
                     item["service_name"] = service_name
-            elif item_kind in {"commands", "scripts"}:
-                item.setdefault("type", LINUX_SCRIPT_TASK_TYPE)
             items.append(item)
 
     for item_kind in HOST_GROUP_BULK_TASK_KEYS:
@@ -890,8 +953,11 @@ def add_target_host_group_env(
 
 def build_remote_target_task_configs(
     environments: dict[str, Any],
+    *,
+    runtime_defaults: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     task_configs_by_id: dict[str, dict[str, Any]] = {}
+    default_runtime = runtime_defaults or {}
 
     for host_group_id, host_group_config in iter_inventory_host_groups(environments):
         legacy_keys = [key for key in ("task_group", "task_group_id") if key in host_group_config]
@@ -912,7 +978,10 @@ def build_remote_target_task_configs(
             host_group_config=host_group_config,
         )
         for current_env, env_group_config in env_configs:
-            base_defaults = host_group_runtime_defaults(base_group_config)
+            base_defaults = deep_merge_dicts(
+                default_runtime,
+                host_group_runtime_defaults(base_group_config),
+            )
             env_defaults = host_group_runtime_defaults(env_group_config)
             base_items_by_identity = items_by_identity(
                 host_group_bulk_items(base_group_config),
@@ -1206,6 +1275,23 @@ def apply_task_runtime_overrides(
         remote_env_vars=merged_env_vars or None,
         preset_params=merged_preset_params or None,
         sudo_mode=rendered.get("sudo_mode", task_spec.sudo_mode),
+        remote_execution_mode=rendered.get(
+            "remote_execution_mode",
+            task_spec.remote_execution_mode,
+        ),
+        systemd_run_scope=rendered.get(
+            "systemd_run_scope",
+            task_spec.systemd_run_scope,
+        ),
+        systemd_unit_prefix=rendered.get(
+            "systemd_unit_prefix",
+            task_spec.systemd_unit_prefix,
+        ),
+        systemd_runtime_max_seconds=(
+            int(rendered["systemd_runtime_max_seconds"])
+            if rendered.get("systemd_runtime_max_seconds") is not None
+            else task_spec.systemd_runtime_max_seconds
+        ),
         command_timeout_seconds=(
             int(rendered["command_timeout_seconds"])
             if rendered.get("command_timeout_seconds") is not None
@@ -1462,6 +1548,12 @@ def render_task_templates(task_spec: WorkflowTaskSpec, tokens: dict[str, str]) -
         working_dir=render_template_value(task_spec.working_dir, tokens),
         remote_env_vars=render_template_value(task_spec.remote_env_vars, tokens),
         preset_params=render_template_value(task_spec.preset_params, tokens),
+        remote_execution_mode=render_template_value(
+            task_spec.remote_execution_mode,
+            tokens,
+        ),
+        systemd_run_scope=render_template_value(task_spec.systemd_run_scope, tokens),
+        systemd_unit_prefix=render_template_value(task_spec.systemd_unit_prefix, tokens),
         depends_on=render_template_value(task_spec.depends_on, tokens),
         start_depends_on=render_template_value(task_spec.start_depends_on, tokens),
         stop_depends_on=render_template_value(task_spec.stop_depends_on, tokens),
@@ -1559,6 +1651,23 @@ def apply_task_env_overrides(
         enabled=bool(override.get("enabled", task_spec.enabled)),
         preset_params=merged_preset_params or None,
         sudo_mode=runtime_overrides.get("sudo_mode", task_spec.sudo_mode),
+        remote_execution_mode=runtime_overrides.get(
+            "remote_execution_mode",
+            task_spec.remote_execution_mode,
+        ),
+        systemd_run_scope=runtime_overrides.get(
+            "systemd_run_scope",
+            task_spec.systemd_run_scope,
+        ),
+        systemd_unit_prefix=runtime_overrides.get(
+            "systemd_unit_prefix",
+            task_spec.systemd_unit_prefix,
+        ),
+        systemd_runtime_max_seconds=(
+            int(runtime_overrides["systemd_runtime_max_seconds"])
+            if runtime_overrides.get("systemd_runtime_max_seconds") is not None
+            else task_spec.systemd_runtime_max_seconds
+        ),
         command_timeout_seconds=(
             int(runtime_overrides["command_timeout_seconds"])
             if runtime_overrides.get("command_timeout_seconds") is not None
@@ -1788,6 +1897,15 @@ def validate_task_spec(
             field_name=f"Task '{task_spec.task_id}' stop_trigger_rule",
         )
     validate_sudo_mode(task_spec.sudo_mode)
+    normalize_remote_execution_mode(task_spec.remote_execution_mode)
+    normalize_systemd_run_scope(task_spec.systemd_run_scope)
+    if (
+        task_spec.systemd_runtime_max_seconds is not None
+        and task_spec.systemd_runtime_max_seconds <= 0
+    ):
+        raise ValueError(
+            f"Task '{task_spec.task_id}' systemd_runtime_max_seconds must be positive."
+        )
 
     if task_spec.task_type == SYSTEMD_TASK_TYPE:
         if action and action not in SUPPORTED_SYSTEMD_ACTIONS:
@@ -1822,6 +1940,14 @@ def validate_task_spec(
         raise ValueError(
             f"Task '{task_spec.task_id}' windows_shell must be one of "
             f"{sorted(SUPPORTED_WINDOWS_SHELLS)}."
+        )
+    if (
+        task_spec.task_type == WINDOWS_SCRIPT_TASK_TYPE
+        and normalize_remote_execution_mode(task_spec.remote_execution_mode) == "systemd_run"
+    ):
+        raise ValueError(
+            f"Task '{task_spec.task_id}' uses windows_script and cannot use "
+            "remote_execution_mode=systemd_run. Use auto or foreground."
         )
 
 
@@ -2118,6 +2244,64 @@ def infer_systemd_scope(platform: str) -> str:
     raise ValueError(f"Unsupported systemd platform '{platform}'.")
 
 
+def resolved_remote_execution_mode(task_spec: WorkflowTaskSpec) -> str:
+    mode = normalize_remote_execution_mode(task_spec.remote_execution_mode)
+    if mode != "auto":
+        return mode
+    if task_spec.task_type == WINDOWS_SCRIPT_TASK_TYPE:
+        return "foreground"
+    return "systemd_run"
+
+
+def resolved_systemd_run_scope(task_spec: WorkflowTaskSpec) -> str:
+    scope = normalize_systemd_run_scope(task_spec.systemd_run_scope)
+    if scope != SYSTEMD_RUN_SCOPE_AUTO:
+        return scope
+    if task_spec.task_type == SYSTEMD_TASK_TYPE:
+        systemd_cfg = task_spec.systemd or {}
+        return infer_systemd_scope(systemd_cfg.get("platform", task_spec.platform))
+    return "system"
+
+
+def remote_systemd_unit_name(
+    *,
+    task_spec: WorkflowTaskSpec,
+    host_target: HostTarget,
+    action: str,
+    dag_id: str,
+    run_id: str,
+) -> str:
+    task_host_id = sanitize_task_id(f"{task_spec.task_id}_{host_target.host}")
+    return build_systemd_unit_name(
+        prefix=task_spec.systemd_unit_prefix or "remote-workflow",
+        dag_id=f"{dag_id}-{action}-{task_host_id}",
+        run_id=run_id,
+    )
+
+
+def systemd_run_timeout_seconds(
+    *,
+    task_spec: WorkflowTaskSpec,
+    base_timeout_seconds: int,
+) -> int:
+    if resolved_remote_execution_mode(task_spec) != "systemd_run":
+        return base_timeout_seconds
+    runtime_max_seconds = (
+        task_spec.systemd_runtime_max_seconds
+        or task_spec.command_timeout_seconds
+        or base_timeout_seconds
+    )
+    return max(base_timeout_seconds, runtime_max_seconds + 300)
+
+
+def ssh_get_pty_for_task(task_spec: WorkflowTaskSpec) -> bool | None:
+    if task_spec.sudo_mode == "non_interactive":
+        return False
+    if resolved_remote_execution_mode(task_spec) == "systemd_run":
+        return False
+    return None
+
+
 def prepare_workflow_plan(
     *,
     workflow: RemoteWorkflowDefinition,
@@ -2260,6 +2444,9 @@ def build_systemd_service_command(
     task_spec: WorkflowTaskSpec,
     host_target: HostTarget,
     action: str,
+    dag_id: str = "remote_workflow",
+    run_id: str = "manual",
+    default_timeout_seconds: int | None = None,
 ) -> str:
     systemd_cfg = task_spec.systemd or {}
     platform = systemd_cfg.get("platform", task_spec.platform)
@@ -2283,6 +2470,31 @@ def build_systemd_service_command(
     command_parts.extend(systemctl_args)
 
     inner_command = shell_join(command_parts)
+    if resolved_remote_execution_mode(task_spec) == "systemd_run":
+        run_scope = resolved_systemd_run_scope(task_spec)
+        unit_sudo_user = sudo_user
+        systemd_run_inner_command = inner_command
+        if run_scope == "system" and sudo_user:
+            systemd_run_inner_command = shell_join(["sudo", "-n", *command_parts])
+        return build_systemd_run_command(
+            unit_name=remote_systemd_unit_name(
+                task_spec=task_spec,
+                host_target=host_target,
+                action=action,
+                dag_id=dag_id,
+                run_id=run_id,
+            ),
+            sudo_user=unit_sudo_user,
+            inner_command=systemd_run_inner_command,
+            runtime_max_seconds=(
+                task_spec.systemd_runtime_max_seconds
+                or task_spec.command_timeout_seconds
+                or default_timeout_seconds
+            ),
+            scope=run_scope,
+            sudo_mode=task_spec.sudo_mode,
+        )
+
     if scope == "system":
         inner_command = shell_join(["sudo", "-n", *command_parts])
 
@@ -2320,6 +2532,25 @@ def build_linux_shell_command(
     remote_env_vars: dict[str, Any] | None,
     sudo_mode: str,
 ) -> str:
+    return build_linux_inner_command(
+        raw_command=raw_command,
+        app_args=app_args,
+        working_dir=working_dir,
+        remote_env_vars=remote_env_vars,
+        sudo_user=sudo_user,
+        sudo_mode=sudo_mode,
+    )
+
+
+def build_linux_inner_command(
+    *,
+    raw_command: Any,
+    app_args: list[str] | None,
+    working_dir: str | None,
+    remote_env_vars: dict[str, Any] | None,
+    sudo_user: str | None = None,
+    sudo_mode: str = DEFAULT_SUDO_MODE,
+) -> str:
     command_text = command_text_with_args(
         raw_command=raw_command,
         app_args=app_args,
@@ -2343,6 +2574,48 @@ def build_linux_shell_command(
             sudo_mode=sudo_mode,
         )
     return shell_join(["bash", "-lc", inner_command])
+
+
+def build_linux_systemd_run_command(
+    *,
+    task_spec: WorkflowTaskSpec,
+    host_target: HostTarget,
+    raw_command: Any,
+    app_args: list[str] | None,
+    working_dir: str | None,
+    remote_env_vars: dict[str, Any] | None,
+    sudo_user: str | None,
+    action: str,
+    dag_id: str,
+    run_id: str,
+    default_timeout_seconds: int | None = None,
+) -> str:
+    inner_command = build_linux_inner_command(
+        raw_command=raw_command,
+        app_args=app_args,
+        working_dir=working_dir,
+        remote_env_vars=remote_env_vars,
+    )
+    run_scope = resolved_systemd_run_scope(task_spec)
+    unit_sudo_user = sudo_user if run_scope == "system" else sudo_user
+    return build_systemd_run_command(
+        unit_name=remote_systemd_unit_name(
+            task_spec=task_spec,
+            host_target=host_target,
+            action=action,
+            dag_id=dag_id,
+            run_id=run_id,
+        ),
+        sudo_user=unit_sudo_user,
+        inner_command=inner_command,
+        runtime_max_seconds=(
+            task_spec.systemd_runtime_max_seconds
+            or task_spec.command_timeout_seconds
+            or default_timeout_seconds
+        ),
+        scope=run_scope,
+        sudo_mode=task_spec.sudo_mode,
+    )
 
 
 def powershell_quote(value: str) -> str:
@@ -2420,12 +2693,18 @@ def build_remote_task_command(
     host_target: HostTarget,
     action: str,
     validated_params: dict[str, Any] | None = None,
+    dag_id: str = "remote_workflow",
+    run_id: str = "manual",
+    default_timeout_seconds: int | None = None,
 ) -> str:
     if task_spec.task_type == SYSTEMD_TASK_TYPE:
         return build_systemd_service_command(
             task_spec=task_spec,
             host_target=host_target,
             action=action,
+            dag_id=dag_id,
+            run_id=run_id,
+            default_timeout_seconds=default_timeout_seconds,
         )
 
     commands = task_spec.commands or {}
@@ -2438,6 +2717,20 @@ def build_remote_task_command(
     )
     sudo_user = task_spec.sudo_user or host_target.sudo_user
     if task_spec.task_type == LINUX_SCRIPT_TASK_TYPE:
+        if resolved_remote_execution_mode(task_spec) == "systemd_run":
+            return build_linux_systemd_run_command(
+                task_spec=task_spec,
+                host_target=host_target,
+                raw_command=commands[action],
+                app_args=app_args,
+                working_dir=task_spec.working_dir,
+                remote_env_vars=remote_env_vars,
+                sudo_user=sudo_user,
+                action=action,
+                dag_id=dag_id,
+                run_id=run_id,
+                default_timeout_seconds=default_timeout_seconds,
+            )
         return build_linux_shell_command(
             raw_command=commands[action],
             app_args=app_args,
@@ -2477,6 +2770,10 @@ def task_spec_to_payload(task_spec: WorkflowTaskSpec) -> dict[str, Any]:
         "remote_env_vars": task_spec.remote_env_vars,
         "preset_params": task_spec.preset_params,
         "sudo_mode": task_spec.sudo_mode,
+        "remote_execution_mode": task_spec.remote_execution_mode,
+        "systemd_run_scope": task_spec.systemd_run_scope,
+        "systemd_unit_prefix": task_spec.systemd_unit_prefix,
+        "systemd_runtime_max_seconds": task_spec.systemd_runtime_max_seconds,
         "command_timeout_seconds": task_spec.command_timeout_seconds,
         "windows_shell": task_spec.windows_shell,
         "group_id": task_spec.group_id,
@@ -2501,7 +2798,14 @@ def task_spec_from_payload(payload: dict[str, Any]) -> WorkflowTaskSpec:
         working_dir=payload.get("working_dir"),
         remote_env_vars=payload.get("remote_env_vars"),
         preset_params=payload.get("preset_params"),
-        sudo_mode=payload.get("sudo_mode", "login"),
+        sudo_mode=payload.get("sudo_mode", DEFAULT_SUDO_MODE),
+        remote_execution_mode=payload.get(
+            "remote_execution_mode",
+            DEFAULT_REMOTE_EXECUTION_MODE,
+        ),
+        systemd_run_scope=payload.get("systemd_run_scope", SYSTEMD_RUN_SCOPE_AUTO),
+        systemd_unit_prefix=payload.get("systemd_unit_prefix"),
+        systemd_runtime_max_seconds=payload.get("systemd_runtime_max_seconds"),
         command_timeout_seconds=payload.get("command_timeout_seconds"),
         windows_shell=payload.get("windows_shell", "powershell"),
         group_id=payload.get("group_id"),
@@ -2796,15 +3100,23 @@ def create_workflow_dag(
                 host_target.task_overrides,
             )
             validate_task_spec(task_spec, action=selected_action)
+            context = get_current_context()
+            base_cmd_timeout = (
+                task_spec.command_timeout_seconds
+                or workflow.command_timeout_seconds
+            )
             command = build_remote_task_command(
                 task_spec=task_spec,
                 host_target=host_target,
                 action=selected_action,
                 validated_params=validated,
+                dag_id=context["dag"].dag_id,
+                run_id=str(context["run_id"]),
+                default_timeout_seconds=base_cmd_timeout,
             )
-            cmd_timeout = (
-                task_spec.command_timeout_seconds
-                or workflow.command_timeout_seconds
+            cmd_timeout = systemd_run_timeout_seconds(
+                task_spec=task_spec,
+                base_timeout_seconds=base_cmd_timeout,
             )
             ssh_hook = MSSSHHook(
                 ssh_conn_id=host_target.ssh_conn_id,
@@ -2819,6 +3131,7 @@ def create_workflow_dag(
                 ssh_hook=ssh_hook,
                 command=command,
                 cmd_timeout=cmd_timeout,
+                get_pty=ssh_get_pty_for_task(task_spec),
             )
 
         validated_task = validate_inputs.override(
@@ -3057,7 +3370,18 @@ def build_task_spec_from_config(
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),
-        sudo_mode=data.get("sudo_mode", "login"),
+        sudo_mode=data.get("sudo_mode", DEFAULT_SUDO_MODE),
+        remote_execution_mode=data.get(
+            "remote_execution_mode",
+            DEFAULT_REMOTE_EXECUTION_MODE,
+        ),
+        systemd_run_scope=data.get("systemd_run_scope", SYSTEMD_RUN_SCOPE_AUTO),
+        systemd_unit_prefix=data.get("systemd_unit_prefix"),
+        systemd_runtime_max_seconds=(
+            int(data["systemd_runtime_max_seconds"])
+            if data.get("systemd_runtime_max_seconds") is not None
+            else None
+        ),
         command_timeout_seconds=(
             int(data["command_timeout_seconds"])
             if data.get("command_timeout_seconds") is not None
@@ -3130,12 +3454,19 @@ def expand_task_specs_from_config(
     data: dict[str, Any],
     *,
     target_task_configs: dict[str, dict[str, Any]],
+    task_defaults: dict[str, Any] | None = None,
     group_id: str | None = None,
     scope: str = "Task",
 ) -> tuple[WorkflowTaskSpec, ...]:
+    task_defaults = task_defaults or {}
     selectors = task_target_selectors_from_config(data)
     if not selectors:
-        return (build_task_spec_from_config(data, group_id=group_id),)
+        return (
+            build_task_spec_from_config(
+                deep_merge_dicts(task_defaults, data),
+                group_id=group_id,
+            ),
+        )
 
     target_ids = resolve_task_target_ids(
         selectors,
@@ -3150,7 +3481,11 @@ def expand_task_specs_from_config(
     task_specs: list[WorkflowTaskSpec] = []
     multiple_targets = len(target_ids) > 1
     for target_id in target_ids:
-        task_config = deep_merge_dicts(target_task_configs[target_id], overlay_config)
+        task_config = deep_merge_dicts(
+            task_defaults,
+            target_task_configs[target_id],
+            overlay_config,
+        )
         task_config["task_id"] = task_id_for_target_reference(
             raw_task_id=overlay_config.get("task_id"),
             target_id=target_id,
@@ -3170,6 +3505,7 @@ def build_task_specs_from_config(
     raw_tasks: list[dict[str, Any]],
     *,
     target_task_configs: dict[str, dict[str, Any]],
+    task_defaults: dict[str, Any] | None = None,
     group_id: str | None = None,
     scope: str = "tasks",
 ) -> tuple[WorkflowTaskSpec, ...]:
@@ -3179,6 +3515,7 @@ def build_task_specs_from_config(
             expand_task_specs_from_config(
                 task_data,
                 target_task_configs=target_task_configs,
+                task_defaults=task_defaults,
                 group_id=group_id,
                 scope=f"{scope}[{task_index}]",
             )
@@ -3190,6 +3527,7 @@ def build_task_group_spec_from_config(
     data: dict,
     *,
     target_task_configs: dict[str, dict[str, Any]] | None = None,
+    task_defaults: dict[str, Any] | None = None,
     group_index: int | None = None,
 ) -> WorkflowTaskGroupSpec:
     reject_host_group_only_runtime_keys(
@@ -3228,6 +3566,7 @@ def build_task_group_spec_from_config(
         tasks=build_task_specs_from_config(
             data.get("tasks", []),
             target_task_configs=target_task_configs,
+            task_defaults=task_defaults,
             group_id=group_id,
             scope=group_scope,
         ),
@@ -3533,13 +3872,18 @@ def build_workflow_definition_from_config(
     schedule_pairs = build_schedule_pairs_from_config(data)
     actions = normalize_workflow_actions(data, schedule_pairs)
     environments = build_workflow_environments_from_config(data)
-    target_task_configs = build_remote_target_task_configs(environments)
+    runtime_defaults = normalize_runtime_defaults(data)
+    target_task_configs = build_remote_target_task_configs(
+        environments,
+        runtime_defaults=runtime_defaults,
+    )
     raw_task_groups = normalize_task_groups_config(data)
     validate_task_group_ids_from_config(raw_task_groups)
     explicit_task_groups = tuple(
         build_task_group_spec_from_config(
             group_data,
             target_task_configs=target_task_configs,
+            task_defaults=runtime_defaults,
             group_index=group_index,
         )
         for group_index, group_data in enumerate(raw_task_groups)
@@ -3562,6 +3906,7 @@ def build_workflow_definition_from_config(
         tasks=build_task_specs_from_config(
             data.get("tasks", []),
             target_task_configs=target_task_configs,
+            task_defaults=runtime_defaults,
             scope="tasks",
         ),
         task_groups=explicit_task_groups,
@@ -3845,13 +4190,22 @@ def workflow_execution_warnings(plan: WorkflowPlan) -> tuple[str, ...]:
                 host_target.task_overrides,
             )
             task_context = f"task '{task_spec.task_id}' host '{host_target.host}'"
+            execution_mode = resolved_remote_execution_mode(effective_task)
             if effective_task.sudo_user and effective_task.sudo_mode != "non_interactive":
                 warnings.append(
                     f"{task_context}: sudo_mode='{effective_task.sudo_mode}' can prompt "
                     "for sudo credentials; use sudo_mode='non_interactive' with NOPASSWD "
                     "sudoers for fully non-interactive Airflow execution."
                 )
-            if effective_task.task_type in SCRIPT_TASK_TYPES:
+            if execution_mode == "systemd_run":
+                warnings.append(
+                    f"{task_context}: remote_execution_mode resolves to systemd_run. "
+                    "The remote command runs in a transient systemd unit and Airflow "
+                    "polls that unit for the result; if the Airflow worker or SSH "
+                    "connection is interrupted, the retry can find the same unit by "
+                    "dag_id/run_id/task/host."
+                )
+            elif effective_task.task_type in SCRIPT_TASK_TYPES:
                 warnings.append(
                     f"{task_context}: script commands run in the foreground over SSH. "
                     "If the Airflow worker or SSH connection is interrupted, Airflow "

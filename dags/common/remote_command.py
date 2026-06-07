@@ -97,7 +97,7 @@ def build_sudo_bash_command(
     *,
     sudo_user: str,
     inner_command: str,
-    sudo_mode: str = "login",
+    sudo_mode: str = "non_interactive",
 ) -> str:
     validate_sudo_mode(sudo_mode)
 
@@ -134,12 +134,14 @@ def build_systemd_unit_name(
 def build_systemd_command(
     *,
     scope: str,
-    sudo_user: str,
+    sudo_user: str | None,
     executable: str,
     args: Iterable[str],
+    sudo_mode: str = "non_interactive",
 ) -> str:
     if scope not in {"system", "user"}:
         raise ValueError("scope must be either 'system' or 'user'.")
+    validate_sudo_mode(sudo_mode)
 
     command_parts = [executable]
     if scope == "user":
@@ -147,25 +149,32 @@ def build_systemd_command(
     command_parts.extend(args)
 
     if scope == "system":
-        return shell_join(["sudo", *command_parts])
+        sudo_parts = ["sudo", "-n"] if sudo_mode == "non_interactive" else ["sudo"]
+        return shell_join([*sudo_parts, *command_parts])
+
+    if not sudo_user:
+        return shell_join(command_parts)
 
     return build_sudo_bash_command(
         sudo_user=sudo_user,
         inner_command=shell_join(command_parts),
+        sudo_mode=sudo_mode,
     )
 
 
 def build_systemd_run_command(
     *,
     unit_name: str,
-    sudo_user: str,
+    sudo_user: str | None,
     inner_command: str,
     runtime_max_seconds: int | None = None,
     scope: str = "system",
+    sudo_mode: str = "non_interactive",
 ) -> str:
     unit_arg = unit_name if unit_name.endswith(".service") else f"{unit_name}.service"
     if scope not in {"system", "user"}:
         raise ValueError("scope must be either 'system' or 'user'.")
+    validate_sudo_mode(sudo_mode)
 
     def systemctl_show(property_name: str) -> str:
         return build_systemd_command(
@@ -178,6 +187,7 @@ def build_systemd_run_command(
                 f"--property={property_name}",
                 "--value",
             ],
+            sudo_mode=sudo_mode,
         )
 
     start_args = [
@@ -188,7 +198,7 @@ def build_systemd_run_command(
         if runtime_max_seconds <= 0:
             raise ValueError("runtime_max_seconds must be a positive integer.")
         start_args.append(f"--property=RuntimeMaxSec={runtime_max_seconds}")
-    if scope == "system":
+    if scope == "system" and sudo_user:
         start_args.append(f"--property=User={sudo_user}")
     start_args.extend(["bash", "-lc", inner_command])
 
@@ -197,24 +207,28 @@ def build_systemd_run_command(
         sudo_user=sudo_user,
         executable="systemd-run",
         args=start_args,
+        sudo_mode=sudo_mode,
     )
     stop_command = build_systemd_command(
         scope=scope,
         sudo_user=sudo_user,
         executable="systemctl",
         args=["stop", unit_arg],
+        sudo_mode=sudo_mode,
     )
     reset_failed_command = build_systemd_command(
         scope=scope,
         sudo_user=sudo_user,
         executable="systemctl",
         args=["reset-failed", unit_arg],
+        sudo_mode=sudo_mode,
     )
     journal_command = build_systemd_command(
         scope=scope,
         sudo_user=sudo_user,
         executable="journalctl",
         args=["-u", unit_arg, "-n", "200", "--no-pager"],
+        sudo_mode=sudo_mode,
     )
 
     script = f"""

@@ -43,7 +43,7 @@ class RemoteCommandTest(unittest.TestCase):
         )
         self.assertEqual(
             command,
-            "sudo -iu reportuser_qa bash -lc "
+            "sudo -n -H -u reportuser_qa bash -lc "
             "'cd /opt/reporting/tds-reporter && bin/report --env qa --report-time=08:30'",
         )
 
@@ -86,6 +86,18 @@ class RemoteCommandTest(unittest.TestCase):
             "sudo -n -H -u reportuser_qa bash -lc 'java -jar report.jar'",
         )
 
+    def test_build_sudo_bash_command_supports_login_mode(self) -> None:
+        command = build_sudo_bash_command(
+            sudo_user="reportuser_qa",
+            inner_command="java -jar report.jar",
+            sudo_mode="login",
+        )
+
+        self.assertEqual(
+            command,
+            "sudo -iu reportuser_qa bash -lc 'java -jar report.jar'",
+        )
+
     def test_build_sudo_bash_command_rejects_invalid_mode(self) -> None:
         with self.assertRaises(ValueError):
             build_sudo_bash_command(
@@ -115,13 +127,13 @@ class RemoteCommandTest(unittest.TestCase):
 
         self.assertTrue(command.startswith("bash -lc "))
         self.assertIn(
-            "sudo systemctl show reporting-tds.service --property=LoadState --value",
+            "sudo -n systemctl show reporting-tds.service --property=LoadState --value",
             command,
         )
         self.assertIn("Found existing systemd unit", command)
-        self.assertIn("sudo systemctl reset-failed reporting-tds.service", command)
+        self.assertIn("sudo -n systemctl reset-failed reporting-tds.service", command)
         self.assertIn(
-            "sudo systemd-run --unit=reporting-tds.service --remain-after-exit "
+            "sudo -n systemd-run --unit=reporting-tds.service --remain-after-exit "
             "--property=RuntimeMaxSec=7200 --property=User=reportuser_qa bash -lc",
             command,
         )

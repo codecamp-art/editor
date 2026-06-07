@@ -41,6 +41,9 @@ from common.trading_day_tasks import (
 )
 
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
+DEFAULT_SUDO_MODE = "non_interactive"
+DEFAULT_REMOTE_EXECUTION_MODE = "systemd_run"
+DEFAULT_SYSTEMD_RUN_SCOPE = "system"
 REPORTING_DAGS_DIR = Path(__file__).resolve().parents[1] / "reporting"
 DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "configs" / "target_hosts.json"
 LEGACY_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "target_hosts.json"
@@ -110,15 +113,15 @@ class RemoteScriptDefinition:
     working_dir: str | None
     fields: dict
     adhoc_rules: dict
-    sudo_mode: str = "login"
+    sudo_mode: str = DEFAULT_SUDO_MODE
     remote_env_vars: dict[str, str] | None = None
     trading_day_check: TradingDayCheckDefinition | None = None
     preset_params: dict | None = None
     command_timeout_seconds: int = 3600
     retry_count: int = 2
     retry_delay_seconds: int = 300
-    remote_execution_mode: str = "foreground"
-    systemd_run_scope: str = "system"
+    remote_execution_mode: str = DEFAULT_REMOTE_EXECUTION_MODE
+    systemd_run_scope: str = DEFAULT_SYSTEMD_RUN_SCOPE
     systemd_unit_prefix: str | None = None
     systemd_runtime_max_seconds: int | None = None
     tags: tuple[str, ...] = ("reporting", "ssh")
@@ -483,6 +486,7 @@ def create_remote_script_dag(
                     inner_command=inner_command,
                     runtime_max_seconds=runtime_max_seconds,
                     scope=definition.systemd_run_scope,
+                    sudo_mode=definition.sudo_mode,
                 )
                 cmd_timeout = max(cmd_timeout, runtime_max_seconds + 300)
                 command_get_pty = False
@@ -694,7 +698,7 @@ def build_trading_day_check_definition(
 def build_remote_script_definition_from_config(
     base: dict,
 ) -> RemoteScriptDefinition:
-    sudo_mode = base.get("sudo_mode", "login")
+    sudo_mode = base.get("sudo_mode", DEFAULT_SUDO_MODE)
     validate_sudo_mode(sudo_mode)
 
     return RemoteScriptDefinition(
@@ -718,8 +722,8 @@ def build_remote_script_definition_from_config(
         command_timeout_seconds=int(base.get("command_timeout_seconds", 3600)),
         retry_count=int(base.get("retry_count", 2)),
         retry_delay_seconds=int(base.get("retry_delay_seconds", 300)),
-        remote_execution_mode=base.get("remote_execution_mode", "foreground"),
-        systemd_run_scope=base.get("systemd_run_scope", "system"),
+        remote_execution_mode=base.get("remote_execution_mode", DEFAULT_REMOTE_EXECUTION_MODE),
+        systemd_run_scope=base.get("systemd_run_scope", DEFAULT_SYSTEMD_RUN_SCOPE),
         systemd_unit_prefix=base.get("systemd_unit_prefix"),
         systemd_runtime_max_seconds=(
             int(base["systemd_runtime_max_seconds"])

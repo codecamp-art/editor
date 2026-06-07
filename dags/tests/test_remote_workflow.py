@@ -116,6 +116,7 @@ from workflow.remote_workflow import (  # noqa: E402
     prepare_workflow_plan,
     register_workflow_dags_from_json,
     register_workflow_dags_from_json_dir,
+    resolved_remote_execution_mode,
     resolve_hosts_for_task,
     resolve_topology_for_env,
     trigger_rule_satisfied,
@@ -868,6 +869,150 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertFalse(trigger_rule_satisfied("all_success", ("success", "skipped")))
         self.assertTrue(trigger_rule_satisfied("all_done", ("success", "failed")))
 
+    def test_default_runtime_uses_non_interactive_systemd_run_for_linux(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "actions": ["run"],
+                "host_groups": {
+                    "batch": {
+                        "type": "linux_script",
+                        "sudo_user": "batch",
+                        "hosts": ["qa-batch-01.company.net"],
+                        "commands": {
+                            "run": "./run.sh",
+                        },
+                    },
+                },
+                "tasks": [
+                    {"task_id": "extract", "host_group": "batch"},
+                ],
+            },
+            default_workflow_id="runtime_defaults",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        task = apply_task_runtime_overrides(
+            plan.tasks[0],
+            plan.hosts_by_task_id["extract"][0].task_overrides,
+        )
+
+        command = build_remote_task_command(
+            task_spec=task,
+            host_target=plan.hosts_by_task_id["extract"][0],
+            action="run",
+            dag_id="daily-batch",
+            run_id="manual__2026-06-07T10:00:00",
+            default_timeout_seconds=1800,
+        )
+
+        self.assertEqual(task.sudo_mode, "non_interactive")
+        self.assertEqual(resolved_remote_execution_mode(task), "systemd_run")
+        self.assertIn("sudo -n systemd-run", command)
+        self.assertIn("--property=User=batch", command)
+        self.assertIn("--property=RuntimeMaxSec=1800", command)
+        self.assertIn("./run.sh", command)
+
+    def test_runtime_defaults_are_overridden_by_service_env_and_host(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "actions": ["run"],
+                "runtime_defaults": {
+                    "sudo_mode": "non_interactive",
+                    "remote_execution_mode": "foreground",
+                    "systemd_unit_prefix": "global",
+                },
+                "host_groups": {
+                    "batch": {
+                        "type": "linux_script",
+                        "scripts": [
+                            {
+                                "id": "job_{host_id}",
+                                "commands": {
+                                    "run": "./job.sh",
+                                },
+                                "remote_execution_mode": "systemd_run",
+                                "systemd_unit_prefix": "service",
+                            }
+                        ],
+                        "environments": {
+                            "qa": {
+                                "sudo_user": "batch_qa",
+                                "systemd_unit_prefix": "env",
+                                "hosts": [
+                                    {
+                                        "host": "qa-batch-01.company.net",
+                                        "host_id": "one",
+                                        "sudo_mode": "login",
+                                        "systemd_unit_prefix": "host",
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                },
+                "tasks": [
+                    {"target": "job_one"},
+                ],
+            },
+            default_workflow_id="runtime_layers",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        task = apply_task_runtime_overrides(
+            plan.tasks[0],
+            plan.hosts_by_task_id["job_one"][0].task_overrides,
+        )
+
+        command = build_remote_task_command(
+            task_spec=task,
+            host_target=plan.hosts_by_task_id["job_one"][0],
+            action="run",
+            dag_id="runtime-layers",
+            run_id="manual__1",
+        )
+
+        self.assertEqual(task.sudo_mode, "login")
+        self.assertEqual(task.remote_execution_mode, "systemd_run")
+        self.assertEqual(task.systemd_unit_prefix, "host")
+        self.assertIn("--property=User=batch_qa", command)
+        self.assertIn("host-runtime-layers-run-job_one", command)
+
+    def test_script_targets_inherit_host_group_task_type(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "actions": ["run"],
+                "host_groups": {
+                    "windows_hosts": {
+                        "type": "windows_script",
+                        "windows_shell": "powershell",
+                        "scripts": [
+                            {
+                                "id": "publish",
+                                "commands": {
+                                    "run": ".\\publish.ps1",
+                                },
+                            }
+                        ],
+                        "environments": {
+                            "qa": {
+                                "hosts": ["qa-win-01.company.net"],
+                            }
+                        },
+                    },
+                },
+                "tasks": [
+                    {"target": "publish"},
+                ],
+            },
+            default_workflow_id="windows_targets",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        task = apply_task_runtime_overrides(
+            plan.tasks[0],
+            plan.hosts_by_task_id["publish"][0].task_overrides,
+        )
+
+        self.assertEqual(task.task_type, "windows_script")
+        self.assertEqual(resolved_remote_execution_mode(task), "foreground")
+
     def test_workflow_graph_markdown_renders_dependencies(self) -> None:
         workflow = build_workflow_definition_from_config(
             {
@@ -1130,7 +1275,9 @@ class RemoteWorkflowTest(unittest.TestCase):
             action="run",
         )
 
-        self.assertEqual(command, "bash -lc './bin/run-job --env qa'")
+        self.assertIn("systemd-run", command)
+        self.assertIn("./bin/run-job --env qa", command)
+        self.assertIn("remote-workflow-remote_workflow-run-extract", command)
 
     def test_register_run_workflow_from_nested_json_creates_one_dag(self) -> None:
         import json

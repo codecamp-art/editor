@@ -345,15 +345,16 @@ def execute_ssh_command(
     ssh_hook: MSSSHHook,
     command: str,
     cmd_timeout: float | ArgNotSet | None = NOTSET,
+    get_pty: bool | None = None,
 ) -> str:
     context = get_current_context()
-    get_pty = command.startswith("sudo")
+    resolved_get_pty = command.startswith("sudo") if get_pty is None else get_pty
 
     with ssh_hook.get_conn() as ssh_client:
         exit_status, agg_stdout, agg_stderr = ssh_hook.exec_ssh_client_command(
             ssh_client,
             command,
-            get_pty=get_pty,
+            get_pty=resolved_get_pty,
             environment=None,
             timeout=cmd_timeout,
         )
