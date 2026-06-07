@@ -118,6 +118,10 @@ from workflow.remote_workflow import (  # noqa: E402
     register_workflow_dags_from_json_dir,
     resolve_hosts_for_task,
     resolve_topology_for_env,
+    trigger_rule_satisfied,
+    validate_workflow_json_file,
+    workflow_graph_markdown,
+    workflow_plan_to_mermaid,
 )
 
 
@@ -824,6 +828,149 @@ class RemoteWorkflowTest(unittest.TestCase):
         message = str(raised.exception)
         self.assertIn("Task 'risk_a' depends on 'grp_dbx'", message)
         self.assertIn("Did you mean: grp_db", message)
+
+    def test_trigger_rule_can_be_configured_and_overridden(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "batch": {
+                        "type": "linux_script",
+                        "hosts": ["qa-batch-01.company.net"],
+                        "commands": {
+                            "run": "./run.sh",
+                        },
+                    },
+                },
+                "tasks": [
+                    {"task_id": "extract", "host_group": "batch"},
+                    {
+                        "task_id": "publish",
+                        "host_group": "batch",
+                        "depends_on": ["extract"],
+                        "trigger_rule": "none_failed",
+                        "env_overrides": {
+                            "qa": {
+                                "trigger_rule": "all_done",
+                            },
+                        },
+                    },
+                ],
+                "actions": ["run"],
+            },
+            default_workflow_id="trigger_rules",
+        )
+
+        plan = workflow_plan_for_env(workflow, "qa")
+        publish = next(task for task in plan.tasks if task.task_id == "publish")
+
+        self.assertEqual(publish.trigger_rule, "all_done")
+        self.assertTrue(trigger_rule_satisfied("none_failed", ("success", "skipped")))
+        self.assertFalse(trigger_rule_satisfied("all_success", ("success", "skipped")))
+        self.assertTrue(trigger_rule_satisfied("all_done", ("success", "failed")))
+
+    def test_workflow_graph_markdown_renders_dependencies(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "batch": {
+                        "type": "linux_script",
+                        "hosts": ["qa-batch-01.company.net"],
+                        "commands": {
+                            "run": "./run.sh",
+                        },
+                    },
+                },
+                "task_groups": [
+                    {
+                        "group_id": "grp_batch",
+                        "tasks": [
+                            {"task_id": "extract", "host_group": "batch"},
+                            {
+                                "task_id": "publish",
+                                "host_group": "batch",
+                                "depends_on": ["extract"],
+                            },
+                        ],
+                    },
+                ],
+                "actions": ["run"],
+            },
+            default_workflow_id="graph",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+
+        graph = workflow_plan_to_mermaid(plan, action="run", title="graph qa run")
+
+        self.assertIn("subgraph g_grp_batch", graph)
+        self.assertIn("n_extract --> n_publish", graph)
+        self.assertIn("n_publish --> wf_end", graph)
+
+    def test_validate_workflow_json_file_and_markdown_graph(self) -> None:
+        import json
+        import tempfile
+
+        config = {
+            "actions": ["run"],
+            "host_groups": {
+                "batch": {
+                    "type": "linux_script",
+                    "hosts": ["qa-batch-01.company.net"],
+                    "commands": {
+                        "run": "./run.sh",
+                    },
+                },
+            },
+            "tasks": [
+                {"task_id": "extract", "host_group": "batch"},
+                {
+                    "task_id": "publish",
+                    "host_group": "batch",
+                    "depends_on": ["extract"],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "daily_batch.json"
+            config_file.write_text(json.dumps(config), encoding="utf-8")
+
+            workflow, plans = validate_workflow_json_file(config_file, envs=("qa",))
+            graph = workflow_graph_markdown(config_file, envs=("qa",), actions=("run",))
+
+        self.assertEqual(workflow.workflow_id, "daily_batch")
+        self.assertEqual(tuple(plans), ("qa",))
+        self.assertIn("## daily_batch qa run", graph)
+        self.assertIn("n_extract --> n_publish", graph)
+
+    def test_validation_envs_use_runtime_envs_not_enabled_in_envs(self) -> None:
+        import json
+        import tempfile
+
+        config = {
+            "actions": ["run"],
+            "enabled_in_envs": ["prod"],
+            "runtime_envs": ["prod", "dr"],
+            "host_groups": {
+                "batch": {
+                    "type": "linux_script",
+                    "hosts": ["{env}-batch-01.company.net"],
+                    "commands": {
+                        "run": "./run.sh",
+                    },
+                },
+            },
+            "tasks": [
+                {"task_id": "extract", "host_group": "batch"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "daily_batch.json"
+            config_file.write_text(json.dumps(config), encoding="utf-8")
+
+            _, plans = validate_workflow_json_file(config_file)
+
+        self.assertEqual(tuple(plans), ("prod", "dr"))
 
     def test_missing_env_target_and_dependency_are_skipped(self) -> None:
         workflow = build_workflow_definition_from_config(

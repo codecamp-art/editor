@@ -62,10 +62,32 @@ SUPPORTED_TASK_TYPES = {SYSTEMD_TASK_TYPE, *SCRIPT_TASK_TYPES}
 REMOTE_COMMAND_ACTIONS = SUPPORTED_WORKFLOW_ACTIONS
 SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
+DEFAULT_TRIGGER_RULE = "all_success"
+SUPPORTED_TRIGGER_RULES = {
+    "all_success",
+    "all_failed",
+    "all_done",
+    "all_done_min_one_success",
+    "all_skipped",
+    "one_success",
+    "one_failed",
+    "one_done",
+    "none_failed",
+    "none_failed_min_one_success",
+    "none_skipped",
+    "always",
+}
+FAILED_STATES = {"failed", "upstream_failed"}
+SKIPPED_STATES = {"skipped"}
+SUCCESS_STATES = {"success"}
+DONE_STATES = {*SUCCESS_STATES, *FAILED_STATES, *SKIPPED_STATES}
 HOST_GROUP_ONLY_RUNTIME_KEYS = ("remote_env_vars", "windows_shell")
 DEPENDENCY_KEYS = ("depends_on", "start_after")
 START_DEPENDENCY_KEYS = ("start_depends_on", "start_after", "depends_on")
 STOP_DEPENDENCY_KEYS = ("stop_depends_on", "stop_after")
+TRIGGER_RULE_KEYS = ("trigger_rule", "depends_trigger_rule")
+START_TRIGGER_RULE_KEYS = ("start_trigger_rule", "start_depends_trigger_rule")
+STOP_TRIGGER_RULE_KEYS = ("stop_trigger_rule", "stop_depends_trigger_rule")
 DEFAULT_TOPOLOGY_KEYS = ("base", "default", "defaults")
 FLAT_TOPOLOGY_KEYS = ("host_defaults", "host_group_defaults", "host_groups", "variables")
 TOPOLOGY_METADATA_KEYS = (
@@ -141,6 +163,9 @@ class WorkflowTaskSpec:
     depends_on: tuple[str, ...] = ()
     start_depends_on: tuple[str, ...] = ()
     stop_depends_on: tuple[str, ...] = ()
+    trigger_rule: str = DEFAULT_TRIGGER_RULE
+    start_trigger_rule: str | None = None
+    stop_trigger_rule: str | None = None
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     optional: bool = False
     enabled: bool = True
@@ -158,6 +183,9 @@ class WorkflowTaskGroupSpec:
     depends_on: tuple[str, ...] = ()
     start_depends_on: tuple[str, ...] = ()
     stop_depends_on: tuple[str, ...] = ()
+    trigger_rule: str = DEFAULT_TRIGGER_RULE
+    start_trigger_rule: str | None = None
+    stop_trigger_rule: str | None = None
     enabled_in_envs: tuple[str, ...] = ALL_RUNTIME_ENVS
     optional: bool = False
     enabled: bool = True
@@ -298,6 +326,56 @@ def dependency_fields_from_config(
         first_config_value(data, STOP_DEPENDENCY_KEYS, stop_depends_on_default)
     )
     return depends_on, start_depends_on, stop_depends_on
+
+
+def normalize_trigger_rule(
+    value: Any,
+    *,
+    field_name: str = "trigger_rule",
+) -> str:
+    if value is None:
+        return DEFAULT_TRIGGER_RULE
+    rule = str(value).strip()
+    if not rule:
+        return DEFAULT_TRIGGER_RULE
+    if rule not in SUPPORTED_TRIGGER_RULES:
+        raise ValueError(
+            f"{field_name} must be one of {sorted(SUPPORTED_TRIGGER_RULES)}; "
+            f"got '{rule}'."
+        )
+    return rule
+
+
+def optional_trigger_rule(
+    value: Any,
+    *,
+    field_name: str,
+) -> str | None:
+    if value is None:
+        return None
+    return normalize_trigger_rule(value, field_name=field_name)
+
+
+def trigger_rule_fields_from_config(
+    data: dict[str, Any],
+    *,
+    trigger_rule_default: str = DEFAULT_TRIGGER_RULE,
+    start_trigger_rule_default: str | None = None,
+    stop_trigger_rule_default: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    trigger_rule = normalize_trigger_rule(
+        first_config_value(data, TRIGGER_RULE_KEYS, trigger_rule_default),
+        field_name="trigger_rule",
+    )
+    start_trigger_rule = optional_trigger_rule(
+        first_config_value(data, START_TRIGGER_RULE_KEYS, start_trigger_rule_default),
+        field_name="start_trigger_rule",
+    )
+    stop_trigger_rule = optional_trigger_rule(
+        first_config_value(data, STOP_TRIGGER_RULE_KEYS, stop_trigger_rule_default),
+        field_name="stop_trigger_rule",
+    )
+    return trigger_rule, start_trigger_rule, stop_trigger_rule
 
 
 def optional_json_object(value: Any, *, name: str) -> dict[str, Any]:
@@ -1387,6 +1465,9 @@ def render_task_templates(task_spec: WorkflowTaskSpec, tokens: dict[str, str]) -
         depends_on=render_template_value(task_spec.depends_on, tokens),
         start_depends_on=render_template_value(task_spec.start_depends_on, tokens),
         stop_depends_on=render_template_value(task_spec.stop_depends_on, tokens),
+        trigger_rule=render_template_value(task_spec.trigger_rule, tokens),
+        start_trigger_rule=render_template_value(task_spec.start_trigger_rule, tokens),
+        stop_trigger_rule=render_template_value(task_spec.stop_trigger_rule, tokens),
         env_overrides=None,
     )
 
@@ -1401,6 +1482,9 @@ def render_group_templates(
         depends_on=render_template_value(group_spec.depends_on, tokens),
         start_depends_on=render_template_value(group_spec.start_depends_on, tokens),
         stop_depends_on=render_template_value(group_spec.stop_depends_on, tokens),
+        trigger_rule=render_template_value(group_spec.trigger_rule, tokens),
+        start_trigger_rule=render_template_value(group_spec.start_trigger_rule, tokens),
+        stop_trigger_rule=render_template_value(group_spec.stop_trigger_rule, tokens),
         env_overrides=None,
     )
 
@@ -1437,6 +1521,12 @@ def apply_task_env_overrides(
         start_depends_on_default=task_spec.start_depends_on,
         stop_depends_on_default=task_spec.stop_depends_on,
     )
+    trigger_rule, start_trigger_rule, stop_trigger_rule = trigger_rule_fields_from_config(
+        override,
+        trigger_rule_default=task_spec.trigger_rule,
+        start_trigger_rule_default=task_spec.start_trigger_rule,
+        stop_trigger_rule_default=task_spec.stop_trigger_rule,
+    )
 
     resolved = replace(
         task_spec,
@@ -1459,6 +1549,9 @@ def apply_task_env_overrides(
         depends_on=depends_on,
         start_depends_on=start_depends_on,
         stop_depends_on=stop_depends_on,
+        trigger_rule=trigger_rule,
+        start_trigger_rule=start_trigger_rule,
+        stop_trigger_rule=stop_trigger_rule,
         enabled_in_envs=normalize_string_tuple(
             override.get("enabled_in_envs", task_spec.enabled_in_envs)
         ),
@@ -1489,12 +1582,21 @@ def apply_group_env_overrides(
         start_depends_on_default=group_spec.start_depends_on,
         stop_depends_on_default=group_spec.stop_depends_on,
     )
+    trigger_rule, start_trigger_rule, stop_trigger_rule = trigger_rule_fields_from_config(
+        override,
+        trigger_rule_default=group_spec.trigger_rule,
+        start_trigger_rule_default=group_spec.start_trigger_rule,
+        stop_trigger_rule_default=group_spec.stop_trigger_rule,
+    )
     resolved = replace(
         group_spec,
         tooltip=override.get("tooltip", group_spec.tooltip),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
         stop_depends_on=stop_depends_on,
+        trigger_rule=trigger_rule,
+        start_trigger_rule=start_trigger_rule,
+        stop_trigger_rule=stop_trigger_rule,
         enabled_in_envs=normalize_string_tuple(
             override.get("enabled_in_envs", group_spec.enabled_in_envs)
         ),
@@ -1671,6 +1773,20 @@ def validate_task_spec(
             f"Task '{task_spec.task_id}' has unsupported task_type '{task_spec.task_type}'."
         )
 
+    normalize_trigger_rule(
+        task_spec.trigger_rule,
+        field_name=f"Task '{task_spec.task_id}' trigger_rule",
+    )
+    if task_spec.start_trigger_rule is not None:
+        normalize_trigger_rule(
+            task_spec.start_trigger_rule,
+            field_name=f"Task '{task_spec.task_id}' start_trigger_rule",
+        )
+    if task_spec.stop_trigger_rule is not None:
+        normalize_trigger_rule(
+            task_spec.stop_trigger_rule,
+            field_name=f"Task '{task_spec.task_id}' stop_trigger_rule",
+        )
     validate_sudo_mode(task_spec.sudo_mode)
 
     if task_spec.task_type == SYSTEMD_TASK_TYPE:
@@ -1742,6 +1858,89 @@ def group_dependency_ids(group_spec: WorkflowTaskGroupSpec, action: str) -> tupl
         start_depends_on=group_spec.start_depends_on,
         stop_depends_on=group_spec.stop_depends_on,
         action=action,
+    )
+
+
+def trigger_rule_for_action(
+    item: WorkflowTaskSpec | WorkflowTaskGroupSpec,
+    action: str,
+) -> str:
+    require_workflow_action(action)
+    if action == START_ACTION:
+        return item.start_trigger_rule or item.trigger_rule
+    if action == STOP_ACTION:
+        return item.stop_trigger_rule or item.trigger_rule
+    if action == STATUS_ACTION:
+        return "always"
+    return item.trigger_rule
+
+
+def effective_dependency_trigger_rule_for_task(
+    task_spec: WorkflowTaskSpec,
+    group_lookup: dict[str, WorkflowTaskGroupSpec],
+    action: str,
+) -> str:
+    task_rule = trigger_rule_for_action(task_spec, action)
+    group_spec = group_lookup.get(task_spec.group_id or "")
+    if not group_spec:
+        return task_rule
+    group_rule = trigger_rule_for_action(group_spec, action)
+    if task_rule == DEFAULT_TRIGGER_RULE and group_rule != DEFAULT_TRIGGER_RULE:
+        return group_rule
+    return task_rule
+
+
+def trigger_rule_satisfied(trigger_rule: str, upstream_states: tuple[str, ...] | list[str]) -> bool:
+    rule = normalize_trigger_rule(trigger_rule)
+    states = tuple(str(state or "missing") for state in upstream_states)
+    if not states:
+        return True
+    state_set = set(states)
+    all_done = all(state in DONE_STATES for state in states)
+    any_success = any(state in SUCCESS_STATES for state in states)
+    any_failed = any(state in FAILED_STATES for state in states)
+    any_skipped = any(state in SKIPPED_STATES for state in states)
+
+    if rule == "always":
+        return True
+    if rule == "all_success":
+        return all(state in SUCCESS_STATES for state in states)
+    if rule == "all_failed":
+        return all(state in FAILED_STATES for state in states)
+    if rule == "all_done":
+        return all_done
+    if rule == "all_done_min_one_success":
+        return all_done and any_success
+    if rule == "all_skipped":
+        return state_set <= SKIPPED_STATES
+    if rule == "one_success":
+        return any_success
+    if rule == "one_failed":
+        return any_failed
+    if rule == "one_done":
+        return any_success or any_failed
+    if rule == "none_failed":
+        return all_done and not any_failed
+    if rule == "none_failed_min_one_success":
+        return all_done and not any_failed and any_success
+    if rule == "none_skipped":
+        return all_done and not any_skipped
+    raise ValueError(f"Unsupported trigger_rule '{rule}'.")
+
+
+def format_trigger_rule_failure(
+    *,
+    trigger_rule: str,
+    task_id: str,
+    states_by_task_id: dict[str, str],
+) -> str:
+    states = ", ".join(
+        f"{upstream_task_id}={state}"
+        for upstream_task_id, state in states_by_task_id.items()
+    )
+    return (
+        f"Trigger rule '{trigger_rule}' for '{task_id}' is not satisfied by "
+        f"upstream task states: {states}."
     )
 
 
@@ -2535,6 +2734,7 @@ def create_workflow_dag(
             group_id: str | None,
             workflow_upstream_task_ids: list[str],
             group_upstream_task_ids: list[str],
+            dependency_trigger_rule: str,
             dag_action: str,
         ) -> str:
             if not target_matches(validated, task_id, group_id):
@@ -2562,17 +2762,22 @@ def create_workflow_dag(
 
             context = get_current_context()
             dag_run = context["dag_run"]
-            not_success: list[str] = []
+            upstream_states: dict[str, str] = {}
             for upstream_task_id in required_upstream_ids:
                 task_instance = dag_run.get_task_instance(upstream_task_id)
                 state = getattr(task_instance, "state", None)
-                if state != "success":
-                    not_success.append(f"{upstream_task_id}={state or 'missing'}")
+                upstream_states[upstream_task_id] = state or "missing"
 
-            if not_success:
+            if not trigger_rule_satisfied(
+                dependency_trigger_rule,
+                tuple(upstream_states.values()),
+            ):
                 raise AirflowSkipException(
-                    f"Upstream dependencies for '{task_id}' are not successful: "
-                    f"{', '.join(not_success)}"
+                    format_trigger_rule_failure(
+                        trigger_rule=dependency_trigger_rule,
+                        task_id=task_id,
+                        states_by_task_id=upstream_states,
+                    )
                 )
 
             return "run"
@@ -2652,9 +2857,20 @@ def create_workflow_dag(
             for group_spec in plan.groups
         }
 
+        group_lookup = {group_spec.group_id: group_spec for group_spec in plan.groups}
         task_lookup = {task_spec.task_id: task_spec for task_spec in plan.tasks}
         operation_refs_by_task_id: dict[str, list] = {task_id: [] for task_id in task_lookup}
         operation_ids_by_task_id: dict[str, list[str]] = {task_id: [] for task_id in task_lookup}
+
+        def effective_dependency_trigger_rule(
+            task_spec: WorkflowTaskSpec,
+            dag_action: str,
+        ) -> str:
+            return effective_dependency_trigger_rule_for_task(
+                task_spec,
+                group_lookup,
+                dag_action,
+            )
 
         def create_operation(task_spec: WorkflowTaskSpec, host_target: HostTarget):
             host_id = sanitize_task_id(host_target.host)
@@ -2729,6 +2945,7 @@ def create_workflow_dag(
                 task_spec.group_id,
                 list(workflow_upstream_ids),
                 list(group_upstream_ids),
+                effective_dependency_trigger_rule(task_spec, action),
                 action,
             )
 
@@ -2814,6 +3031,7 @@ def build_task_spec_from_config(
         )
     task_type = data.get("task_type", data.get("type", SYSTEMD_TASK_TYPE))
     depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(data)
+    trigger_rule, start_trigger_rule, stop_trigger_rule = trigger_rule_fields_from_config(data)
     return WorkflowTaskSpec(
         task_id=data["task_id"],
         task_type=task_type,
@@ -2833,6 +3051,9 @@ def build_task_spec_from_config(
         depends_on=depends_on,
         start_depends_on=start_depends_on,
         stop_depends_on=stop_depends_on,
+        trigger_rule=trigger_rule,
+        start_trigger_rule=start_trigger_rule,
+        stop_trigger_rule=stop_trigger_rule,
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),
@@ -2990,12 +3211,16 @@ def build_task_group_spec_from_config(
         else f"task_group '{group_id}'.tasks"
     )
     depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(data)
+    trigger_rule, start_trigger_rule, stop_trigger_rule = trigger_rule_fields_from_config(data)
     return WorkflowTaskGroupSpec(
         group_id=group_id,
         tooltip=data.get("tooltip"),
         depends_on=depends_on,
         start_depends_on=start_depends_on,
         stop_depends_on=stop_depends_on,
+        trigger_rule=trigger_rule,
+        start_trigger_rule=start_trigger_rule,
+        stop_trigger_rule=stop_trigger_rule,
         enabled_in_envs=normalize_string_tuple(data.get("enabled_in_envs", ALL_RUNTIME_ENVS)),
         optional=bool(data.get("optional", False)),
         enabled=bool(data.get("enabled", True)),
@@ -3383,11 +3608,16 @@ def build_workflow_definition_from_config(
     )
 
 
-def load_workflow_definition_from_json(config_file: str | Path) -> RemoteWorkflowDefinition:
+def load_workflow_definition_from_json(
+    config_file: str | Path,
+    *,
+    config_root: str | Path | None = None,
+) -> RemoteWorkflowDefinition:
     config_path = Path(config_file)
+    root_path = Path(config_root) if config_root is not None else None
     return build_workflow_definition_from_config(
         load_json_file(config_path),
-        default_workflow_id=config_path.stem,
+        default_workflow_id=default_workflow_id_from_path(config_path, root_path),
     )
 
 
@@ -3511,6 +3741,277 @@ def effective_target_runtime_envs(
     return (current_env,)
 
 
+def collect_nested_environment_names(topology: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    host_groups = topology.get("host_groups") or {}
+    if not isinstance(host_groups, dict):
+        return names
+    for host_group_config in host_groups.values():
+        if not isinstance(host_group_config, dict):
+            continue
+        environments = host_group_config.get("environments") or {}
+        if isinstance(environments, dict):
+            names.update(str(env_name) for env_name in environments)
+    return names
+
+
+def environment_names_from_workflow(workflow: RemoteWorkflowDefinition) -> tuple[str, ...]:
+    names: set[str] = set()
+    environments = optional_json_object(workflow.environments, name="Workflow environments")
+    for env_name, topology in environments.items():
+        if isinstance(topology, dict):
+            names.update(collect_nested_environment_names(topology))
+        if env_name not in DEFAULT_TOPOLOGY_KEYS:
+            names.add(str(env_name))
+    return tuple(sorted(name for name in names if name not in DEFAULT_TOPOLOGY_KEYS))
+
+
+def workflow_validation_envs(
+    workflow: RemoteWorkflowDefinition,
+    envs: str | list[str] | tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    if envs is not None:
+        selected_envs = normalize_string_tuple(envs)
+        if not selected_envs:
+            raise ValueError("At least one environment must be selected.")
+        return selected_envs
+
+    return (
+        workflow.target_runtime_envs
+        or environment_names_from_workflow(workflow)
+        or (get_current_env_name(),)
+    )
+
+
+def validate_workflow_plan_runtime_configs(
+    *,
+    workflow: RemoteWorkflowDefinition,
+    plan: WorkflowPlan,
+    current_env: str,
+) -> None:
+    for action in workflow.actions:
+        validation_action = action if action in (RUN_ACTION, STATUS_ACTION) else None
+        for task_spec in plan.tasks:
+            for host_target in plan.hosts_by_task_id.get(task_spec.task_id, ()):
+                effective_task = apply_task_runtime_overrides(
+                    task_spec,
+                    host_target.task_overrides,
+                )
+                try:
+                    validate_task_spec(
+                        effective_task,
+                        action=validation_action,
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        f"Task '{task_spec.task_id}' on host '{host_target.host}' "
+                        f"is invalid for env '{current_env}' action '{action}': {exc}"
+                    ) from exc
+
+
+def validate_workflow_json_file(
+    config_file: str | Path,
+    *,
+    envs: str | list[str] | tuple[str, ...] | None = None,
+    config_root: str | Path | None = None,
+) -> tuple[RemoteWorkflowDefinition, dict[str, WorkflowPlan]]:
+    workflow = load_workflow_definition_from_json(
+        config_file,
+        config_root=config_root,
+    )
+    plans: dict[str, WorkflowPlan] = {}
+    for env_name in workflow_validation_envs(workflow, envs):
+        topology = resolve_topology_for_env(workflow, env_name)
+        plan = prepare_workflow_plan(
+            workflow=workflow,
+            topology=topology,
+            current_env=env_name,
+        )
+        validate_workflow_plan_runtime_configs(
+            workflow=workflow,
+            plan=plan,
+            current_env=env_name,
+        )
+        plans[env_name] = plan
+    return workflow, plans
+
+
+def workflow_execution_warnings(plan: WorkflowPlan) -> tuple[str, ...]:
+    warnings: list[str] = []
+    for task_spec in plan.tasks:
+        for host_target in plan.hosts_by_task_id.get(task_spec.task_id, ()):
+            effective_task = apply_task_runtime_overrides(
+                task_spec,
+                host_target.task_overrides,
+            )
+            task_context = f"task '{task_spec.task_id}' host '{host_target.host}'"
+            if effective_task.sudo_user and effective_task.sudo_mode != "non_interactive":
+                warnings.append(
+                    f"{task_context}: sudo_mode='{effective_task.sudo_mode}' can prompt "
+                    "for sudo credentials; use sudo_mode='non_interactive' with NOPASSWD "
+                    "sudoers for fully non-interactive Airflow execution."
+                )
+            if effective_task.task_type in SCRIPT_TASK_TYPES:
+                warnings.append(
+                    f"{task_context}: script commands run in the foreground over SSH. "
+                    "If the Airflow worker or SSH connection is interrupted, Airflow "
+                    "cannot keep tracking that remote process and this task attempt fails."
+                )
+            elif effective_task.task_type == SYSTEMD_TASK_TYPE:
+                warnings.append(
+                    f"{task_context}: systemd start/stop/status is issued synchronously "
+                    "over SSH. The service state is recoverable with a later status run, "
+                    "but an interrupted Airflow worker or SSH connection fails the task "
+                    "attempt that was waiting on systemctl."
+                )
+    return tuple(dict.fromkeys(warnings))
+
+
+def mermaid_quote(value: str) -> str:
+    return '"' + value.replace('"', '\\"') + '"'
+
+
+def mermaid_node_id(task_id: str) -> str:
+    return f"n_{sanitize_task_id(task_id)}"
+
+
+def workflow_plan_to_mermaid(
+    plan: WorkflowPlan,
+    *,
+    action: str,
+    title: str | None = None,
+) -> str:
+    require_workflow_action(action)
+    dependency_map = plan_dependency_map_for_action(plan, action)
+    group_lookup = {group_spec.group_id: group_spec for group_spec in plan.groups}
+    group_task_ids = {
+        group_spec.group_id: tuple(task_spec.task_id for task_spec in group_spec.tasks)
+        for group_spec in plan.groups
+    }
+    grouped_task_ids = {
+        task_id
+        for task_ids in group_task_ids.values()
+        for task_id in task_ids
+    }
+
+    lines = ["flowchart TD"]
+    if title:
+        lines.append(f"  %% {title}")
+    lines.extend(["  wf_start((start))", "  wf_end((end))"])
+
+    for group_spec in plan.groups:
+        lines.append(
+            f"  subgraph g_{sanitize_task_id(group_spec.group_id)}"
+            f"[{mermaid_quote(group_spec.group_id)}]"
+        )
+        for task_spec in group_spec.tasks:
+            lines.append(
+                f"    {mermaid_node_id(task_spec.task_id)}"
+                f"[{mermaid_quote(task_spec.task_id)}]"
+            )
+        lines.append("  end")
+
+    for task_spec in plan.tasks:
+        if task_spec.task_id in grouped_task_ids:
+            continue
+        lines.append(
+            f"  {mermaid_node_id(task_spec.task_id)}"
+            f"[{mermaid_quote(task_spec.task_id)}]"
+        )
+
+    if not plan.tasks:
+        lines.append("  wf_start --> wf_end")
+        return "\n".join(lines)
+
+    upstream_references: set[str] = set()
+    for task_spec in plan.tasks:
+        task_node_id = mermaid_node_id(task_spec.task_id)
+        upstream_ids = dependency_map.get(task_spec.task_id, ())
+        trigger_rule = effective_dependency_trigger_rule_for_task(
+            task_spec,
+            group_lookup,
+            action,
+        )
+        if not upstream_ids:
+            lines.append(f"  wf_start --> {task_node_id}")
+            continue
+        for upstream_id in upstream_ids:
+            upstream_references.add(upstream_id)
+            upstream_node_id = mermaid_node_id(upstream_id)
+            if trigger_rule == DEFAULT_TRIGGER_RULE:
+                lines.append(f"  {upstream_node_id} --> {task_node_id}")
+            else:
+                lines.append(
+                    f"  {upstream_node_id} -->|{trigger_rule}| {task_node_id}"
+                )
+
+    for task_spec in plan.tasks:
+        if task_spec.task_id not in upstream_references:
+            lines.append(f"  {mermaid_node_id(task_spec.task_id)} --> wf_end")
+
+    return "\n".join(lines)
+
+
+def workflow_graph_markdown(
+    config_file: str | Path,
+    *,
+    envs: str | list[str] | tuple[str, ...] | None = None,
+    actions: str | list[str] | tuple[str, ...] | None = None,
+    config_root: str | Path | None = None,
+) -> str:
+    workflow, plans = validate_workflow_json_file(
+        config_file,
+        envs=envs,
+        config_root=config_root,
+    )
+    selected_actions = (
+        normalize_string_tuple(actions)
+        if actions is not None
+        else workflow.actions
+    )
+    if not selected_actions:
+        raise ValueError("At least one workflow action must be selected.")
+    for action in selected_actions:
+        require_workflow_action(action)
+
+    sections: list[str] = []
+    for env_name, plan in plans.items():
+        for action in selected_actions:
+            if action not in workflow.actions and not (
+                action == STATUS_ACTION and any(
+                    start_stop_action in workflow.actions
+                    for start_stop_action in START_STOP_ACTIONS
+                )
+            ):
+                continue
+            title = f"{workflow.workflow_id} {env_name} {action}"
+            graph = workflow_plan_to_mermaid(plan, action=action, title=title)
+            sections.append(f"## {title}\n\n```mermaid\n{graph}\n```")
+    return "\n\n".join(sections)
+
+
+def write_workflow_graph_markdown(
+    config_file: str | Path,
+    output_file: str | Path,
+    *,
+    envs: str | list[str] | tuple[str, ...] | None = None,
+    actions: str | list[str] | tuple[str, ...] | None = None,
+    config_root: str | Path | None = None,
+) -> Path:
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        workflow_graph_markdown(
+            config_file,
+            envs=envs,
+            actions=actions,
+            config_root=config_root,
+        ),
+        encoding="utf-8",
+    )
+    return output_path
+
+
 def workflow_namespace_key(
     *,
     workflow_id: str,
@@ -3594,3 +4095,21 @@ def register_workflow_dags_from_json_dir(
             global_namespace=global_namespace,
             config_root=config_root,
         )
+
+
+DEFAULT_REMOTE_WORKFLOW_CONFIG_DIR = Path(__file__).resolve().parents[1] / "remote_workflows"
+
+
+def register_default_remote_workflow_dags(
+    *,
+    global_namespace: dict,
+    config_dir: str | Path = DEFAULT_REMOTE_WORKFLOW_CONFIG_DIR,
+) -> None:
+    register_workflow_dags_from_json_dir(
+        config_dir=config_dir,
+        global_namespace=global_namespace,
+    )
+
+
+if __name__ != "workflow.remote_workflow":
+    register_default_remote_workflow_dags(global_namespace=globals())
