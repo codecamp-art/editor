@@ -116,7 +116,7 @@ def install_runtime_stubs() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Validate a remote workflow JSON file and optionally render a Mermaid graph."
+        description="Validate a remote workflow JSON file and optionally render SVG graph previews."
     )
     parser.add_argument("config", type=Path, help="Path to a remote workflow JSON file.")
     parser.add_argument(
@@ -141,7 +141,10 @@ def parse_args() -> argparse.Namespace:
         "--graph-out",
         type=Path,
         default=None,
-        help="Write all requested graphs to one Markdown file.",
+        help=(
+            "Write requested SVG graph previews. Use a .svg file when one graph "
+            "is selected, or a directory for multiple env/action graphs."
+        ),
     )
     return parser.parse_args()
 
@@ -155,7 +158,7 @@ def main() -> int:
     install_airflow_validation_stubs()
     install_runtime_stubs()
 
-    from workflow.remote_workflow_graph import write_workflow_graph_markdown  # noqa: WPS433
+    from workflow.remote_workflow_graph import write_workflow_graph_svg  # noqa: WPS433
     from workflow.remote_workflow_validation import (  # noqa: WPS433
         validate_workflow_json_file,
         workflow_execution_warnings,
@@ -183,14 +186,15 @@ def main() -> int:
                 print(f"WARNING: {warning}", file=sys.stderr)
 
         if args.graph_out:
-            graph_path = write_workflow_graph_markdown(
+            graph_paths = write_workflow_graph_svg(
                 args.config,
                 args.graph_out,
                 envs=envs,
                 actions=actions,
                 config_root=args.config_root,
             )
-            print(f"graph: {graph_path}")
+            for graph_path in graph_paths:
+                print(f"graph: {graph_path}")
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

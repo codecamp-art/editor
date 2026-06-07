@@ -124,8 +124,8 @@ from workflow.remote_workflow import (  # noqa: E402
     validate_task_spec,
 )
 from workflow.remote_workflow_graph import (  # noqa: E402
-    workflow_graph_markdown,
-    workflow_plan_to_mermaid,
+    workflow_graph_svgs,
+    workflow_plan_to_svg,
 )
 from workflow.remote_workflow_validation import validate_workflow_json_file  # noqa: E402
 
@@ -1211,7 +1211,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(task.task_type, "windows_script")
         self.assertEqual(resolved_remote_execution_mode(task), "foreground")
 
-    def test_workflow_graph_markdown_renders_dependencies(self) -> None:
+    def test_workflow_graph_svg_renders_dependencies(self) -> None:
         workflow = build_workflow_definition_from_config(
             {
                 "host_groups": {
@@ -1242,13 +1242,21 @@ class RemoteWorkflowTest(unittest.TestCase):
         )
         plan = workflow_plan_for_env(workflow, "qa")
 
-        graph = workflow_plan_to_mermaid(plan, action="run", title="graph qa run")
+        graph = workflow_plan_to_svg(
+            plan,
+            action="run",
+            workflow_id="graph",
+            env_name="qa",
+        )
 
-        self.assertIn("subgraph g_grp_batch", graph)
-        self.assertIn("n_extract --> n_publish", graph)
-        self.assertIn("n_publish --> wf_end", graph)
+        self.assertIn("<svg", graph)
+        self.assertIn("graph - RUN DAG", graph)
+        self.assertIn("grp_batch", graph)
+        self.assertIn("extract", graph)
+        self.assertIn("publish", graph)
+        self.assertIn('marker-end="url(#arrow)"', graph)
 
-    def test_validate_workflow_json_file_and_markdown_graph(self) -> None:
+    def test_validate_workflow_json_file_and_svg_graph(self) -> None:
         import json
         import tempfile
 
@@ -1278,12 +1286,19 @@ class RemoteWorkflowTest(unittest.TestCase):
             config_file.write_text(json.dumps(config), encoding="utf-8")
 
             workflow, plans = validate_workflow_json_file(config_file, envs=("qa",))
-            graph = workflow_graph_markdown(config_file, envs=("qa",), actions=("run",))
+            graph_documents = workflow_graph_svgs(
+                config_file,
+                envs=("qa",),
+                actions=("run",),
+            )
 
         self.assertEqual(workflow.workflow_id, "daily_batch")
         self.assertEqual(tuple(plans), ("qa",))
-        self.assertIn("## daily_batch qa run", graph)
-        self.assertIn("n_extract --> n_publish", graph)
+        self.assertEqual(len(graph_documents), 1)
+        self.assertEqual(graph_documents[0][:3], ("daily_batch", "qa", "run"))
+        self.assertIn("daily_batch - RUN DAG", graph_documents[0][3])
+        self.assertIn("extract", graph_documents[0][3])
+        self.assertIn("publish", graph_documents[0][3])
 
     def test_validation_envs_use_runtime_envs_not_enabled_in_envs(self) -> None:
         import json
