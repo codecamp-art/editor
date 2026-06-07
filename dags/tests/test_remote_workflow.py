@@ -690,6 +690,141 @@ class RemoteWorkflowTest(unittest.TestCase):
 
         self.assertEqual(same_name_workflow.tasks[0].task_id, "risk_a")
 
+    def test_missing_target_error_includes_scope_and_candidates(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            build_workflow_definition_from_config(
+                {
+                    "host_groups": {
+                        "trading": {
+                            "services": [
+                                {
+                                    "id": "tr_mng",
+                                    "service_name": "tr-mng.service",
+                                },
+                            ],
+                            "environments": {
+                                "qa": {"hosts": ["qa-trading-01.company.net"]},
+                            },
+                        },
+                    },
+                    "task_groups": [
+                        {
+                            "group_id": "grp_trading1",
+                            "tasks": [
+                                {
+                                    "target": "tr_mng1",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                default_workflow_id="bad_target",
+            )
+
+        message = str(raised.exception)
+        self.assertIn("task_groups[0]('grp_trading1').tasks[0]", message)
+        self.assertIn("target 'tr_mng1'", message)
+        self.assertIn("Did you mean: tr_mng", message)
+        self.assertIn("Available target ids include: tr_mng", message)
+
+    def test_duplicate_group_id_error_includes_locations(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            build_workflow_definition_from_config(
+                {
+                    "host_groups": {
+                        "zookeeper": {
+                            "services": [
+                                {"id": "zk_1", "service_name": "zk-1.service"},
+                            ],
+                            "environments": {
+                                "qa": {"hosts": ["qa-zk-01.company.net"]},
+                            },
+                        },
+                    },
+                    "task_groups": [
+                        {"group_id": "zk", "tasks": [{"target": "zk_1"}]},
+                        {"group_id": "zk", "tasks": [{"target": "zk_1"}]},
+                    ],
+                },
+                default_workflow_id="duplicate_group",
+            )
+
+        message = str(raised.exception)
+        self.assertIn("Duplicate task_group group_id 'zk'", message)
+        self.assertIn("task_groups[1]", message)
+        self.assertIn("task_groups[0]", message)
+
+    def test_duplicate_task_id_error_includes_locations(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "shared": {
+                        "services": [
+                            {"id": "shared_service", "service_name": "shared.service"},
+                        ],
+                        "environments": {
+                            "qa": {"hosts": ["qa-shared-01.company.net"]},
+                        },
+                    },
+                },
+                "task_groups": [
+                    {
+                        "group_id": "first",
+                        "tasks": [{"target": "shared_service"}],
+                    },
+                    {
+                        "group_id": "second",
+                        "tasks": [{"target": "shared_service"}],
+                    },
+                ],
+            },
+            default_workflow_id="duplicate_task",
+        )
+
+        with self.assertRaises(ValueError) as raised:
+            workflow_plan_for_env(workflow, "qa")
+
+        message = str(raised.exception)
+        self.assertIn("Duplicate task_id 'shared_service'", message)
+        self.assertIn("task_groups[1]('second').tasks[0]", message)
+        self.assertIn("task_groups[0]('first').tasks[0]", message)
+
+    def test_missing_dependency_error_includes_task_and_candidates(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "risk": {
+                        "services": [
+                            {"id": "risk_a", "service_name": "risk-a.service"},
+                        ],
+                        "environments": {
+                            "qa": {"hosts": ["qa-risk-01.company.net"]},
+                        },
+                    },
+                },
+                "tasks": [
+                    {
+                        "target": "risk_a",
+                        "depends_on": ["grp_dbx"],
+                    },
+                ],
+                "task_groups": [
+                    {
+                        "group_id": "grp_db",
+                        "tasks": [],
+                    }
+                ],
+            },
+            default_workflow_id="missing_dependency",
+        )
+
+        with self.assertRaises(ValueError) as raised:
+            workflow_plan_for_env(workflow, "qa")
+
+        message = str(raised.exception)
+        self.assertIn("Task 'risk_a' depends on 'grp_dbx'", message)
+        self.assertIn("Did you mean: grp_db", message)
+
     def test_missing_env_target_and_dependency_are_skipped(self) -> None:
         workflow = build_workflow_definition_from_config(
             {

@@ -1,0 +1,958 @@
+{
+  "description": "# Example Platform Start/Stop\n\nDraft reconstructed from screenshots. Replace REDACTED placeholders with real host names, service prefixes, and users.",
+  "schedule_pairs": [
+    {
+      "start": "35 17 * * 7",
+      "stop": "30 6 * * 6"
+    }
+  ],
+  "command_timeout_seconds": 3600,
+  "tags": [
+    "v8t"
+  ],
+  "dag_metadata": {
+    "start": {
+      "description": "Start DAG: runs start order and honors upstream start dependencies.",
+      "tags": [
+        "auto_start"
+      ]
+    },
+    "stop": {
+      "description": "Stop DAG: runs the configured stop order, or the reversed start order when no stop dependencies are defined.",
+      "tags": [
+        "auto_stop"
+      ]
+    }
+  },
+  "host_groups": {
+    "arb_hosts": {
+      "platform": "rhel7",
+      "services": [
+        {
+          "id": "arb_service",
+          "service_name": "redacted_arb_service.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            "dev-arb-01.linux.example.com.cn"
+          ]
+        },
+        "qa": {
+          "sudo_user": "ipm_qa",
+          "hosts": [
+            "qa-arb-01.linux.example.com.cn"
+          ]
+        },
+        "prod": {
+          "sudo_user": "ipm_prod",
+          "hosts": [
+            "prod-arb-01.linux.example.com.cn"
+          ]
+        },
+        "dr": {
+          "sudo_user": "ipm_prod",
+          "hosts": [
+            "dr-arb-01.linux.example.com.cn"
+          ]
+        }
+      }
+    },
+    "sync_a_hosts": {
+      "platform": "rhel7",
+      "services": [
+        {
+          "id": "sync_a",
+          "service_name": "redacted_sync_a.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            {
+              "host": "dev-sync-a-01.linux.example.com.cn"
+            }
+          ]
+        },
+        "qa": {
+          "sudo_user": "redacted_qa",
+          "hosts": [
+            {
+              "host": "qa-sync-a-01.linux.example.com.cn"
+            }
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "host": "prod-sync-a-01.linux.example.com.cn"
+            }
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "host": "dr-sync-a-01.linux.example.com.cn"
+            }
+          ]
+        }
+      }
+    },
+    "sync_b_hosts": {
+      "platform": "rhel7",
+      "services": [
+        {
+          "id": "sync_b",
+          "service_name": "redacted_sync_b.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            {
+              "host": "dev-sync-b-01.linux.example.com.cn"
+            }
+          ]
+        },
+        "qa": {
+          "sudo_user": "redacted_qa",
+          "hosts": [
+            {
+              "host": "qa-sync-b-01.linux.example.com.cn"
+            }
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "host": "prod-sync-b-01.linux.example.com.cn"
+            }
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "host": "dr-sync-b-01.linux.example.com.cn"
+            }
+          ]
+        }
+      }
+    },
+    "trading1": {
+      "platform": "rhel7",
+      "services": [
+        {
+          "id": "drtp1",
+          "service_name": "redacted_drtp1.service"
+        },
+        {
+          "id": "ptmq_a",
+          "service_name": "redacted_ptmq_a.service"
+        },
+        {
+          "id": "trade_a",
+          "service_name": "redacted_trade_a.service"
+        },
+        {
+          "id": "trmq_a",
+          "service_name": "redacted_trmq_a.service"
+        },
+        {
+          "id": "phmq_a",
+          "service_name": "redacted_phmq_a.service"
+        },
+        {
+          "id": "push_a",
+          "service_name": "redacted_push_a.service"
+        },
+        {
+          "id": "tr_mng1",
+          "service_name": "redacted_tr_mng.service"
+        },
+        {
+          "id": "tds1",
+          "service_name": "redacted_tds.service"
+        },
+        {
+          "id": "portal1",
+          "service_name": "redacted_portal1.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            "dev-trading1-01.linux.example.com.cn"
+          ]
+        },
+        "qa": {
+          "sudo_user": "redacted_qa",
+          "hosts": [
+            "qa-trading1-01.linux.example.com.cn"
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "prod-trading1-01.linux.example.com.cn"
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "dr-trading1-01.linux.example.com.cn"
+          ]
+        }
+      }
+    },
+    "trading2": {
+      "platform": "rhel7",
+      "services": [
+        {
+          "id": "drtp2",
+          "service_name": "redacted_drtp2.service"
+        },
+        {
+          "id": "ptmq_b",
+          "service_name": "redacted_ptmq_b.service"
+        },
+        {
+          "id": "trade_b",
+          "service_name": "redacted_trade_b.service"
+        },
+        {
+          "id": "trmq_b",
+          "service_name": "redacted_trmq_b.service"
+        },
+        {
+          "id": "phmq_b",
+          "service_name": "redacted_phmq_b.service"
+        },
+        {
+          "id": "push_b",
+          "service_name": "redacted_push_b.service"
+        },
+        {
+          "id": "tr_mng2",
+          "service_name": "redacted_tr_mng.service"
+        },
+        {
+          "id": "tds2",
+          "service_name": "redacted_tds.service"
+        },
+        {
+          "id": "portal2",
+          "service_name": "redacted_portal2.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            "dev-trading2-01.linux.example.com.cn"
+          ]
+        },
+        "qa": {
+          "sudo_user": "redacted_qa",
+          "hosts": [
+            "qa-trading2-01.linux.example.com.cn"
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "prod-trading2-01.linux.example.com.cn"
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "dr-trading2-01.linux.example.com.cn"
+          ]
+        }
+      }
+    },
+    "risk_a": {
+      "platform": "rhel7",
+      "services": [
+        {
+          "id": "risk_a",
+          "service_name": "redacted_risk_a.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            "dev-risk-a-01.linux.example.com.cn"
+          ]
+        },
+        "qa": {
+          "sudo_user": "redacted_qa",
+          "hosts": [
+            "qa-risk-a-01.linux.example.com.cn"
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "prod-risk-a-01.linux.example.com.cn"
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "dr-risk-a-01.linux.example.com.cn"
+          ]
+        }
+      }
+    },
+    "risk_b": {
+      "platform": "rhel7",
+      "services": [
+        {
+          "id": "risk_b",
+          "service_name": "redacted_risk_b.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            "dev-risk-b-01.linux.example.com.cn"
+          ]
+        },
+        "qa": {
+          "sudo_user": "redacted_qa",
+          "hosts": [
+            "qa-risk-b-01.linux.example.com.cn"
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "prod-risk-b-01.linux.example.com.cn"
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            "dr-risk-b-01.linux.example.com.cn"
+          ]
+        }
+      }
+    },
+    "sybase_drtp": {
+      "sudo_user": "sybase15",
+      "services": [
+        {
+          "id": "sybase_drtp_{host_id}",
+          "service_name": "redacted_sybase_drtp.service"
+        },
+        {
+          "id": "sybase_dms_{host_id}",
+          "service_name": "redacted_sybase_dms.service"
+        },
+        {
+          "id": "risksvr_{host_id}",
+          "service_name": "redacted_risksvr.service"
+        },
+        {
+          "id": "monsvr_{host_id}",
+          "service_name": "redacted_monsvr.service"
+        },
+        {
+          "id": "zk_{host_id}",
+          "sudo_user": "zk_{host_id}",
+          "service_name": "redacted_zk_{host_id}.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "sudo_user": "redacted_dev",
+          "hosts": [
+            {
+              "host": "dev-sybase-01.linux.example.com.cn",
+              "host_id": "1"
+            },
+            {
+              "host": "dev-sybase-02.linux.example.com.cn",
+              "host_id": "2"
+            }
+          ]
+        },
+        "qa": {
+          "sudo_user": "redacted_qa",
+          "hosts": [
+            {
+              "host": "qa-sybase-01.linux.example.com.cn",
+              "host_id": "1"
+            },
+            {
+              "host": "qa-sybase-02.linux.example.com.cn",
+              "host_id": "2"
+            }
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "host": "prod-sybase-01.linux.example.com.cn",
+              "host_id": "1"
+            },
+            {
+              "host": "prod-sybase-02.linux.example.com.cn",
+              "host_id": "2"
+            }
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "host": "dr-sybase-01.linux.example.com.cn",
+              "host_id": "1"
+            },
+            {
+              "host": "dr-sybase-02.linux.example.com.cn",
+              "host_id": "2"
+            }
+          ]
+        }
+      }
+    },
+    "zk_3": {
+      "services": [
+        {
+          "sudo_user": "zk_3",
+          "id": "zk_3",
+          "service_name": "redacted_zk_3.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "hosts": [
+            {
+              "host": "dev-zk-03.linux.example.com.cn"
+            }
+          ]
+        },
+        "qa": {
+          "hosts": [
+            {
+              "host": "qa-zk-03.linux.example.com.cn"
+            }
+          ]
+        },
+        "prod": {
+          "hosts": [
+            {
+              "host": "prod-zk-03.linux.example.com.cn"
+            }
+          ]
+        },
+        "dr": {
+          "hosts": [
+            {
+              "host": "dr-zk-03.linux.example.com.cn"
+            }
+          ]
+        }
+      }
+    },
+    "offer": {
+      "sudo_user": "offer_{host_id}",
+      "services": [
+        {
+          "id": "offer_{host_id}_{offer_name}_drtp",
+          "service_name": "redacted_offer_{host_id}_drtp.service"
+        },
+        {
+          "id": "offer_{host_id}_{offer_name}_dms",
+          "service_name": "redacted_offer_{host_id}_dms.service"
+        }
+      ],
+      "environments": {
+        "dev": {
+          "hosts": [
+            {
+              "id": "offer_dce_1",
+              "sudo_user": "redacted_dev",
+              "platform": "rhel7",
+              "host": "dev-offer-dce-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "dce"
+              }
+            },
+            {
+              "id": "offer_insfe_1",
+              "host": "dev-offer-insfe-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "insfe"
+              }
+            },
+            {
+              "id": "offer_cex_1",
+              "host": "dev-offer-cex-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "cex"
+              }
+            }
+          ]
+        },
+        "qa": {
+          "hosts": [
+            {
+              "id": "offer_dce_1",
+              "platform": "rhel7",
+              "sudo_user": "redacted_qa",
+              "host": "qa-offer-dce-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "dce"
+              }
+            },
+            {
+              "id": "offer_dce_2",
+              "platform": "rhel7",
+              "sudo_user": "redacted_qa",
+              "host": "qa-offer-dce-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "dce"
+              }
+            },
+            {
+              "id": "offer_insfe_1",
+              "host": "qa-offer-insfe-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "insfe"
+              }
+            },
+            {
+              "id": "offer_insfe_2",
+              "host": "qa-offer-insfe-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "insfe"
+              }
+            },
+            {
+              "id": "offer_cex_1",
+              "host": "qa-offer-cex-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "cex"
+              }
+            },
+            {
+              "id": "offer_cex_2",
+              "host": "qa-offer-cex-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "cex"
+              }
+            }
+          ]
+        },
+        "prod": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "id": "offer_dce_1",
+              "platform": "rhel7",
+              "sudo_user": "redacted_dev",
+              "host": "prod-offer-dce-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "dce"
+              }
+            },
+            {
+              "id": "offer_dce_2",
+              "platform": "rhel7",
+              "sudo_user": "redacted_dev",
+              "host": "prod-offer-dce-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "dce"
+              }
+            },
+            {
+              "id": "offer_insfe_1",
+              "host": "prod-offer-insfe-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "insfe"
+              }
+            },
+            {
+              "id": "offer_insfe_2",
+              "host": "prod-offer-insfe-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "insfe"
+              }
+            },
+            {
+              "id": "offer_cex_1",
+              "host": "prod-offer-cex-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "cex"
+              }
+            },
+            {
+              "id": "offer_cex_2",
+              "host": "prod-offer-cex-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "cex"
+              }
+            }
+          ]
+        },
+        "dr": {
+          "sudo_user": "redacted_prod",
+          "hosts": [
+            {
+              "id": "offer_dce_1",
+              "platform": "rhel7",
+              "sudo_user": "redacted_dev",
+              "host": "dr-offer-dce-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "dce"
+              }
+            },
+            {
+              "id": "offer_dce_2",
+              "platform": "rhel7",
+              "sudo_user": "redacted_dev",
+              "host": "dr-offer-dce-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "dce"
+              }
+            },
+            {
+              "id": "offer_insfe_1",
+              "host": "dr-offer-insfe-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "insfe"
+              }
+            },
+            {
+              "id": "offer_insfe_2",
+              "host": "dr-offer-insfe-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "insfe"
+              }
+            },
+            {
+              "id": "offer_cex_1",
+              "host": "dr-offer-cex-01.linux.example.com.cn",
+              "host_id": "1",
+              "variables": {
+                "offer_name": "cex"
+              }
+            },
+            {
+              "id": "offer_cex_2",
+              "host": "dr-offer-cex-02.linux.example.com.cn",
+              "host_id": "2",
+              "variables": {
+                "offer_name": "cex"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "task_groups": [
+    {
+      "group_id": "grp_db",
+      "tasks": [
+        {
+          "target": "arb_service",
+          "task_id": "arb_service"
+        },
+        {
+          "task_id": "sync",
+          "targets": [
+            "sync_a",
+            "sync_b"
+          ],
+          "depends_on": [
+            "arb_service"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_trading1",
+      "tasks": [
+        {
+          "task_id": "drtp1",
+          "target": "drtp1",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "trading1",
+          "targets": [
+            "trade_a",
+            "ptmq_a",
+            "trmq_a",
+            "phmq_a",
+            "push_a",
+            "tr_mng1",
+            "tds1",
+            "portal1"
+          ],
+          "depends_on": [
+            "drtp1"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_trading2",
+      "tasks": [
+        {
+          "task_id": "drtp2",
+          "target": "drtp2",
+          "depends_on": [
+            "grp_trading1"
+          ]
+        },
+        {
+          "task_id": "trading2",
+          "targets": [
+            "trade_b",
+            "ptmq_b",
+            "trmq_b",
+            "phmq_b",
+            "push_b",
+            "tr_mng2",
+            "tds2",
+            "portal2"
+          ],
+          "depends_on": [
+            "drtp2"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_lv2_1",
+      "tasks": [
+        {
+          "task_id": "sybase_drtp_1",
+          "target": "sybase_drtp_1",
+          "depends_on": [
+            "grp_trading2"
+          ]
+        },
+        {
+          "task_id": "sybase_dms_risksvr",
+          "targets": [
+            "sybase_dms_1",
+            "risksvr_1"
+          ],
+          "depends_on": [
+            "sybase_drtp_1"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_lv2_2",
+      "tasks": [
+        {
+          "task_id": "sybase_drtp_2",
+          "target": "sybase_drtp_2",
+          "depends_on": [
+            "grp_trading2"
+          ]
+        },
+        {
+          "task_id": "sybase_dms_monsvr",
+          "targets": [
+            "sybase_dms_2",
+            "monsvr_2"
+          ],
+          "depends_on": [
+            "sybase_drtp_2"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_risk",
+      "tasks": [
+        {
+          "task_id": "risk_a",
+          "target": "risk_a",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "risk_b",
+          "target": "risk_b",
+          "depends_on": [
+            "risk_a"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "zk",
+      "tasks": [
+        {
+          "task_id": "zk",
+          "targets": [
+            "zk_1",
+            "zk_2",
+            "zk_3"
+          ],
+          "depends_on": [
+            "grp_db"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_offer_dce_1",
+      "tasks": [
+        {
+          "task_id": "offer_1_dce_drtp",
+          "target": "offer_1_dce_drtp",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "offer_1_dce_dms",
+          "target": "offer_1_dce_dms",
+          "depends_on": [
+            "offer_1_dce_drtp"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_offer_dce_2",
+      "tasks": [
+        {
+          "task_id": "offer_2_dce_drtp",
+          "target": "offer_2_dce_drtp",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "offer_2_dce_dms",
+          "target": "offer_2_dce_dms",
+          "depends_on": [
+            "offer_2_dce_drtp"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_offer_insfe_1",
+      "tasks": [
+        {
+          "task_id": "offer_1_insfe_drtp",
+          "target": "offer_1_insfe_drtp",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "offer_1_insfe_dms",
+          "target": "offer_1_insfe_dms",
+          "depends_on": [
+            "offer_1_insfe_drtp"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_offer_insfe_2",
+      "tasks": [
+        {
+          "task_id": "offer_2_insfe_drtp",
+          "target": "offer_2_insfe_drtp",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "offer_2_insfe_dms",
+          "target": "offer_2_insfe_dms",
+          "depends_on": [
+            "offer_2_insfe_drtp"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_offer_cex_1",
+      "tasks": [
+        {
+          "task_id": "offer_1_cex_drtp",
+          "target": "offer_1_cex_drtp",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "offer_1_cex_dms",
+          "target": "offer_1_cex_dms",
+          "depends_on": [
+            "offer_1_cex_drtp"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "grp_offer_cex_2",
+      "tasks": [
+        {
+          "task_id": "offer_2_cex_drtp",
+          "target": "offer_2_cex_drtp",
+          "depends_on": [
+            "grp_db"
+          ]
+        },
+        {
+          "task_id": "offer_2_cex_dms",
+          "target": "offer_2_cex_dms",
+          "depends_on": [
+            "offer_2_cex_drtp"
+          ]
+        }
+      ]
+    }
+  ]
+}

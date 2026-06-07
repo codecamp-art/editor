@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from difflib import get_close_matches
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -327,6 +328,35 @@ def unique_preserving_order(values: list[str] | tuple[str, ...]) -> tuple[str, .
 def sanitize_task_id(value: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_]+", "_", value).strip("_")
     return safe or "target"
+
+
+def format_id_sample(values: tuple[str, ...] | list[str], *, limit: int = 20) -> str:
+    sample = list(values[:limit])
+    suffix = "" if len(values) <= limit else f", ... ({len(values)} total)"
+    return ", ".join(sample) + suffix
+
+
+def target_lookup_error(
+    *,
+    selector: str,
+    target_ids: tuple[str, ...],
+    scope: str,
+    wildcard: bool = False,
+) -> ValueError:
+    if wildcard:
+        message = (
+            f"{scope} target selector '{selector}' did not match any host target."
+        )
+    else:
+        message = (
+            f"{scope} references target '{selector}', but it is not defined in host_groups."
+        )
+    matches = get_close_matches(selector, target_ids, n=5, cutoff=0.55)
+    if matches:
+        message += f" Did you mean: {', '.join(matches)}?"
+    if target_ids:
+        message += f" Available target ids include: {format_id_sample(target_ids)}."
+    return ValueError(message)
 
 
 def render_template_value(value: Any, tokens: dict[str, str]) -> Any:
@@ -1751,10 +1781,26 @@ def build_dependency_map(
             if dep_id in active_task_ids and task_group_lookup.get(dep_id) == task_spec.group_id
         }
 
-    def validate_dependency_name(dep_id: str) -> None:
+    available_dependency_ids = tuple(
+        sorted((*defined_task_ids, *defined_group_ids))
+    )
+
+    def validate_dependency_name(dep_id: str, *, source_task_id: str) -> None:
         if dep_id in defined_task_ids or dep_id in defined_group_ids:
             return
-        raise ValueError(f"Dependency '{dep_id}' is not defined as a task or task_group.")
+        message = (
+            f"Task '{source_task_id}' depends on '{dep_id}', but that dependency "
+            "is not defined as a task or task_group."
+        )
+        matches = get_close_matches(dep_id, available_dependency_ids, n=5, cutoff=0.55)
+        if matches:
+            message += f" Did you mean: {', '.join(matches)}?"
+        if available_dependency_ids:
+            message += (
+                " Available task/group ids include: "
+                f"{format_id_sample(available_dependency_ids)}."
+            )
+        raise ValueError(message)
 
     def group_leaf_tasks(group_id: str) -> tuple[str, ...]:
         group_task_ids = tasks_by_group.get(group_id, [])
@@ -1764,7 +1810,6 @@ def build_dependency_map(
         return tuple(task_id for task_id in group_task_ids if task_id not in upstream_ids)
 
     def expand_dependency(dep_id: str) -> tuple[str, ...]:
-        validate_dependency_name(dep_id)
         if dep_id in active_task_ids:
             return (dep_id,)
         if dep_id in active_groups:
@@ -1781,6 +1826,7 @@ def build_dependency_map(
 
         expanded: list[str] = []
         for dep_id in dep_ids:
+            validate_dependency_name(dep_id, source_task_id=task_spec.task_id)
             expanded.extend(expand_dependency(dep_id))
 
         dependency_map[task_spec.task_id] = tuple(
@@ -1880,14 +1926,46 @@ def prepare_workflow_plan(
     current_env: str,
 ) -> WorkflowPlan:
     tokens = build_env_tokens(topology, current_env)
-    defined_task_ids = {task_spec.task_id for task_spec in workflow.tasks}
-    defined_group_ids = {group_spec.group_id for group_spec in workflow.task_groups}
+    defined_task_ids: set[str] = set()
+    task_locations: dict[str, str] = {}
+    defined_group_ids: set[str] = set()
+    group_locations: dict[str, str] = {}
 
-    for group_spec in workflow.task_groups:
-        for task_spec in group_spec.tasks:
-            if task_spec.task_id in defined_task_ids:
-                raise ValueError(f"Duplicate task_id detected: {task_spec.task_id}")
-            defined_task_ids.add(task_spec.task_id)
+    def register_group_id(group_id: str, location: str) -> None:
+        if group_id in group_locations:
+            raise ValueError(
+                f"Duplicate task_group group_id '{group_id}' found at {location}; "
+                f"first defined at {group_locations[group_id]}. "
+                "group_id values must be unique because Airflow TaskGroup IDs and "
+                "DAG parameters use them for selection."
+            )
+        defined_group_ids.add(group_id)
+        group_locations[group_id] = location
+
+    def register_task_id(task_id: str, location: str) -> None:
+        if task_id in task_locations:
+            raise ValueError(
+                f"Duplicate task_id '{task_id}' found at {location}; "
+                f"first defined at {task_locations[task_id]}. "
+                "Task ids must be unique across top-level tasks and all task_groups "
+                "after target expansion. If the same service is needed in multiple "
+                "places, give each host_group service/script a unique id or use "
+                "a task_id template containing {target_id}."
+            )
+        defined_task_ids.add(task_id)
+        task_locations[task_id] = location
+
+    for task_index, task_spec in enumerate(workflow.tasks):
+        register_task_id(task_spec.task_id, f"tasks[{task_index}]")
+
+    for group_index, group_spec in enumerate(workflow.task_groups):
+        group_location = f"task_groups[{group_index}]('{group_spec.group_id}')"
+        register_group_id(group_spec.group_id, group_location)
+        for task_index, task_spec in enumerate(group_spec.tasks):
+            register_task_id(
+                task_spec.task_id,
+                f"{group_location}.tasks[{task_index}]",
+            )
 
     active_groups: list[WorkflowTaskGroupSpec] = []
     active_tasks: list[WorkflowTaskSpec] = []
@@ -2777,6 +2855,8 @@ def task_target_selectors_from_config(data: dict[str, Any]) -> tuple[str, ...]:
 def resolve_task_target_ids(
     selectors: tuple[str, ...],
     target_task_configs: dict[str, dict[str, Any]],
+    *,
+    scope: str,
 ) -> tuple[str, ...]:
     resolved: list[str] = []
     target_ids = tuple(target_task_configs)
@@ -2784,11 +2864,20 @@ def resolve_task_target_ids(
         if any(char in selector for char in "*?["):
             matches = [target_id for target_id in target_ids if fnmatchcase(target_id, selector)]
             if not matches:
-                raise ValueError(f"target selector '{selector}' did not match any host target.")
+                raise target_lookup_error(
+                    selector=selector,
+                    target_ids=target_ids,
+                    scope=scope,
+                    wildcard=True,
+                )
             resolved.extend(matches)
             continue
         if selector not in target_task_configs:
-            raise ValueError(f"target '{selector}' is not defined in host_groups.")
+            raise target_lookup_error(
+                selector=selector,
+                target_ids=target_ids,
+                scope=scope,
+            )
         resolved.append(selector)
     return unique_preserving_order(resolved)
 
@@ -2821,12 +2910,17 @@ def expand_task_specs_from_config(
     *,
     target_task_configs: dict[str, dict[str, Any]],
     group_id: str | None = None,
+    scope: str = "Task",
 ) -> tuple[WorkflowTaskSpec, ...]:
     selectors = task_target_selectors_from_config(data)
     if not selectors:
         return (build_task_spec_from_config(data, group_id=group_id),)
 
-    target_ids = resolve_task_target_ids(selectors, target_task_configs)
+    target_ids = resolve_task_target_ids(
+        selectors,
+        target_task_configs,
+        scope=scope,
+    )
     overlay_config = {
         key: value
         for key, value in data.items()
@@ -2856,14 +2950,16 @@ def build_task_specs_from_config(
     *,
     target_task_configs: dict[str, dict[str, Any]],
     group_id: str | None = None,
+    scope: str = "tasks",
 ) -> tuple[WorkflowTaskSpec, ...]:
     specs: list[WorkflowTaskSpec] = []
-    for task_data in raw_tasks:
+    for task_index, task_data in enumerate(raw_tasks):
         specs.extend(
             expand_task_specs_from_config(
                 task_data,
                 target_task_configs=target_task_configs,
                 group_id=group_id,
+                scope=f"{scope}[{task_index}]",
             )
         )
     return tuple(specs)
@@ -2873,13 +2969,26 @@ def build_task_group_spec_from_config(
     data: dict,
     *,
     target_task_configs: dict[str, dict[str, Any]] | None = None,
+    group_index: int | None = None,
 ) -> WorkflowTaskGroupSpec:
     reject_host_group_only_runtime_keys(
         data,
         scope=f"Task group '{data.get('group_id', '<unknown>')}'",
     )
     target_task_configs = target_task_configs or {}
+    if not data.get("group_id"):
+        location = (
+            f"task_groups[{group_index}]"
+            if group_index is not None
+            else "task_group"
+        )
+        raise ValueError(f"{location} must define group_id.")
     group_id = data["group_id"]
+    group_scope = (
+        f"task_groups[{group_index}]('{group_id}').tasks"
+        if group_index is not None
+        else f"task_group '{group_id}'.tasks"
+    )
     depends_on, start_depends_on, stop_depends_on = dependency_fields_from_config(data)
     return WorkflowTaskGroupSpec(
         group_id=group_id,
@@ -2895,8 +3004,37 @@ def build_task_group_spec_from_config(
             data.get("tasks", []),
             target_task_configs=target_task_configs,
             group_id=group_id,
+            scope=group_scope,
         ),
     )
+
+
+def normalize_task_groups_config(data: dict) -> list[dict[str, Any]]:
+    raw_groups = data.get("task_groups", [])
+    if raw_groups is None:
+        return []
+    if not isinstance(raw_groups, list):
+        raise TypeError("task_groups must be a list of task group objects.")
+    return raw_groups
+
+
+def validate_task_group_ids_from_config(raw_groups: list[dict[str, Any]]) -> None:
+    locations_by_group_id: dict[str, str] = {}
+    for group_index, group_data in enumerate(raw_groups):
+        if not isinstance(group_data, dict):
+            raise TypeError(f"task_groups[{group_index}] must be a JSON object.")
+        group_id = group_data.get("group_id")
+        if not group_id:
+            raise ValueError(f"task_groups[{group_index}] must define group_id.")
+        location = f"task_groups[{group_index}]"
+        if group_id in locations_by_group_id:
+            raise ValueError(
+                f"Duplicate task_group group_id '{group_id}' found at {location}; "
+                f"first defined at {locations_by_group_id[group_id]}. "
+                "group_id values must be unique because Airflow TaskGroup IDs and "
+                "DAG parameters use them for selection."
+            )
+        locations_by_group_id[group_id] = location
 
 
 def build_schedule_pair_from_config(data: dict, *, schedule_id: str) -> WorkflowSchedulePair:
@@ -3171,12 +3309,15 @@ def build_workflow_definition_from_config(
     actions = normalize_workflow_actions(data, schedule_pairs)
     environments = build_workflow_environments_from_config(data)
     target_task_configs = build_remote_target_task_configs(environments)
+    raw_task_groups = normalize_task_groups_config(data)
+    validate_task_group_ids_from_config(raw_task_groups)
     explicit_task_groups = tuple(
         build_task_group_spec_from_config(
             group_data,
             target_task_configs=target_task_configs,
+            group_index=group_index,
         )
-        for group_data in data.get("task_groups", [])
+        for group_index, group_data in enumerate(raw_task_groups)
     )
     run_metadata = action_metadata_from_config(data, RUN_ACTION)
     start_metadata = action_metadata_from_config(data, START_ACTION)
@@ -3196,6 +3337,7 @@ def build_workflow_definition_from_config(
         tasks=build_task_specs_from_config(
             data.get("tasks", []),
             target_task_configs=target_task_configs,
+            scope="tasks",
         ),
         task_groups=explicit_task_groups,
         upstream_dags_for_run=upstream_dags_for_action(data, RUN_ACTION),
