@@ -44,6 +44,7 @@ ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
 DEFAULT_SUDO_MODE = "non_interactive"
 DEFAULT_REMOTE_EXECUTION_MODE = "systemd_run"
 DEFAULT_SYSTEMD_RUN_SCOPE = "system"
+DEFAULT_RETRY_DELAY_SECONDS = 10
 REPORTING_DAGS_DIR = Path(__file__).resolve().parents[1] / "reporting"
 DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "configs" / "target_hosts.json"
 LEGACY_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "target_hosts.json"
@@ -119,7 +120,7 @@ class RemoteScriptDefinition:
     preset_params: dict | None = None
     command_timeout_seconds: int = 3600
     retry_count: int = 2
-    retry_delay_seconds: int = 300
+    retry_delay_seconds: int = DEFAULT_RETRY_DELAY_SECONDS
     remote_execution_mode: str = DEFAULT_REMOTE_EXECUTION_MODE
     systemd_run_scope: str = DEFAULT_SYSTEMD_RUN_SCOPE
     systemd_unit_prefix: str | None = None
@@ -721,7 +722,7 @@ def build_remote_script_definition_from_config(
         preset_params=base.get("preset_params"),
         command_timeout_seconds=int(base.get("command_timeout_seconds", 3600)),
         retry_count=int(base.get("retry_count", 2)),
-        retry_delay_seconds=int(base.get("retry_delay_seconds", 300)),
+        retry_delay_seconds=int(base.get("retry_delay_seconds", DEFAULT_RETRY_DELAY_SECONDS)),
         remote_execution_mode=base.get("remote_execution_mode", DEFAULT_REMOTE_EXECUTION_MODE),
         systemd_run_scope=base.get("systemd_run_scope", DEFAULT_SYSTEMD_RUN_SCOPE),
         systemd_unit_prefix=base.get("systemd_unit_prefix"),

@@ -27,7 +27,9 @@
     "sudo_mode": "non_interactive",
     "remote_execution_mode": "auto",
     "systemd_run_scope": "auto",
-    "systemd_unit_prefix": "platform-workflow"
+    "systemd_unit_prefix": "platform-workflow",
+    "retry_count": 2,
+    "retry_delay_seconds": 10
   },
   "tags": [
     "remote-workflow",
@@ -152,6 +154,7 @@
         {
           "id": "order_api_{host_id}",
           "systemd_unit_prefix": "order-api",
+          "retry_count": 3,
           "service_name": "order-api.service"
         },
         {

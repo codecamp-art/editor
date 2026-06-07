@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from difflib import get_close_matches
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -66,6 +67,8 @@ SUPPORTED_SYSTEMD_PLATFORMS = {"rhel7", "rhel8"}
 SUPPORTED_WINDOWS_SHELLS = {"powershell", "cmd", "raw"}
 DEFAULT_SUDO_MODE = "non_interactive"
 DEFAULT_REMOTE_EXECUTION_MODE = "auto"
+DEFAULT_RETRY_COUNT = 2
+DEFAULT_RETRY_DELAY_SECONDS = 10
 SUPPORTED_REMOTE_EXECUTION_MODES = {"auto", "foreground", "systemd_run"}
 SYSTEMD_RUN_SCOPE_AUTO = "auto"
 SUPPORTED_SYSTEMD_RUN_SCOPES = {SYSTEMD_RUN_SCOPE_AUTO, "system", "user"}
@@ -126,6 +129,8 @@ RUNTIME_OVERRIDE_KEYS = (
     "systemd_unit_prefix",
     "systemd_runtime_max_seconds",
     "command_timeout_seconds",
+    "retry_count",
+    "retry_delay_seconds",
     "windows_shell",
 )
 GLOBAL_RUNTIME_DEFAULT_KEYS = (
@@ -135,6 +140,8 @@ GLOBAL_RUNTIME_DEFAULT_KEYS = (
     "systemd_unit_prefix",
     "systemd_runtime_max_seconds",
     "command_timeout_seconds",
+    "retry_count",
+    "retry_delay_seconds",
 )
 
 
@@ -194,6 +201,8 @@ class WorkflowTaskSpec:
     systemd_unit_prefix: str | None = None
     systemd_runtime_max_seconds: int | None = None
     command_timeout_seconds: int | None = None
+    retry_count: int = DEFAULT_RETRY_COUNT
+    retry_delay_seconds: int = DEFAULT_RETRY_DELAY_SECONDS
     windows_shell: str = "powershell"
     env_overrides: dict[str, dict[str, Any]] | None = None
     group_id: str | None = None
@@ -344,10 +353,27 @@ def normalize_runtime_defaults(data: dict[str, Any]) -> dict[str, Any]:
     defaults.setdefault("sudo_mode", DEFAULT_SUDO_MODE)
     defaults.setdefault("remote_execution_mode", DEFAULT_REMOTE_EXECUTION_MODE)
     defaults.setdefault("systemd_run_scope", SYSTEMD_RUN_SCOPE_AUTO)
+    defaults.setdefault("retry_count", DEFAULT_RETRY_COUNT)
+    defaults.setdefault("retry_delay_seconds", DEFAULT_RETRY_DELAY_SECONDS)
     normalize_remote_execution_mode(defaults["remote_execution_mode"])
     normalize_systemd_run_scope(defaults["systemd_run_scope"])
     validate_sudo_mode(defaults["sudo_mode"])
+    normalize_non_negative_int(defaults["retry_count"], field_name="runtime_defaults.retry_count")
+    normalize_non_negative_int(
+        defaults["retry_delay_seconds"],
+        field_name="runtime_defaults.retry_delay_seconds",
+    )
     return defaults
+
+
+def normalize_non_negative_int(value: Any, *, field_name: str) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be zero or a positive integer.") from exc
+    if normalized < 0:
+        raise ValueError(f"{field_name} must be zero or a positive integer.")
+    return normalized
 
 
 def is_start_stop_action(action: str) -> bool:
@@ -1297,6 +1323,22 @@ def apply_task_runtime_overrides(
             if rendered.get("command_timeout_seconds") is not None
             else task_spec.command_timeout_seconds
         ),
+        retry_count=(
+            normalize_non_negative_int(
+                rendered["retry_count"],
+                field_name=f"Task '{task_spec.task_id}' retry_count",
+            )
+            if rendered.get("retry_count") is not None
+            else task_spec.retry_count
+        ),
+        retry_delay_seconds=(
+            normalize_non_negative_int(
+                rendered["retry_delay_seconds"],
+                field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
+            )
+            if rendered.get("retry_delay_seconds") is not None
+            else task_spec.retry_delay_seconds
+        ),
         windows_shell=rendered.get("windows_shell", task_spec.windows_shell),
     )
 
@@ -1554,6 +1596,14 @@ def render_task_templates(task_spec: WorkflowTaskSpec, tokens: dict[str, str]) -
         ),
         systemd_run_scope=render_template_value(task_spec.systemd_run_scope, tokens),
         systemd_unit_prefix=render_template_value(task_spec.systemd_unit_prefix, tokens),
+        retry_count=normalize_non_negative_int(
+            render_template_value(task_spec.retry_count, tokens),
+            field_name=f"Task '{task_spec.task_id}' retry_count",
+        ),
+        retry_delay_seconds=normalize_non_negative_int(
+            render_template_value(task_spec.retry_delay_seconds, tokens),
+            field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
+        ),
         depends_on=render_template_value(task_spec.depends_on, tokens),
         start_depends_on=render_template_value(task_spec.start_depends_on, tokens),
         stop_depends_on=render_template_value(task_spec.stop_depends_on, tokens),
@@ -1672,6 +1722,22 @@ def apply_task_env_overrides(
             int(runtime_overrides["command_timeout_seconds"])
             if runtime_overrides.get("command_timeout_seconds") is not None
             else task_spec.command_timeout_seconds
+        ),
+        retry_count=(
+            normalize_non_negative_int(
+                runtime_overrides["retry_count"],
+                field_name=f"Task '{task_spec.task_id}' retry_count",
+            )
+            if runtime_overrides.get("retry_count") is not None
+            else task_spec.retry_count
+        ),
+        retry_delay_seconds=(
+            normalize_non_negative_int(
+                runtime_overrides["retry_delay_seconds"],
+                field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
+            )
+            if runtime_overrides.get("retry_delay_seconds") is not None
+            else task_spec.retry_delay_seconds
         ),
         env_overrides=None,
     )
@@ -1906,6 +1972,14 @@ def validate_task_spec(
         raise ValueError(
             f"Task '{task_spec.task_id}' systemd_runtime_max_seconds must be positive."
         )
+    normalize_non_negative_int(
+        task_spec.retry_count,
+        field_name=f"Task '{task_spec.task_id}' retry_count",
+    )
+    normalize_non_negative_int(
+        task_spec.retry_delay_seconds,
+        field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
+    )
 
     if task_spec.task_type == SYSTEMD_TASK_TYPE:
         if action and action not in SUPPORTED_SYSTEMD_ACTIONS:
@@ -2302,6 +2376,21 @@ def ssh_get_pty_for_task(task_spec: WorkflowTaskSpec) -> bool | None:
     return None
 
 
+def task_retry_kwargs(task_spec: WorkflowTaskSpec) -> dict[str, Any]:
+    retry_count = normalize_non_negative_int(
+        task_spec.retry_count,
+        field_name=f"Task '{task_spec.task_id}' retry_count",
+    )
+    retry_delay_seconds = normalize_non_negative_int(
+        task_spec.retry_delay_seconds,
+        field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
+    )
+    return {
+        "retries": retry_count,
+        "retry_delay": timedelta(seconds=retry_delay_seconds),
+    }
+
+
 def prepare_workflow_plan(
     *,
     workflow: RemoteWorkflowDefinition,
@@ -2464,18 +2553,38 @@ def build_systemd_service_command(
     else:
         raise ValueError(f"Systemd tasks do not support action '{action}'.")
 
-    command_parts = ["systemctl"]
-    if scope == "user":
-        command_parts.append("--user")
-    command_parts.extend(systemctl_args)
+    def systemctl_command(args: list[str], *, prefix_sudo: bool = False) -> str:
+        command_parts = ["systemctl"]
+        if scope == "user":
+            command_parts.append("--user")
+        command_parts.extend(args)
+        if prefix_sudo:
+            command_parts = ["sudo", "-n", *command_parts]
+        return shell_join(command_parts)
 
-    inner_command = shell_join(command_parts)
+    def service_action_command(*, prefix_sudo: bool = False) -> str:
+        action_command = systemctl_command(systemctl_args, prefix_sudo=prefix_sudo)
+        if action == START_ACTION:
+            active_check = systemctl_command(
+                ["is-active", "--quiet", service_name],
+                prefix_sudo=prefix_sudo,
+            )
+            return f"{action_command} && {active_check}"
+        if action == STOP_ACTION:
+            inactive_check = systemctl_command(
+                ["is-active", "--quiet", service_name],
+                prefix_sudo=prefix_sudo,
+            )
+            return f"{action_command} && ! {inactive_check}"
+        return action_command
+
+    inner_command = service_action_command()
     if resolved_remote_execution_mode(task_spec) == "systemd_run":
         run_scope = resolved_systemd_run_scope(task_spec)
         unit_sudo_user = sudo_user
-        systemd_run_inner_command = inner_command
-        if run_scope == "system" and sudo_user:
-            systemd_run_inner_command = shell_join(["sudo", "-n", *command_parts])
+        systemd_run_inner_command = service_action_command(
+            prefix_sudo=(run_scope == "system" and bool(sudo_user)),
+        )
         return build_systemd_run_command(
             unit_name=remote_systemd_unit_name(
                 task_spec=task_spec,
@@ -2496,7 +2605,7 @@ def build_systemd_service_command(
         )
 
     if scope == "system":
-        inner_command = shell_join(["sudo", "-n", *command_parts])
+        inner_command = service_action_command(prefix_sudo=True)
 
     if sudo_user:
         return build_sudo_bash_command(
@@ -2775,6 +2884,8 @@ def task_spec_to_payload(task_spec: WorkflowTaskSpec) -> dict[str, Any]:
         "systemd_unit_prefix": task_spec.systemd_unit_prefix,
         "systemd_runtime_max_seconds": task_spec.systemd_runtime_max_seconds,
         "command_timeout_seconds": task_spec.command_timeout_seconds,
+        "retry_count": task_spec.retry_count,
+        "retry_delay_seconds": task_spec.retry_delay_seconds,
         "windows_shell": task_spec.windows_shell,
         "group_id": task_spec.group_id,
     }
@@ -2807,6 +2918,14 @@ def task_spec_from_payload(payload: dict[str, Any]) -> WorkflowTaskSpec:
         systemd_unit_prefix=payload.get("systemd_unit_prefix"),
         systemd_runtime_max_seconds=payload.get("systemd_runtime_max_seconds"),
         command_timeout_seconds=payload.get("command_timeout_seconds"),
+        retry_count=normalize_non_negative_int(
+            payload.get("retry_count", DEFAULT_RETRY_COUNT),
+            field_name=f"Task '{payload['task_id']}' retry_count",
+        ),
+        retry_delay_seconds=normalize_non_negative_int(
+            payload.get("retry_delay_seconds", DEFAULT_RETRY_DELAY_SECONDS),
+            field_name=f"Task '{payload['task_id']}' retry_delay_seconds",
+        ),
         windows_shell=payload.get("windows_shell", "powershell"),
         group_id=payload.get("group_id"),
     )
@@ -3204,6 +3323,7 @@ def create_workflow_dag(
             return run_remote_task.override(
                 task_id=task_id,
                 executor_config=executor_config,
+                **task_retry_kwargs(effective_task_spec),
             )(
                 validated_task,
                 task_spec_to_payload(task_spec),
@@ -3386,6 +3506,14 @@ def build_task_spec_from_config(
             int(data["command_timeout_seconds"])
             if data.get("command_timeout_seconds") is not None
             else None
+        ),
+        retry_count=normalize_non_negative_int(
+            data.get("retry_count", DEFAULT_RETRY_COUNT),
+            field_name=f"Task '{data['task_id']}' retry_count",
+        ),
+        retry_delay_seconds=normalize_non_negative_int(
+            data.get("retry_delay_seconds", DEFAULT_RETRY_DELAY_SECONDS),
+            field_name=f"Task '{data['task_id']}' retry_delay_seconds",
         ),
         env_overrides=data.get("env_overrides"),
         group_id=group_id,

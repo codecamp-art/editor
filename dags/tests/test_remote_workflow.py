@@ -119,6 +119,7 @@ from workflow.remote_workflow import (  # noqa: E402
     resolved_remote_execution_mode,
     resolve_hosts_for_task,
     resolve_topology_for_env,
+    task_retry_kwargs,
     trigger_rule_satisfied,
     validate_workflow_json_file,
     workflow_graph_markdown,
@@ -393,8 +394,20 @@ class RemoteWorkflowTest(unittest.TestCase):
             action="start",
         )
         self.assertIn("gateway.service", gateway_command)
+        self.assertIn("start gateway.service", gateway_command)
+        self.assertIn("is-active --quiet gateway.service", gateway_command)
         self.assertIn("shared_prod", gateway_command)
         self.assertNotIn("gateway_base", gateway_command)
+        gateway_stop_command = build_remote_task_command(
+            task_spec=apply_task_runtime_overrides(
+                gateway_task,
+                gateway_host.task_overrides,
+            ),
+            host_target=gateway_host,
+            action="stop",
+        )
+        self.assertIn("stop gateway.service", gateway_stop_command)
+        self.assertIn("! systemctl --user is-active --quiet gateway.service", gateway_stop_command)
 
         pricing_task = next(task for task in plan.tasks if task.task_id == "pricing")
         pricing_host = plan.hosts_by_task_id["pricing"][0]
@@ -905,6 +918,8 @@ class RemoteWorkflowTest(unittest.TestCase):
         )
 
         self.assertEqual(task.sudo_mode, "non_interactive")
+        self.assertEqual(task.retry_count, 2)
+        self.assertEqual(task.retry_delay_seconds, 10)
         self.assertEqual(resolved_remote_execution_mode(task), "systemd_run")
         self.assertIn("sudo -n systemd-run", command)
         self.assertIn("--property=User=batch", command)
@@ -919,6 +934,8 @@ class RemoteWorkflowTest(unittest.TestCase):
                     "sudo_mode": "non_interactive",
                     "remote_execution_mode": "foreground",
                     "systemd_unit_prefix": "global",
+                    "retry_count": 2,
+                    "retry_delay_seconds": 10,
                 },
                 "host_groups": {
                     "batch": {
@@ -931,18 +948,22 @@ class RemoteWorkflowTest(unittest.TestCase):
                                 },
                                 "remote_execution_mode": "systemd_run",
                                 "systemd_unit_prefix": "service",
+                                "retry_count": 3,
+                                "retry_delay_seconds": 30,
                             }
                         ],
                         "environments": {
                             "qa": {
                                 "sudo_user": "batch_qa",
                                 "systemd_unit_prefix": "env",
+                                "retry_count": 4,
                                 "hosts": [
                                     {
                                         "host": "qa-batch-01.company.net",
                                         "host_id": "one",
                                         "sudo_mode": "login",
                                         "systemd_unit_prefix": "host",
+                                        "retry_delay_seconds": 50,
                                     }
                                 ],
                             }
@@ -972,6 +993,10 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(task.sudo_mode, "login")
         self.assertEqual(task.remote_execution_mode, "systemd_run")
         self.assertEqual(task.systemd_unit_prefix, "host")
+        self.assertEqual(task.retry_count, 4)
+        self.assertEqual(task.retry_delay_seconds, 50)
+        self.assertEqual(task_retry_kwargs(task)["retries"], 4)
+        self.assertEqual(task_retry_kwargs(task)["retry_delay"].total_seconds(), 50)
         self.assertIn("--property=User=batch_qa", command)
         self.assertIn("host-runtime-layers-run-job_one", command)
 
