@@ -16,6 +16,13 @@
     "run": "15 9 * * 1-5"
   },
   "command_timeout_seconds": 1800,
+  "runtime_defaults": {
+    "sudo_mode": "non_interactive",
+    "remote_execution_mode": "auto",
+    "systemd_unit_prefix": "batch-workflow",
+    "retry_count": 2,
+    "retry_delay_seconds": 10
+  },
   "tags": [
     "remote-workflow",
     "batch",

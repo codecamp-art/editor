@@ -121,6 +121,7 @@ from workflow.remote_workflow import (  # noqa: E402
     resolve_topology_for_env,
     task_retry_kwargs,
     trigger_rule_satisfied,
+    validate_task_spec,
     validate_workflow_json_file,
     workflow_graph_markdown,
     workflow_plan_to_mermaid,
@@ -921,8 +922,9 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(task.retry_count, 2)
         self.assertEqual(task.retry_delay_seconds, 10)
         self.assertEqual(resolved_remote_execution_mode(task), "systemd_run")
-        self.assertIn("sudo -n systemd-run", command)
-        self.assertIn("--property=User=batch", command)
+        self.assertIn("systemd-run --user", command)
+        self.assertIn("sudo -n -H -u batch", command)
+        self.assertNotIn("--property=User=batch", command)
         self.assertIn("--property=RuntimeMaxSec=1800", command)
         self.assertIn("./run.sh", command)
 
@@ -961,12 +963,137 @@ class RemoteWorkflowTest(unittest.TestCase):
 
         self.assertEqual(task.sudo_mode, "non_interactive")
         self.assertEqual(task.remote_execution_mode, "auto")
-        self.assertEqual(task.systemd_run_scope, "auto")
         self.assertIsNone(task.systemd_unit_prefix)
         self.assertEqual(task.retry_count, 2)
         self.assertEqual(task.retry_delay_seconds, 10)
         self.assertEqual(resolved_remote_execution_mode(task), "systemd_run")
         self.assertIn("remote-workflow-missing-runtime-defaults-run-extract", command)
+
+    def test_auto_runtime_uses_foreground_for_rhel7_linux_script(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "actions": ["run"],
+                "host_groups": {
+                    "batch": {
+                        "type": "linux_script",
+                        "platform": "rhel7",
+                        "sudo_user": "batch",
+                        "hosts": ["qa-batch-01.company.net"],
+                        "commands": {
+                            "run": "./run.sh",
+                        },
+                    },
+                },
+                "tasks": [
+                    {"task_id": "extract", "host_group": "batch"},
+                ],
+            },
+            default_workflow_id="rhel7_script_auto",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        task = apply_task_runtime_overrides(
+            plan.tasks[0],
+            plan.hosts_by_task_id["extract"][0].task_overrides,
+        )
+        command = build_remote_task_command(
+            task_spec=task,
+            host_target=plan.hosts_by_task_id["extract"][0],
+            action="run",
+        )
+
+        self.assertEqual(task.platform, "rhel7")
+        self.assertEqual(resolved_remote_execution_mode(task), "foreground")
+        self.assertNotIn("systemd-run", command)
+        self.assertIn("sudo -n -H -u batch bash -lc ./run.sh", command)
+
+    def test_rhel7_linux_script_rejects_explicit_systemd_run(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "actions": ["run"],
+                "host_groups": {
+                    "batch": {
+                        "type": "linux_script",
+                        "platform": "rhel7",
+                        "remote_execution_mode": "systemd_run",
+                        "hosts": ["qa-batch-01.company.net"],
+                        "commands": {
+                            "run": "./run.sh",
+                        },
+                    },
+                },
+                "tasks": [
+                    {"task_id": "extract", "host_group": "batch"},
+                ],
+            },
+            default_workflow_id="rhel7_script_invalid",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        task = apply_task_runtime_overrides(
+            plan.tasks[0],
+            plan.hosts_by_task_id["extract"][0].task_overrides,
+        )
+
+        with self.assertRaisesRegex(ValueError, "linux_script on RHEL7"):
+            validate_task_spec(task, action="run")
+
+    def test_auto_runtime_uses_system_scope_for_rhel7_systemd_service(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "host_groups": {
+                    "gateway": {
+                        "type": "systemd",
+                        "platform": "rhel7",
+                        "sudo_user": "gateway",
+                        "service_name": "gateway.service",
+                        "hosts": ["qa-gw-01.company.net"],
+                    },
+                },
+                "tasks": [
+                    {"task_id": "gateway", "host_group": "gateway"},
+                ],
+            },
+            default_workflow_id="rhel7_systemd_auto",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        task = apply_task_runtime_overrides(
+            plan.tasks[0],
+            plan.hosts_by_task_id["gateway"][0].task_overrides,
+        )
+        command = build_remote_task_command(
+            task_spec=task,
+            host_target=plan.hosts_by_task_id["gateway"][0],
+            action="start",
+        )
+
+        self.assertEqual(task.systemd["platform"], "rhel7")
+        self.assertEqual(resolved_remote_execution_mode(task), "systemd_run")
+        self.assertIn("sudo -n systemd-run", command)
+        self.assertIn("--property=User=gateway", command)
+        self.assertIn("sudo -n systemctl start gateway.service", command)
+
+    def test_systemd_run_scope_config_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "systemd_run_scope"):
+            build_workflow_definition_from_config(
+                {
+                    "runtime_defaults": {
+                        "systemd_run_scope": "system",
+                    },
+                    "host_groups": {
+                        "batch": {
+                            "type": "linux_script",
+                            "hosts": ["qa-batch-01.company.net"],
+                            "commands": {
+                                "run": "./run.sh",
+                            },
+                        },
+                    },
+                    "tasks": [
+                        {"task_id": "extract", "host_group": "batch"},
+                    ],
+                    "actions": ["run"],
+                },
+                default_workflow_id="removed_scope",
+            )
 
     def test_runtime_defaults_are_overridden_by_service_env_and_host(self) -> None:
         workflow = build_workflow_definition_from_config(
@@ -1039,7 +1166,9 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertEqual(task.retry_delay_seconds, 50)
         self.assertEqual(task_retry_kwargs(task)["retries"], 4)
         self.assertEqual(task_retry_kwargs(task)["retry_delay"].total_seconds(), 50)
-        self.assertIn("--property=User=batch_qa", command)
+        self.assertIn("sudo -iu batch_qa", command)
+        self.assertIn("systemd-run --user", command)
+        self.assertNotIn("--property=User=batch_qa", command)
         self.assertIn("host-runtime-layers-run-job_one", command)
 
     def test_script_targets_inherit_host_group_task_type(self) -> None:

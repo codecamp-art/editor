@@ -70,8 +70,7 @@ DEFAULT_REMOTE_EXECUTION_MODE = "auto"
 DEFAULT_RETRY_COUNT = 2
 DEFAULT_RETRY_DELAY_SECONDS = 10
 SUPPORTED_REMOTE_EXECUTION_MODES = {"auto", "foreground", "systemd_run"}
-SYSTEMD_RUN_SCOPE_AUTO = "auto"
-SUPPORTED_SYSTEMD_RUN_SCOPES = {SYSTEMD_RUN_SCOPE_AUTO, "system", "user"}
+REMOVED_RUNTIME_KEYS = ("systemd_run_scope",)
 DEFAULT_TRIGGER_RULE = "all_success"
 SUPPORTED_TRIGGER_RULES = {
     "all_success",
@@ -125,7 +124,6 @@ RUNTIME_OVERRIDE_KEYS = (
     "preset_params",
     "sudo_mode",
     "remote_execution_mode",
-    "systemd_run_scope",
     "systemd_unit_prefix",
     "systemd_runtime_max_seconds",
     "command_timeout_seconds",
@@ -136,7 +134,6 @@ RUNTIME_OVERRIDE_KEYS = (
 GLOBAL_RUNTIME_DEFAULT_KEYS = (
     "sudo_mode",
     "remote_execution_mode",
-    "systemd_run_scope",
     "systemd_unit_prefix",
     "systemd_runtime_max_seconds",
     "command_timeout_seconds",
@@ -197,7 +194,6 @@ class WorkflowTaskSpec:
     enabled: bool = True
     sudo_mode: str = DEFAULT_SUDO_MODE
     remote_execution_mode: str = DEFAULT_REMOTE_EXECUTION_MODE
-    systemd_run_scope: str = SYSTEMD_RUN_SCOPE_AUTO
     systemd_unit_prefix: str | None = None
     systemd_runtime_max_seconds: int | None = None
     command_timeout_seconds: int | None = None
@@ -312,6 +308,17 @@ def first_config_value(data: dict[str, Any], keys: tuple[str, ...], default: Any
     return default
 
 
+def reject_removed_runtime_keys(config: dict[str, Any], *, scope: str) -> None:
+    removed_keys = [key for key in REMOVED_RUNTIME_KEYS if key in config]
+    if removed_keys:
+        raise ValueError(
+            f"{scope} contains unsupported field(s): {', '.join(removed_keys)}. "
+            "systemd-run scope is inferred from platform and task_type: RHEL7 "
+            "systemd services use system scope, while RHEL8 systemd services and "
+            "Linux scripts use user scope."
+        )
+
+
 def require_workflow_action(action: str) -> None:
     if action not in SUPPORTED_WORKFLOW_ACTIONS:
         raise ValueError(f"action must be one of {SUPPORTED_WORKFLOW_ACTIONS}")
@@ -327,21 +334,13 @@ def normalize_remote_execution_mode(value: Any) -> str:
     return mode
 
 
-def normalize_systemd_run_scope(value: Any) -> str:
-    scope = str(value or SYSTEMD_RUN_SCOPE_AUTO).strip()
-    if scope not in SUPPORTED_SYSTEMD_RUN_SCOPES:
-        raise ValueError(
-            f"systemd_run_scope must be one of {sorted(SUPPORTED_SYSTEMD_RUN_SCOPES)}; "
-            f"got '{scope}'."
-        )
-    return scope
-
-
 def normalize_runtime_defaults(data: dict[str, Any]) -> dict[str, Any]:
     raw_defaults = optional_json_object(
         data.get("runtime_defaults", {}),
         name="runtime_defaults",
     )
+    reject_removed_runtime_keys(raw_defaults, scope="runtime_defaults")
+    reject_removed_runtime_keys(data, scope="Workflow root")
     defaults = {
         key: value
         for key, value in raw_defaults.items()
@@ -352,11 +351,9 @@ def normalize_runtime_defaults(data: dict[str, Any]) -> dict[str, Any]:
             defaults[key] = data[key]
     defaults.setdefault("sudo_mode", DEFAULT_SUDO_MODE)
     defaults.setdefault("remote_execution_mode", DEFAULT_REMOTE_EXECUTION_MODE)
-    defaults.setdefault("systemd_run_scope", SYSTEMD_RUN_SCOPE_AUTO)
     defaults.setdefault("retry_count", DEFAULT_RETRY_COUNT)
     defaults.setdefault("retry_delay_seconds", DEFAULT_RETRY_DELAY_SECONDS)
     normalize_remote_execution_mode(defaults["remote_execution_mode"])
-    normalize_systemd_run_scope(defaults["systemd_run_scope"])
     validate_sudo_mode(defaults["sudo_mode"])
     normalize_non_negative_int(defaults["retry_count"], field_name="runtime_defaults.retry_count")
     normalize_non_negative_int(
@@ -821,6 +818,7 @@ def merge_host_entries(
 
 
 def host_group_runtime_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    reject_removed_runtime_keys(config, scope="host_group")
     excluded = {
         "hosts",
         "host",
@@ -843,6 +841,7 @@ def host_group_runtime_defaults(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def host_entry_runtime_defaults(entry: dict[str, Any]) -> dict[str, Any]:
+    reject_removed_runtime_keys(entry, scope="host")
     excluded = {
         "hosts",
         "host",
@@ -1244,6 +1243,7 @@ def extract_task_runtime_overrides(config: dict[str, Any]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     if not config:
         return overrides
+    reject_removed_runtime_keys(config, scope="Task runtime overrides")
 
     systemd_overrides = extract_systemd_overrides(config)
     if "platform" in config:
@@ -1304,10 +1304,6 @@ def apply_task_runtime_overrides(
         remote_execution_mode=rendered.get(
             "remote_execution_mode",
             task_spec.remote_execution_mode,
-        ),
-        systemd_run_scope=rendered.get(
-            "systemd_run_scope",
-            task_spec.systemd_run_scope,
         ),
         systemd_unit_prefix=rendered.get(
             "systemd_unit_prefix",
@@ -1594,7 +1590,6 @@ def render_task_templates(task_spec: WorkflowTaskSpec, tokens: dict[str, str]) -
             task_spec.remote_execution_mode,
             tokens,
         ),
-        systemd_run_scope=render_template_value(task_spec.systemd_run_scope, tokens),
         systemd_unit_prefix=render_template_value(task_spec.systemd_unit_prefix, tokens),
         retry_count=normalize_non_negative_int(
             render_template_value(task_spec.retry_count, tokens),
@@ -1704,10 +1699,6 @@ def apply_task_env_overrides(
         remote_execution_mode=runtime_overrides.get(
             "remote_execution_mode",
             task_spec.remote_execution_mode,
-        ),
-        systemd_run_scope=runtime_overrides.get(
-            "systemd_run_scope",
-            task_spec.systemd_run_scope,
         ),
         systemd_unit_prefix=runtime_overrides.get(
             "systemd_unit_prefix",
@@ -1961,10 +1952,9 @@ def validate_task_spec(
         normalize_trigger_rule(
             task_spec.stop_trigger_rule,
             field_name=f"Task '{task_spec.task_id}' stop_trigger_rule",
-        )
+    )
     validate_sudo_mode(task_spec.sudo_mode)
     normalize_remote_execution_mode(task_spec.remote_execution_mode)
-    normalize_systemd_run_scope(task_spec.systemd_run_scope)
     if (
         task_spec.systemd_runtime_max_seconds is not None
         and task_spec.systemd_runtime_max_seconds <= 0
@@ -1998,6 +1988,14 @@ def validate_task_spec(
             raise ValueError(f"Task '{task_spec.task_id}' must define systemd.service_name.")
 
     if task_spec.task_type in SCRIPT_TASK_TYPES:
+        if (
+            task_spec.task_type == LINUX_SCRIPT_TASK_TYPE
+            and task_spec.platform not in SUPPORTED_SYSTEMD_PLATFORMS
+        ):
+            raise ValueError(
+                f"Task '{task_spec.task_id}' platform must be one of "
+                f"{sorted(SUPPORTED_SYSTEMD_PLATFORMS)} for linux_script tasks."
+            )
         commands = task_spec.commands or {}
         if require_runtime_config:
             required_actions = (action,) if action else (*START_STOP_ACTIONS, STATUS_ACTION)
@@ -2021,6 +2019,15 @@ def validate_task_spec(
     ):
         raise ValueError(
             f"Task '{task_spec.task_id}' uses windows_script and cannot use "
+            "remote_execution_mode=systemd_run. Use auto or foreground."
+        )
+    if (
+        task_spec.task_type == LINUX_SCRIPT_TASK_TYPE
+        and task_spec.platform == "rhel7"
+        and normalize_remote_execution_mode(task_spec.remote_execution_mode) == "systemd_run"
+    ):
+        raise ValueError(
+            f"Task '{task_spec.task_id}' uses linux_script on RHEL7 and cannot use "
             "remote_execution_mode=systemd_run. Use auto or foreground."
         )
 
@@ -2310,12 +2317,19 @@ def build_action_dependency_maps(
     return run_map, start_map, stop_map
 
 
-def infer_systemd_scope(platform: str) -> str:
+def infer_systemd_service_scope(platform: str) -> str:
     if platform == "rhel7":
         return "system"
     if platform == "rhel8":
         return "user"
     raise ValueError(f"Unsupported systemd platform '{platform}'.")
+
+
+def task_platform(task_spec: WorkflowTaskSpec) -> str:
+    if task_spec.task_type == SYSTEMD_TASK_TYPE:
+        systemd_cfg = task_spec.systemd or {}
+        return str(systemd_cfg.get("platform", task_spec.platform))
+    return str(task_spec.platform)
 
 
 def resolved_remote_execution_mode(task_spec: WorkflowTaskSpec) -> str:
@@ -2324,17 +2338,20 @@ def resolved_remote_execution_mode(task_spec: WorkflowTaskSpec) -> str:
         return mode
     if task_spec.task_type == WINDOWS_SCRIPT_TASK_TYPE:
         return "foreground"
+    if task_spec.task_type == LINUX_SCRIPT_TASK_TYPE:
+        return "systemd_run" if task_platform(task_spec) == "rhel8" else "foreground"
     return "systemd_run"
 
 
-def resolved_systemd_run_scope(task_spec: WorkflowTaskSpec) -> str:
-    scope = normalize_systemd_run_scope(task_spec.systemd_run_scope)
-    if scope != SYSTEMD_RUN_SCOPE_AUTO:
-        return scope
+def inferred_remote_unit_scope(task_spec: WorkflowTaskSpec) -> str:
     if task_spec.task_type == SYSTEMD_TASK_TYPE:
-        systemd_cfg = task_spec.systemd or {}
-        return infer_systemd_scope(systemd_cfg.get("platform", task_spec.platform))
-    return "system"
+        return infer_systemd_service_scope(task_platform(task_spec))
+    if task_spec.task_type == LINUX_SCRIPT_TASK_TYPE and task_platform(task_spec) == "rhel8":
+        return "user"
+    raise ValueError(
+        f"Task '{task_spec.task_id}' cannot run through systemd-run with "
+        f"task_type={task_spec.task_type} on platform={task_platform(task_spec)}."
+    )
 
 
 def remote_systemd_unit_name(
@@ -2539,7 +2556,7 @@ def build_systemd_service_command(
 ) -> str:
     systemd_cfg = task_spec.systemd or {}
     platform = systemd_cfg.get("platform", task_spec.platform)
-    scope = infer_systemd_scope(platform)
+    scope = infer_systemd_service_scope(platform)
     service_name = systemd_cfg["service_name"]
     sudo_user = task_spec.sudo_user or host_target.sudo_user
 
@@ -2580,7 +2597,7 @@ def build_systemd_service_command(
 
     inner_command = service_action_command()
     if resolved_remote_execution_mode(task_spec) == "systemd_run":
-        run_scope = resolved_systemd_run_scope(task_spec)
+        run_scope = inferred_remote_unit_scope(task_spec)
         unit_sudo_user = sudo_user
         systemd_run_inner_command = service_action_command(
             prefix_sudo=(run_scope == "system" and bool(sudo_user)),
@@ -2705,7 +2722,7 @@ def build_linux_systemd_run_command(
         working_dir=working_dir,
         remote_env_vars=remote_env_vars,
     )
-    run_scope = resolved_systemd_run_scope(task_spec)
+    run_scope = inferred_remote_unit_scope(task_spec)
     unit_sudo_user = sudo_user if run_scope == "system" else sudo_user
     return build_systemd_run_command(
         unit_name=remote_systemd_unit_name(
@@ -2880,7 +2897,6 @@ def task_spec_to_payload(task_spec: WorkflowTaskSpec) -> dict[str, Any]:
         "preset_params": task_spec.preset_params,
         "sudo_mode": task_spec.sudo_mode,
         "remote_execution_mode": task_spec.remote_execution_mode,
-        "systemd_run_scope": task_spec.systemd_run_scope,
         "systemd_unit_prefix": task_spec.systemd_unit_prefix,
         "systemd_runtime_max_seconds": task_spec.systemd_runtime_max_seconds,
         "command_timeout_seconds": task_spec.command_timeout_seconds,
@@ -2914,7 +2930,6 @@ def task_spec_from_payload(payload: dict[str, Any]) -> WorkflowTaskSpec:
             "remote_execution_mode",
             DEFAULT_REMOTE_EXECUTION_MODE,
         ),
-        systemd_run_scope=payload.get("systemd_run_scope", SYSTEMD_RUN_SCOPE_AUTO),
         systemd_unit_prefix=payload.get("systemd_unit_prefix"),
         systemd_runtime_max_seconds=payload.get("systemd_runtime_max_seconds"),
         command_timeout_seconds=payload.get("command_timeout_seconds"),
@@ -3457,6 +3472,10 @@ def build_task_spec_from_config(
     group_id: str | None = None,
     allow_host_group_runtime_keys: bool = False,
 ) -> WorkflowTaskSpec:
+    reject_removed_runtime_keys(
+        data,
+        scope=f"Task '{data.get('task_id', '<unknown>')}'",
+    )
     if not allow_host_group_runtime_keys:
         reject_host_group_only_runtime_keys(
             data,
@@ -3495,7 +3514,6 @@ def build_task_spec_from_config(
             "remote_execution_mode",
             DEFAULT_REMOTE_EXECUTION_MODE,
         ),
-        systemd_run_scope=data.get("systemd_run_scope", SYSTEMD_RUN_SCOPE_AUTO),
         systemd_unit_prefix=data.get("systemd_unit_prefix"),
         systemd_runtime_max_seconds=(
             int(data["systemd_runtime_max_seconds"])

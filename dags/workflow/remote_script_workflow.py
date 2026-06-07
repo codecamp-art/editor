@@ -43,11 +43,20 @@ from common.trading_day_tasks import (
 ALL_RUNTIME_ENVS = ("dev", "qa", "prod", "dr")
 DEFAULT_SUDO_MODE = "non_interactive"
 DEFAULT_REMOTE_EXECUTION_MODE = "systemd_run"
-DEFAULT_SYSTEMD_RUN_SCOPE = "system"
 DEFAULT_RETRY_DELAY_SECONDS = 10
 REPORTING_DAGS_DIR = Path(__file__).resolve().parents[1] / "reporting"
 DEFAULT_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "configs" / "target_hosts.json"
 LEGACY_REMOTE_SCRIPT_TARGET_HOST_FILE = REPORTING_DAGS_DIR / "target_hosts.json"
+
+
+def reject_removed_systemd_run_scope(config: dict | None, *, scope: str) -> None:
+    if config and "systemd_run_scope" in config:
+        raise ValueError(
+            f"{scope} contains unsupported field systemd_run_scope. "
+            "Script systemd-run execution uses RHEL8 user scope; use "
+            "remote_execution_mode=foreground for environments that cannot run "
+            "scripts through user-scoped systemd units."
+        )
 
 
 
@@ -122,7 +131,6 @@ class RemoteScriptDefinition:
     retry_count: int = 2
     retry_delay_seconds: int = DEFAULT_RETRY_DELAY_SECONDS
     remote_execution_mode: str = DEFAULT_REMOTE_EXECUTION_MODE
-    systemd_run_scope: str = DEFAULT_SYSTEMD_RUN_SCOPE
     systemd_unit_prefix: str | None = None
     systemd_runtime_max_seconds: int | None = None
     tags: tuple[str, ...] = ("reporting", "ssh")
@@ -486,7 +494,7 @@ def create_remote_script_dag(
                     sudo_user=definition.sudo_user,
                     inner_command=inner_command,
                     runtime_max_seconds=runtime_max_seconds,
-                    scope=definition.systemd_run_scope,
+                    scope="user",
                     sudo_mode=definition.sudo_mode,
                 )
                 cmd_timeout = max(cmd_timeout, runtime_max_seconds + 300)
@@ -535,6 +543,7 @@ def create_remote_script_definition_variant(
 ) -> RemoteScriptDefinition:
     current_env = get_current_env_name()
     env_override = (variant.env_overrides or {}).get(current_env, {})
+    reject_removed_systemd_run_scope(env_override, scope=f"env_overrides.{current_env}")
 
     fields = merge_field_definitions(
         base_definition.fields,
@@ -610,10 +619,6 @@ def create_remote_script_definition_variant(
         "remote_execution_mode",
         base_definition.remote_execution_mode,
     )
-    resolved_systemd_run_scope = env_override.get(
-        "systemd_run_scope",
-        base_definition.systemd_run_scope,
-    )
     resolved_systemd_unit_prefix = env_override.get(
         "systemd_unit_prefix",
         base_definition.systemd_unit_prefix,
@@ -669,7 +674,6 @@ def create_remote_script_definition_variant(
         retry_count=int(resolved_retry_count),
         retry_delay_seconds=int(resolved_retry_delay_seconds),
         remote_execution_mode=resolved_remote_execution_mode,
-        systemd_run_scope=resolved_systemd_run_scope,
         systemd_unit_prefix=resolved_systemd_unit_prefix,
         systemd_runtime_max_seconds=resolved_systemd_runtime_max_seconds,
         tags=tags,
@@ -699,6 +703,7 @@ def build_trading_day_check_definition(
 def build_remote_script_definition_from_config(
     base: dict,
 ) -> RemoteScriptDefinition:
+    reject_removed_systemd_run_scope(base, scope="base")
     sudo_mode = base.get("sudo_mode", DEFAULT_SUDO_MODE)
     validate_sudo_mode(sudo_mode)
 
@@ -724,7 +729,6 @@ def build_remote_script_definition_from_config(
         retry_count=int(base.get("retry_count", 2)),
         retry_delay_seconds=int(base.get("retry_delay_seconds", DEFAULT_RETRY_DELAY_SECONDS)),
         remote_execution_mode=base.get("remote_execution_mode", DEFAULT_REMOTE_EXECUTION_MODE),
-        systemd_run_scope=base.get("systemd_run_scope", DEFAULT_SYSTEMD_RUN_SCOPE),
         systemd_unit_prefix=base.get("systemd_unit_prefix"),
         systemd_runtime_max_seconds=(
             int(base["systemd_runtime_max_seconds"])
@@ -742,6 +746,12 @@ def build_remote_script_definition_from_config(
 def build_remote_script_variant_from_config(
     variant: dict,
 ) -> RemoteScriptScheduleVariant:
+    reject_removed_systemd_run_scope(variant, scope=f"variant '{variant.get('dag_id', '<unknown>')}'")
+    for env_name, env_override in (variant.get("env_overrides") or {}).items():
+        reject_removed_systemd_run_scope(
+            env_override,
+            scope=f"variant '{variant.get('dag_id', '<unknown>')}' env_overrides.{env_name}",
+        )
     sudo_mode = variant.get("sudo_mode")
     if sudo_mode is not None:
         validate_sudo_mode(sudo_mode)
