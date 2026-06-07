@@ -140,6 +140,17 @@ GLOBAL_RUNTIME_DEFAULT_KEYS = (
     "retry_count",
     "retry_delay_seconds",
 )
+COMMON_HOST_RUNTIME_EXCLUDED_KEYS = frozenset(
+    {
+        "hosts",
+        "host",
+        "hostname",
+        "host_id",
+        "id",
+        "variables",
+    }
+)
+HOST_GROUP_RUNTIME_EXCLUDED_KEYS = COMMON_HOST_RUNTIME_EXCLUDED_KEYS | {"environments"}
 
 
 @dataclass(frozen=True)
@@ -544,12 +555,16 @@ def render_template_value(value: Any, tokens: dict[str, str]) -> Any:
 
 
 def build_env_tokens(topology: dict, current_env: str) -> dict[str, str]:
-    tokens = {
+    tokens = base_env_tokens(current_env)
+    tokens.update({str(key): str(value) for key, value in topology.get("variables", {}).items()})
+    return tokens
+
+
+def base_env_tokens(current_env: str) -> dict[str, str]:
+    return {
         "env": current_env,
         "loc": get_current_loc_name(),
     }
-    tokens.update({str(key): str(value) for key, value in topology.get("variables", {}).items()})
-    return tokens
 
 
 def get_default_environment_topology(environments: dict[str, Any]) -> dict[str, Any]:
@@ -818,41 +833,31 @@ def merge_host_entries(
 
 
 def host_group_runtime_defaults(config: dict[str, Any]) -> dict[str, Any]:
-    reject_removed_runtime_keys(config, scope="host_group")
-    excluded = {
-        "hosts",
-        "host",
-        "hostname",
-        "host_id",
-        "id",
-        "variables",
-        "environments",
-    }
-    defaults: dict[str, Any] = {}
-    for key, value in config.items():
-        if value is None or key in excluded:
-            continue
-        if key in HOST_GROUP_BULK_TASK_KEYS:
-            if key in {"commands", "service_name"} and not isinstance(value, list):
-                defaults[key] = value
-            continue
-        defaults[key] = value
-    return defaults
+    return host_runtime_defaults(
+        config,
+        excluded_keys=HOST_GROUP_RUNTIME_EXCLUDED_KEYS,
+        scope="host_group",
+    )
 
 
 def host_entry_runtime_defaults(entry: dict[str, Any]) -> dict[str, Any]:
-    reject_removed_runtime_keys(entry, scope="host")
-    excluded = {
-        "hosts",
-        "host",
-        "hostname",
-        "host_id",
-        "id",
-        "variables",
-    }
+    return host_runtime_defaults(
+        entry,
+        excluded_keys=COMMON_HOST_RUNTIME_EXCLUDED_KEYS,
+        scope="host",
+    )
+
+
+def host_runtime_defaults(
+    config: dict[str, Any],
+    *,
+    excluded_keys: frozenset[str],
+    scope: str,
+) -> dict[str, Any]:
+    reject_removed_runtime_keys(config, scope=scope)
     defaults: dict[str, Any] = {}
-    for key, value in entry.items():
-        if value is None or key in excluded:
+    for key, value in config.items():
+        if value is None or key in excluded_keys:
             continue
         if key in HOST_GROUP_BULK_TASK_KEYS:
             if key in {"commands", "service_name"} and not isinstance(value, list):
@@ -889,7 +894,7 @@ def tokens_for_inventory_host(
     group_config: dict[str, Any],
     host_entry: dict[str, Any],
 ) -> dict[str, str]:
-    tokens = {"env": current_env, "loc": get_current_loc_name()}
+    tokens = base_env_tokens(current_env)
     tokens.update({str(key): str(value) for key, value in group_config.get("variables", {}).items()})
     tokens.update({str(key): str(value) for key, value in host_entry.get("variables", {}).items()})
     host = render_template_value(
@@ -1309,34 +1314,52 @@ def apply_task_runtime_overrides(
             "systemd_unit_prefix",
             task_spec.systemd_unit_prefix,
         ),
-        systemd_runtime_max_seconds=(
-            int(rendered["systemd_runtime_max_seconds"])
-            if rendered.get("systemd_runtime_max_seconds") is not None
-            else task_spec.systemd_runtime_max_seconds
+        systemd_runtime_max_seconds=optional_int_override(
+            rendered,
+            "systemd_runtime_max_seconds",
+            task_spec.systemd_runtime_max_seconds,
         ),
-        command_timeout_seconds=(
-            int(rendered["command_timeout_seconds"])
-            if rendered.get("command_timeout_seconds") is not None
-            else task_spec.command_timeout_seconds
+        command_timeout_seconds=optional_int_override(
+            rendered,
+            "command_timeout_seconds",
+            task_spec.command_timeout_seconds,
         ),
-        retry_count=(
-            normalize_non_negative_int(
-                rendered["retry_count"],
-                field_name=f"Task '{task_spec.task_id}' retry_count",
-            )
-            if rendered.get("retry_count") is not None
-            else task_spec.retry_count
+        retry_count=non_negative_int_override(
+            rendered,
+            "retry_count",
+            task_spec.retry_count,
+            field_name=f"Task '{task_spec.task_id}' retry_count",
         ),
-        retry_delay_seconds=(
-            normalize_non_negative_int(
-                rendered["retry_delay_seconds"],
-                field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
-            )
-            if rendered.get("retry_delay_seconds") is not None
-            else task_spec.retry_delay_seconds
+        retry_delay_seconds=non_negative_int_override(
+            rendered,
+            "retry_delay_seconds",
+            task_spec.retry_delay_seconds,
+            field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
         ),
         windows_shell=rendered.get("windows_shell", task_spec.windows_shell),
     )
+
+
+def optional_int_override(
+    data: dict[str, Any],
+    key: str,
+    default: int | None,
+) -> int | None:
+    if data.get(key) is None:
+        return default
+    return int(data[key])
+
+
+def non_negative_int_override(
+    data: dict[str, Any],
+    key: str,
+    default: int,
+    *,
+    field_name: str,
+) -> int:
+    if data.get(key) is None:
+        return default
+    return normalize_non_negative_int(data[key], field_name=field_name)
 
 
 def build_workflow_airflow_fields(
@@ -1461,18 +1484,16 @@ def build_args_from_fields(validated: dict, fields: dict) -> list[str]:
             continue
 
         value = validated.get(field_name)
-        if value in (None, "") or (isinstance(value, list) and not value):
+        if field_value_is_empty(value):
             continue
 
         cli_name = spec.get("cli_name", field_name)
-        transform = spec.get("transform")
-
-        if transform == "lower_bool":
-            value = str(bool(value)).lower()
-        elif isinstance(value, list):
-            value = spec.get("cli_joiner", ",").join(str(item) for item in value)
-
-        args.append(f"--{cli_name}={value}")
+        formatted_value = format_field_value(
+            value,
+            transform=spec.get("transform"),
+            list_joiner=spec.get("cli_joiner", ","),
+        )
+        args.append(f"--{cli_name}={formatted_value}")
 
     return args
 
@@ -1485,22 +1506,39 @@ def build_env_vars_from_fields(validated: dict, fields: dict) -> dict[str, str]:
             continue
 
         value = validated.get(field_name)
-        if value in (None, "") or (isinstance(value, list) and not value):
+        if field_value_is_empty(value):
             continue
 
         env_name = spec.get("env_name")
         if not env_name:
             continue
 
-        transform = spec.get("env_transform")
-        if transform == "lower_bool":
-            value = str(bool(value)).lower()
-        elif isinstance(value, list):
-            value = spec.get("env_joiner", ",").join(str(item) for item in value)
-
-        env_vars[env_name] = str(value)
+        env_vars[env_name] = str(
+            format_field_value(
+                value,
+                transform=spec.get("env_transform"),
+                list_joiner=spec.get("env_joiner", ","),
+            )
+        )
 
     return env_vars
+
+
+def field_value_is_empty(value: Any) -> bool:
+    return value in (None, "") or (isinstance(value, list) and not value)
+
+
+def format_field_value(
+    value: Any,
+    *,
+    transform: str | None,
+    list_joiner: str,
+) -> Any:
+    if transform == "lower_bool":
+        return str(bool(value)).lower()
+    if isinstance(value, list):
+        return list_joiner.join(str(item) for item in value)
+    return value
 
 
 def resolve_script_runtime_params(
@@ -1539,19 +1577,27 @@ def normalize_target_selection(value: Any) -> tuple[str, ...]:
 
 
 def selected_target_tasks(validated: dict) -> tuple[str, ...]:
-    return unique_preserving_order(
-        [
-            *normalize_target_selection(validated.get("target_task")),
-            *normalize_target_selection(validated.get("target_tasks")),
-        ]
-    )
+    return selected_targets(validated, single_key="target_task", multi_key="target_tasks")
 
 
 def selected_target_task_groups(validated: dict) -> tuple[str, ...]:
+    return selected_targets(
+        validated,
+        single_key="target_task_group",
+        multi_key="target_task_groups",
+    )
+
+
+def selected_targets(
+    validated: dict,
+    *,
+    single_key: str,
+    multi_key: str,
+) -> tuple[str, ...]:
     return unique_preserving_order(
         [
-            *normalize_target_selection(validated.get("target_task_group")),
-            *normalize_target_selection(validated.get("target_task_groups")),
+            *normalize_target_selection(validated.get(single_key)),
+            *normalize_target_selection(validated.get(multi_key)),
         ]
     )
 
@@ -1704,31 +1750,27 @@ def apply_task_env_overrides(
             "systemd_unit_prefix",
             task_spec.systemd_unit_prefix,
         ),
-        systemd_runtime_max_seconds=(
-            int(runtime_overrides["systemd_runtime_max_seconds"])
-            if runtime_overrides.get("systemd_runtime_max_seconds") is not None
-            else task_spec.systemd_runtime_max_seconds
+        systemd_runtime_max_seconds=optional_int_override(
+            runtime_overrides,
+            "systemd_runtime_max_seconds",
+            task_spec.systemd_runtime_max_seconds,
         ),
-        command_timeout_seconds=(
-            int(runtime_overrides["command_timeout_seconds"])
-            if runtime_overrides.get("command_timeout_seconds") is not None
-            else task_spec.command_timeout_seconds
+        command_timeout_seconds=optional_int_override(
+            runtime_overrides,
+            "command_timeout_seconds",
+            task_spec.command_timeout_seconds,
         ),
-        retry_count=(
-            normalize_non_negative_int(
-                runtime_overrides["retry_count"],
-                field_name=f"Task '{task_spec.task_id}' retry_count",
-            )
-            if runtime_overrides.get("retry_count") is not None
-            else task_spec.retry_count
+        retry_count=non_negative_int_override(
+            runtime_overrides,
+            "retry_count",
+            task_spec.retry_count,
+            field_name=f"Task '{task_spec.task_id}' retry_count",
         ),
-        retry_delay_seconds=(
-            normalize_non_negative_int(
-                runtime_overrides["retry_delay_seconds"],
-                field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
-            )
-            if runtime_overrides.get("retry_delay_seconds") is not None
-            else task_spec.retry_delay_seconds
+        retry_delay_seconds=non_negative_int_override(
+            runtime_overrides,
+            "retry_delay_seconds",
+            task_spec.retry_delay_seconds,
+            field_name=f"Task '{task_spec.task_id}' retry_delay_seconds",
         ),
         env_overrides=None,
     )
@@ -1952,9 +1994,9 @@ def validate_task_spec(
         normalize_trigger_rule(
             task_spec.stop_trigger_rule,
             field_name=f"Task '{task_spec.task_id}' stop_trigger_rule",
-    )
+        )
     validate_sudo_mode(task_spec.sudo_mode)
-    normalize_remote_execution_mode(task_spec.remote_execution_mode)
+    remote_execution_mode = normalize_remote_execution_mode(task_spec.remote_execution_mode)
     if (
         task_spec.systemd_runtime_max_seconds is not None
         and task_spec.systemd_runtime_max_seconds <= 0
@@ -2015,7 +2057,7 @@ def validate_task_spec(
         )
     if (
         task_spec.task_type == WINDOWS_SCRIPT_TASK_TYPE
-        and normalize_remote_execution_mode(task_spec.remote_execution_mode) == "systemd_run"
+        and remote_execution_mode == "systemd_run"
     ):
         raise ValueError(
             f"Task '{task_spec.task_id}' uses windows_script and cannot use "
@@ -2024,7 +2066,7 @@ def validate_task_spec(
     if (
         task_spec.task_type == LINUX_SCRIPT_TASK_TYPE
         and task_spec.platform == "rhel7"
-        and normalize_remote_execution_mode(task_spec.remote_execution_mode) == "systemd_run"
+        and remote_execution_mode == "systemd_run"
     ):
         raise ValueError(
             f"Task '{task_spec.task_id}' uses linux_script on RHEL7 and cannot use "
@@ -2289,28 +2331,19 @@ def build_action_dependency_maps(
     dict[str, tuple[str, ...]],
     dict[str, tuple[str, ...]],
 ]:
-    run_map = build_dependency_map(
-        tasks=tasks,
-        groups=groups,
-        defined_task_ids=defined_task_ids,
-        defined_group_ids=defined_group_ids,
-        action=RUN_ACTION,
-    )
-    start_map = build_dependency_map(
-        tasks=tasks,
-        groups=groups,
-        defined_task_ids=defined_task_ids,
-        defined_group_ids=defined_group_ids,
-        action=START_ACTION,
-    )
-    stop_map = (
-        build_dependency_map(
+    def dependency_map_for(action: str) -> dict[str, tuple[str, ...]]:
+        return build_dependency_map(
             tasks=tasks,
             groups=groups,
             defined_task_ids=defined_task_ids,
             defined_group_ids=defined_group_ids,
-            action=STOP_ACTION,
+            action=action,
         )
+
+    run_map = dependency_map_for(RUN_ACTION)
+    start_map = dependency_map_for(START_ACTION)
+    stop_map = (
+        dependency_map_for(STOP_ACTION)
         if has_custom_stop_dependency_graph(tasks=tasks, groups=groups)
         else reverse_dependency_map(start_map)
     )
@@ -2560,9 +2593,6 @@ def build_systemd_service_command(
     service_name = systemd_cfg["service_name"]
     sudo_user = task_spec.sudo_user or host_target.sudo_user
 
-    if platform not in SUPPORTED_SYSTEMD_PLATFORMS:
-        raise ValueError(f"Unsupported systemd platform '{platform}'.")
-
     if action == STATUS_ACTION:
         systemctl_args = [STATUS_ACTION, service_name, "--no-pager"]
     elif action in START_STOP_ACTIONS:
@@ -2723,7 +2753,6 @@ def build_linux_systemd_run_command(
         remote_env_vars=remote_env_vars,
     )
     run_scope = inferred_remote_unit_scope(task_spec)
-    unit_sudo_user = sudo_user if run_scope == "system" else sudo_user
     return build_systemd_run_command(
         unit_name=remote_systemd_unit_name(
             task_spec=task_spec,
@@ -2732,7 +2761,7 @@ def build_linux_systemd_run_command(
             dag_id=dag_id,
             run_id=run_id,
         ),
-        sudo_user=unit_sudo_user,
+        sudo_user=sudo_user,
         inner_command=inner_command,
         runtime_max_seconds=(
             task_spec.systemd_runtime_max_seconds
