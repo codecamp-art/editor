@@ -339,7 +339,7 @@ def normalize_systemd_run_scope(value: Any) -> str:
 
 def normalize_runtime_defaults(data: dict[str, Any]) -> dict[str, Any]:
     raw_defaults = optional_json_object(
-        data.get("runtime_defaults"),
+        data.get("runtime_defaults", {}),
         name="runtime_defaults",
     )
     defaults = {

@@ -926,6 +926,48 @@ class RemoteWorkflowTest(unittest.TestCase):
         self.assertIn("--property=RuntimeMaxSec=1800", command)
         self.assertIn("./run.sh", command)
 
+    def test_missing_runtime_defaults_uses_builtin_defaults(self) -> None:
+        workflow = build_workflow_definition_from_config(
+            {
+                "actions": ["run"],
+                "host_groups": {
+                    "batch": {
+                        "type": "linux_script",
+                        "sudo_user": "batch",
+                        "hosts": ["qa-batch-01.company.net"],
+                        "commands": {
+                            "run": "./run.sh",
+                        },
+                    },
+                },
+                "tasks": [
+                    {"task_id": "extract", "host_group": "batch"},
+                ],
+            },
+            default_workflow_id="missing_runtime_defaults",
+        )
+        plan = workflow_plan_for_env(workflow, "qa")
+        task = apply_task_runtime_overrides(
+            plan.tasks[0],
+            plan.hosts_by_task_id["extract"][0].task_overrides,
+        )
+        command = build_remote_task_command(
+            task_spec=task,
+            host_target=plan.hosts_by_task_id["extract"][0],
+            action="run",
+            dag_id="missing-runtime-defaults",
+            run_id="manual__1",
+        )
+
+        self.assertEqual(task.sudo_mode, "non_interactive")
+        self.assertEqual(task.remote_execution_mode, "auto")
+        self.assertEqual(task.systemd_run_scope, "auto")
+        self.assertIsNone(task.systemd_unit_prefix)
+        self.assertEqual(task.retry_count, 2)
+        self.assertEqual(task.retry_delay_seconds, 10)
+        self.assertEqual(resolved_remote_execution_mode(task), "systemd_run")
+        self.assertIn("remote-workflow-missing-runtime-defaults-run-extract", command)
+
     def test_runtime_defaults_are_overridden_by_service_env_and_host(self) -> None:
         workflow = build_workflow_definition_from_config(
             {
