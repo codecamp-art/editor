@@ -4232,286 +4232,6 @@ def effective_target_runtime_envs(
     return (current_env,)
 
 
-def collect_nested_environment_names(topology: dict[str, Any]) -> set[str]:
-    names: set[str] = set()
-    host_groups = topology.get("host_groups") or {}
-    if not isinstance(host_groups, dict):
-        return names
-    for host_group_config in host_groups.values():
-        if not isinstance(host_group_config, dict):
-            continue
-        environments = host_group_config.get("environments") or {}
-        if isinstance(environments, dict):
-            names.update(str(env_name) for env_name in environments)
-    return names
-
-
-def environment_names_from_workflow(workflow: RemoteWorkflowDefinition) -> tuple[str, ...]:
-    names: set[str] = set()
-    environments = optional_json_object(workflow.environments, name="Workflow environments")
-    for env_name, topology in environments.items():
-        if isinstance(topology, dict):
-            names.update(collect_nested_environment_names(topology))
-        if env_name not in DEFAULT_TOPOLOGY_KEYS:
-            names.add(str(env_name))
-    return tuple(sorted(name for name in names if name not in DEFAULT_TOPOLOGY_KEYS))
-
-
-def workflow_validation_envs(
-    workflow: RemoteWorkflowDefinition,
-    envs: str | list[str] | tuple[str, ...] | None = None,
-) -> tuple[str, ...]:
-    if envs is not None:
-        selected_envs = normalize_string_tuple(envs)
-        if not selected_envs:
-            raise ValueError("At least one environment must be selected.")
-        return selected_envs
-
-    return (
-        workflow.target_runtime_envs
-        or environment_names_from_workflow(workflow)
-        or (get_current_env_name(),)
-    )
-
-
-def validate_workflow_plan_runtime_configs(
-    *,
-    workflow: RemoteWorkflowDefinition,
-    plan: WorkflowPlan,
-    current_env: str,
-) -> None:
-    for action in workflow.actions:
-        validation_action = action if action in (RUN_ACTION, STATUS_ACTION) else None
-        for task_spec in plan.tasks:
-            for host_target in plan.hosts_by_task_id.get(task_spec.task_id, ()):
-                effective_task = apply_task_runtime_overrides(
-                    task_spec,
-                    host_target.task_overrides,
-                )
-                try:
-                    validate_task_spec(
-                        effective_task,
-                        action=validation_action,
-                    )
-                except Exception as exc:
-                    raise ValueError(
-                        f"Task '{task_spec.task_id}' on host '{host_target.host}' "
-                        f"is invalid for env '{current_env}' action '{action}': {exc}"
-                    ) from exc
-
-
-def validate_workflow_json_file(
-    config_file: str | Path,
-    *,
-    envs: str | list[str] | tuple[str, ...] | None = None,
-    config_root: str | Path | None = None,
-) -> tuple[RemoteWorkflowDefinition, dict[str, WorkflowPlan]]:
-    workflow = load_workflow_definition_from_json(
-        config_file,
-        config_root=config_root,
-    )
-    plans: dict[str, WorkflowPlan] = {}
-    for env_name in workflow_validation_envs(workflow, envs):
-        topology = resolve_topology_for_env(workflow, env_name)
-        plan = prepare_workflow_plan(
-            workflow=workflow,
-            topology=topology,
-            current_env=env_name,
-        )
-        validate_workflow_plan_runtime_configs(
-            workflow=workflow,
-            plan=plan,
-            current_env=env_name,
-        )
-        plans[env_name] = plan
-    return workflow, plans
-
-
-def workflow_execution_warnings(plan: WorkflowPlan) -> tuple[str, ...]:
-    warnings: list[str] = []
-    for task_spec in plan.tasks:
-        for host_target in plan.hosts_by_task_id.get(task_spec.task_id, ()):
-            effective_task = apply_task_runtime_overrides(
-                task_spec,
-                host_target.task_overrides,
-            )
-            task_context = f"task '{task_spec.task_id}' host '{host_target.host}'"
-            execution_mode = resolved_remote_execution_mode(effective_task)
-            if effective_task.sudo_user and effective_task.sudo_mode != "non_interactive":
-                warnings.append(
-                    f"{task_context}: sudo_mode='{effective_task.sudo_mode}' can prompt "
-                    "for sudo credentials; use sudo_mode='non_interactive' with NOPASSWD "
-                    "sudoers for fully non-interactive Airflow execution."
-                )
-            if execution_mode == "systemd_run":
-                warnings.append(
-                    f"{task_context}: remote_execution_mode resolves to systemd_run. "
-                    "The remote command runs in a transient systemd unit and Airflow "
-                    "polls that unit for the result; if the Airflow worker or SSH "
-                    "connection is interrupted, the retry can find the same unit by "
-                    "dag_id/run_id/task/host."
-                )
-            elif effective_task.task_type in SCRIPT_TASK_TYPES:
-                warnings.append(
-                    f"{task_context}: script commands run in the foreground over SSH. "
-                    "If the Airflow worker or SSH connection is interrupted, Airflow "
-                    "cannot keep tracking that remote process and this task attempt fails."
-                )
-            elif effective_task.task_type == SYSTEMD_TASK_TYPE:
-                warnings.append(
-                    f"{task_context}: systemd start/stop/status is issued synchronously "
-                    "over SSH. The service state is recoverable with a later status run, "
-                    "but an interrupted Airflow worker or SSH connection fails the task "
-                    "attempt that was waiting on systemctl."
-                )
-    return tuple(dict.fromkeys(warnings))
-
-
-def mermaid_quote(value: str) -> str:
-    return '"' + value.replace('"', '\\"') + '"'
-
-
-def mermaid_node_id(task_id: str) -> str:
-    return f"n_{sanitize_task_id(task_id)}"
-
-
-def workflow_plan_to_mermaid(
-    plan: WorkflowPlan,
-    *,
-    action: str,
-    title: str | None = None,
-) -> str:
-    require_workflow_action(action)
-    dependency_map = plan_dependency_map_for_action(plan, action)
-    group_lookup = {group_spec.group_id: group_spec for group_spec in plan.groups}
-    group_task_ids = {
-        group_spec.group_id: tuple(task_spec.task_id for task_spec in group_spec.tasks)
-        for group_spec in plan.groups
-    }
-    grouped_task_ids = {
-        task_id
-        for task_ids in group_task_ids.values()
-        for task_id in task_ids
-    }
-
-    lines = ["flowchart TD"]
-    if title:
-        lines.append(f"  %% {title}")
-    lines.extend(["  wf_start((start))", "  wf_end((end))"])
-
-    for group_spec in plan.groups:
-        lines.append(
-            f"  subgraph g_{sanitize_task_id(group_spec.group_id)}"
-            f"[{mermaid_quote(group_spec.group_id)}]"
-        )
-        for task_spec in group_spec.tasks:
-            lines.append(
-                f"    {mermaid_node_id(task_spec.task_id)}"
-                f"[{mermaid_quote(task_spec.task_id)}]"
-            )
-        lines.append("  end")
-
-    for task_spec in plan.tasks:
-        if task_spec.task_id in grouped_task_ids:
-            continue
-        lines.append(
-            f"  {mermaid_node_id(task_spec.task_id)}"
-            f"[{mermaid_quote(task_spec.task_id)}]"
-        )
-
-    if not plan.tasks:
-        lines.append("  wf_start --> wf_end")
-        return "\n".join(lines)
-
-    upstream_references: set[str] = set()
-    for task_spec in plan.tasks:
-        task_node_id = mermaid_node_id(task_spec.task_id)
-        upstream_ids = dependency_map.get(task_spec.task_id, ())
-        trigger_rule = effective_dependency_trigger_rule_for_task(
-            task_spec,
-            group_lookup,
-            action,
-        )
-        if not upstream_ids:
-            lines.append(f"  wf_start --> {task_node_id}")
-            continue
-        for upstream_id in upstream_ids:
-            upstream_references.add(upstream_id)
-            upstream_node_id = mermaid_node_id(upstream_id)
-            if trigger_rule == DEFAULT_TRIGGER_RULE:
-                lines.append(f"  {upstream_node_id} --> {task_node_id}")
-            else:
-                lines.append(
-                    f"  {upstream_node_id} -->|{trigger_rule}| {task_node_id}"
-                )
-
-    for task_spec in plan.tasks:
-        if task_spec.task_id not in upstream_references:
-            lines.append(f"  {mermaid_node_id(task_spec.task_id)} --> wf_end")
-
-    return "\n".join(lines)
-
-
-def workflow_graph_markdown(
-    config_file: str | Path,
-    *,
-    envs: str | list[str] | tuple[str, ...] | None = None,
-    actions: str | list[str] | tuple[str, ...] | None = None,
-    config_root: str | Path | None = None,
-) -> str:
-    workflow, plans = validate_workflow_json_file(
-        config_file,
-        envs=envs,
-        config_root=config_root,
-    )
-    selected_actions = (
-        normalize_string_tuple(actions)
-        if actions is not None
-        else workflow.actions
-    )
-    if not selected_actions:
-        raise ValueError("At least one workflow action must be selected.")
-    for action in selected_actions:
-        require_workflow_action(action)
-
-    sections: list[str] = []
-    for env_name, plan in plans.items():
-        for action in selected_actions:
-            if action not in workflow.actions and not (
-                action == STATUS_ACTION and any(
-                    start_stop_action in workflow.actions
-                    for start_stop_action in START_STOP_ACTIONS
-                )
-            ):
-                continue
-            title = f"{workflow.workflow_id} {env_name} {action}"
-            graph = workflow_plan_to_mermaid(plan, action=action, title=title)
-            sections.append(f"## {title}\n\n```mermaid\n{graph}\n```")
-    return "\n\n".join(sections)
-
-
-def write_workflow_graph_markdown(
-    config_file: str | Path,
-    output_file: str | Path,
-    *,
-    envs: str | list[str] | tuple[str, ...] | None = None,
-    actions: str | list[str] | tuple[str, ...] | None = None,
-    config_root: str | Path | None = None,
-) -> Path:
-    output_path = Path(output_file)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        workflow_graph_markdown(
-            config_file,
-            envs=envs,
-            actions=actions,
-            config_root=config_root,
-        ),
-        encoding="utf-8",
-    )
-    return output_path
-
-
 def workflow_namespace_key(
     *,
     workflow_id: str,
@@ -4533,7 +4253,24 @@ def register_workflow_dags_from_json(
     config_root: str | Path | None = None,
 ) -> None:
     config_path = Path(config_file)
+    try:
+        register_workflow_dags_from_json_unchecked(
+            config_path=config_path,
+            global_namespace=global_namespace,
+            config_root=config_root,
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"Failed to register remote workflow JSON '{config_path}': {exc}"
+        ) from exc
 
+
+def register_workflow_dags_from_json_unchecked(
+    *,
+    config_path: Path,
+    global_namespace: dict,
+    config_root: str | Path | None = None,
+) -> None:
     root_path = Path(config_root) if config_root is not None else None
     config = load_json_file(config_path)
     workflow = build_workflow_definition_from_config(
@@ -4571,7 +4308,7 @@ def register_workflow_dags_from_json(
                 action=action,
                 schedule=collect_schedule_values(enabled_pairs, action),
                 target_env=target_env,
-                source_file=config_file,
+                source_file=config_path,
             )
             global_namespace[
                 workflow_namespace_key(

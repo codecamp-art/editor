@@ -122,10 +122,12 @@ from workflow.remote_workflow import (  # noqa: E402
     task_retry_kwargs,
     trigger_rule_satisfied,
     validate_task_spec,
-    validate_workflow_json_file,
+)
+from workflow.remote_workflow_graph import (  # noqa: E402
     workflow_graph_markdown,
     workflow_plan_to_mermaid,
 )
+from workflow.remote_workflow_validation import validate_workflow_json_file  # noqa: E402
 
 
 def workflow_plan_for_env(workflow, env: str):
@@ -1534,6 +1536,33 @@ class RemoteWorkflowTest(unittest.TestCase):
                 default_workflow_id_from_path(nested_dir / "daily.json", root),
                 "team_a_batch_daily",
             )
+
+    def test_register_workflow_reports_config_path_on_parse_error(self) -> None:
+        import json
+        import tempfile
+
+        config = {
+            "actions": ["run"],
+            "runtime_defaults": {
+                "systemd_run_scope": "user",
+            },
+            "host_groups": {},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "bad.json"
+            config_file.write_text(json.dumps(config), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as raised:
+                register_workflow_dags_from_json(
+                    config_file=config_file,
+                    global_namespace={},
+                    config_root=Path(tmp),
+                )
+            message = str(raised.exception)
+            self.assertIn("Failed to register remote workflow JSON", message)
+            self.assertIn("bad.json", message)
+            self.assertIn("systemd_run_scope", message)
 
     def test_register_start_stop_workflow_can_target_multiple_runtime_envs(self) -> None:
         import json

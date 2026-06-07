@@ -155,10 +155,10 @@ def main() -> int:
     install_airflow_validation_stubs()
     install_runtime_stubs()
 
-    from workflow.remote_workflow import (  # noqa: WPS433
+    from workflow.remote_workflow_graph import write_workflow_graph_markdown  # noqa: WPS433
+    from workflow.remote_workflow_validation import (  # noqa: WPS433
         validate_workflow_json_file,
         workflow_execution_warnings,
-        write_workflow_graph_markdown,
     )
 
     envs = split_csv_values(args.envs)
