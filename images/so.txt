@@ -1,0 +1,106 @@
+comparison.json   → Nested Data Reporting
+comparison.sarif  → Warnings NG
+report.html       → HTML Publisher
+
+之所以称为长期方案，并不是因为一定要永久同时使用三个插件，而是因为它把报告拆成了三个相对独立的层次：
+
+比较程序产生的业务结果
+        ↓
+统一的数据模型
+        ↓
+┌──────────────┬──────────────┬──────────────┐
+│ Jenkins 问题 │ Jenkins 指标 │ 详细交互报告 │
+│ Warnings NG  │ Nested Data  │ HTML         │
+└──────────────┴──────────────┴──────────────┘
+
+每一层解决不同的问题：
+
+Warnings NG：哪些具体差异需要处理，以及哪些是新增、遗留、已修复。
+Nested Data Reporting：总体数量、分类、比例和跨构建趋势。
+HTML Publisher：完整字段、配置内容差异、过滤、展开和复杂页面交互。
+
+它的核心优势是：数据不再绑定某一个 Jenkins 插件的页面能力。
+
+一、为什么这是长期方案
+1. 数据与展示解耦
+
+最差的实现方式是：
+
+比较程序
+   ↓
+直接拼 HTML
+
+这样 HTML 里虽然有所有信息，但 Jenkins 无法理解里面哪些是错误、哪些是警告、哪些是本次新增问题。HTML Publisher 只负责发布 HTML 文件和保留每个构建的报告，不会自动把 HTML 内容转换成 Jenkins 的 Issue、Quality Gate 或历史问题生命周期。
+
+长期方案则是：
+
+比较程序
+   ↓
+canonical comparison-report.json
+   ├── HTML generator
+   ├── Warnings adapter
+   └── Nested Data adapter
+
+这里建议稍微修正我之前的命名，不要直接把 comparison.json 设计成 Nested Data Reporting 专用格式，而应区分：
+
+comparison-report.json      # 业务主数据，唯一事实来源
+warnings.sarif/json         # Warnings NG 适配文件
+nested-summary.json         # Nested Data Reporting 适配文件
+html/index.html             # 人工调查页面
+
+
+核心必须保留
+comparison-report.json
+
+它是你们自己的稳定业务模型，不与 Jenkins 插件绑定。
+
+建议默认启用
+warnings.json 或 warnings.sarif
+
+交给 Warnings NG，负责：
+
+Unexpected Difference
+New/Fixed/Outstanding
+Severity
+Quality Gate
+Jenkins Build 状态
+Jenkins 原生趋势和问题入口
+
+对于你们自己开发的比较程序，Warnings NG 原生 JSON 格式可能比 SARIF 更直接，因为你可以明确控制 category、type、moduleName、severity 和 fingerprint。SARIF 的优势则是跨平台通用性更好。Warnings NG 两者都支持。
+
+建议默认启用
+html/index.html
+
+交给 HTML Publisher，负责：
+
+Summary 基本信息
+Config File Diff
+Binary Diff
+Exclusion Reference
+每列 Filter
+排序
+展开
+完整值和 checksum
+更现代的外观
+可选启用
+nested-summary.json
+
+当你们确实需要下面这些任意业务指标趋势时使用：
+
+Match Rate
+Total Compared
+Excluded Count
+各环境分布
+各服务器分布
+Config/Binary 比例
+报告运行时间
+
+如果只关心“异常数量趋势”，Warnings NG 已经足够，Nested Data Reporting 不一定必须安装。
+
+因此更准确的长期架构是：
+
+                         ┌─ Warnings NG：异常、生命周期、Gate
+comparison-report.json ──┼─ HTML Publisher：完整调查页面
+                         └─ Nested Data：可选的业务指标趋势
+
+**Warnings NG 管异常，Nested Data Reporting 管指标，HTML Publisher 管详情。**这三者职责不重叠时，才是这个方案真正的长期优势。
