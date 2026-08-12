@@ -1,0 +1,26 @@
+@Configuration(proxyBeanMethods = false)
+public class PingFederateMtlsConfig {
+
+    @Bean
+    OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest>
+            pingFederateTokenResponseClient(RestClientSsl ssl) {
+
+        RestClient restClient = RestClient.builder()
+                .apply(ssl.fromBundle("pingfed-mtls"))
+                .messageConverters(converters -> {
+                    converters.clear();
+                    converters.add(new FormHttpMessageConverter());
+                    converters.add(
+                            new OAuth2AccessTokenResponseHttpMessageConverter());
+                })
+                .defaultStatusHandler(
+                        new OAuth2ErrorResponseErrorHandler())
+                .build();
+
+        var client =
+                new RestClientAuthorizationCodeTokenResponseClient();
+
+        client.setRestClient(restClient);
+        return client;
+    }
+}
