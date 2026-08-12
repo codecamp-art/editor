@@ -1,3 +1,43 @@
+server:
+  forward-headers-strategy: framework
+
+app:
+  security:
+    enabled: true
+    allowed-ip-ranges:
+      - 0.0.0.0/0
+      - ::/0
+    oidc:
+      enabled: true
+      allowed-groups:
+        - acl-uireport-prod-ro
+
+spring:
+  ssl:
+    bundle:
+      pem:
+        pingfed-mtls:
+          keystore:
+            certificate: ${PINGFED_CLIENT_CERTIFICATE:file:/app/.cert/server.pem}
+            private-key: ${PINGFED_CLIENT_PRIVATE_KEY:file:/app/.cert/server.key}
+  security:
+    oauth2:
+      client:
+        registration:
+          reporting-web:
+            provider: pingfed
+            client-id: ${PINGFED_CLIENT_ID:pf_oa_qa_reporting-web-oidc_app}
+            client-authentication-method: tls_client_auth
+            authorization-grant-type: authorization_code
+            redirect-uri: "https://host2.linux.com.cn:8443/login/oauth2/code/{registrationId}"
+            scope:
+              - openid
+              - profile
+              - email
+        provider:
+          pingfed:
+            issuer-uri: ${PINGFED_ISSUER_URI:https://saml-qa.lb.com.cn:9031}
+
 tds:
   mode: native
   drtp-endpoints:

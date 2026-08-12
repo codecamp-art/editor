@@ -1,3 +1,7 @@
+app:
+  security:
+    enabled: false
+
 tds:
   mode: stub
   drtp-endpoints:

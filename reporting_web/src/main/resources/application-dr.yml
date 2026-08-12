@@ -10,7 +10,7 @@ app:
     oidc:
       enabled: true
       allowed-groups:
-        - acl-uireport-qa-ro
+        - acl-uireport-prod-ro
 
 spring:
   ssl:
@@ -29,7 +29,7 @@ spring:
             client-id: ${PINGFED_CLIENT_ID:pf_oa_qa_reporting-web-oidc_app}
             client-authentication-method: tls_client_auth
             authorization-grant-type: authorization_code
-            redirect-uri: "https://host1.linux.com.cn:8443/login/oauth2/code/{registrationId}"
+            redirect-uri: "https://host2.linux.com.cn:8443/login/oauth2/code/{registrationId}"
             scope:
               - openid
               - profile
@@ -41,7 +41,7 @@ spring:
 tds:
   mode: native
   drtp-endpoints:
-    - host: REPLACE_ME_QA_DRTP_HOST
+    - host: REPLACE_ME_DR_DRTP_HOST
       port: 6003
   vault:
-    secret-path: ${VAULT_SECRET_PATH:REPLACE_ME_QA_SECRET_PATH}
+    secret-path: ${VAULT_SECRET_PATH:REPLACE_ME_DR_SECRET_PATH}

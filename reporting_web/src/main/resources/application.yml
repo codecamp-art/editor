@@ -4,10 +4,15 @@ spring:
 
 app:
   security:
-    enabled: true
+    enabled: false
     allowed-ip-ranges:
       - 127.0.0.1/32
       - ::1/128
+    oidc:
+      enabled: false
+      registration-id: reporting-web
+      ssl-bundle: pingfed-mtls
+      allowed-groups: []
 
 tds:
   mode: stub
