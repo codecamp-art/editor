@@ -6,7 +6,7 @@ This document keeps only the TDS details needed for the initial `reporting_web` 
 
 `reporting_web` needs:
 
-- An IP-whitelisted web page for permitted network clients.
+- A PingFederate OIDC-protected web page for entitled reporting users in QA/PROD/DR, with no authentication in DEV.
 - A client ID or name search input.
 - A selectable list of matching client candidates.
 - A result table matching the data structure in `docs/product/client_data_snapshot.png`.
@@ -16,7 +16,7 @@ This document keeps only the TDS details needed for the initial `reporting_web` 
 Out of scope for the initial version:
 
 - Admin pages.
-- Complex entitlement management.
+- User self-service entitlement management.
 - Editing TDS data.
 - Mobile-specific UI.
 - Production HA design.
@@ -229,7 +229,7 @@ Stub mode should:
 - Position field mapping and aggregation.
 - TDS error sanitization.
 - API success and validation failures.
-- IP whitelist access boundary.
+- OIDC group access boundary.
 - UI rendering in the snapshot structure.
 - Copy-to-Excel payload format.
 - Stub mode without loading the vendor runtime.

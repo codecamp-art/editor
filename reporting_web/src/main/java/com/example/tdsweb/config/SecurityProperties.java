@@ -8,9 +8,8 @@ import org.springframework.validation.annotation.Validated;
 
 @Validated
 @ConfigurationProperties(prefix = "app.security")
-public class IpWhitelistProperties {
+public class SecurityProperties {
     private boolean enabled = true;
-    private List<@NotBlank String> allowedIpRanges = new ArrayList<>(List.of("127.0.0.1/32", "::1/128"));
     private Oidc oidc = new Oidc();
 
     public boolean isEnabled() {
@@ -19,14 +18,6 @@ public class IpWhitelistProperties {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
-    }
-
-    public List<String> getAllowedIpRanges() {
-        return allowedIpRanges;
-    }
-
-    public void setAllowedIpRanges(List<String> allowedIpRanges) {
-        this.allowedIpRanges = allowedIpRanges == null ? new ArrayList<>() : allowedIpRanges;
     }
 
     public Oidc getOidc() {

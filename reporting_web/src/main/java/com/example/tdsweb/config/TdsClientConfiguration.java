@@ -8,7 +8,7 @@ import com.example.tdsweb.tds.TdsPasswordProvider;
 import com.example.tdsweb.tds.TdsQueryClient;
 import com.example.tdsweb.tds.TdsRecordMapper;
 import com.example.tdsweb.tds.VaultTdsPasswordProvider;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

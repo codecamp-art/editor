@@ -10,7 +10,7 @@ The vendor provides:
 
 The system should provide a web UI where users can query client-related TDS data.
 
-Users should be able to open the web page directly from permitted network locations. Access is controlled by an IP whitelist.
+Users should authenticate with PingFederate OIDC in QA/PROD/DR. Access is controlled by the OIDC `groups` claim, while DEV does not require authentication.
 
 The user should be able to input or select a client ID or Name and query the client's data.
 

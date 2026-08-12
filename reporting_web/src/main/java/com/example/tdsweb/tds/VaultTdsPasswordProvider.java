@@ -1,8 +1,9 @@
 package com.example.tdsweb.tds;
 
 import com.example.tdsweb.config.TdsProperties;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.util.LinkedHashMap;
@@ -99,7 +100,7 @@ public class VaultTdsPasswordProvider implements TdsPasswordProvider {
     private JsonNode parseJson(String body) {
         try {
             return objectMapper.readTree(body);
-        } catch (IOException ex) {
+        } catch (JacksonException ex) {
             throw new TdsClientException("vault HTTP response for TDS password is not valid JSON", ex);
         }
     }

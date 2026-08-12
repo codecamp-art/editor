@@ -9,7 +9,7 @@
 - Linux/RHEL8 is the production build target and links `tds/linux_x86_64/libtds_api.so`; Windows local diagnostics require Win32/x86 because the vendor SDK supplies 32-bit `.lib` and `.dll` files.
 - Local Windows and RHEL8 builds read manually placed SDK files from `tds.sdk-root`, defaulting to `reporting_web/tds`; SDK download and extraction are Jenkins-only through `cmake/PrepareTdsSdk.cmake` with certificate/key auth.
 
-`reporting_web` has no application code yet. The project direction is Java 21, Spring Boot, Gradle, Linux deployment, IP whitelist access control, and a small native adapter rather than direct vendor API use from application logic.
+`reporting_web` has no application code yet. The project direction is Java 21, Spring Boot, Gradle, Linux deployment, PingFederate OIDC access control, and a small native adapter rather than direct vendor API use from application logic.
 
 ## Goals / Non-Goals
 

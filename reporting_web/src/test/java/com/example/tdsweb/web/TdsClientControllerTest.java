@@ -20,11 +20,10 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = "app.security.enabled=true")
 @AutoConfigureMockMvc
@@ -75,15 +74,6 @@ class TdsClientControllerTest {
     }
 
     @Test
-    void rejectsRequestsOutsideIpWhitelist() throws Exception {
-        mockMvc.perform(get("/api/tds/clients").param("query", "1001").with(remoteAddress("203.0.113.10")))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.message").value("request IP is not allowed"));
-
-        verify(tdsQueryClient, never()).searchClients(any());
-    }
-
-    @Test
     void sanitizesNativeFailure() throws Exception {
         when(tdsQueryClient.queryClient("1001", Optional.empty()))
             .thenThrow(new TdsClientException("TdsApi_reqLogin failed password=secret token=abc"));
@@ -92,13 +82,6 @@ class TdsClientControllerTest {
             .andExpect(status().isBadGateway())
             .andExpect(jsonPath("$.message", containsString("password=<redacted>")))
             .andExpect(jsonPath("$.message", containsString("token=<redacted>")));
-    }
-
-    private static RequestPostProcessor remoteAddress(String address) {
-        return request -> {
-            request.setRemoteAddr(address);
-            return request;
-        };
     }
 
     private static ClientQueryResult sampleResult() {

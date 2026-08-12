@@ -1,21 +1,21 @@
 ## ADDED Requirements
 
 ### Requirement: Reporting System Navigation Shell
-The page SHALL use the reporting-system layout from the provided reference image, including a top bar, network access display, sidebar navigation, and only the active `Client TDS Query` navigation item until additional sidebar functions are implemented.
+The page SHALL use the reporting-system layout from the provided reference image, including a top bar, access display, sidebar navigation, and only the active `Client TDS Query` navigation item until additional sidebar functions are implemented.
 
 #### Scenario: Page shell is visible
-- **WHEN** a request from an allowed client IP opens the client query page
-- **THEN** the page shows the `TDS Reporting System` top bar, IP whitelist access display, sidebar navigation, and only the active `Client TDS Query` item
+- **WHEN** an authorized user opens the client query page
+- **THEN** the page shows the `TDS Reporting System` top bar, access display, sidebar navigation, and only the active `Client TDS Query` item
 
 ### Requirement: Client Lookup Page
-The system SHALL provide a web page where a user from an allowed client IP can input a client search term, select one client by client ID or name, and submit a client TDS detail query.
+The system SHALL provide a web page where an authorized user can input a client search term, select one client by client ID or name, and submit a client TDS detail query.
 
 #### Scenario: User searches for a client
-- **WHEN** a user from an allowed client IP enters a client ID or name fragment
+- **WHEN** an authorized user enters a client ID or name fragment
 - **THEN** the page calls the backend client lookup API and shows matching client candidates
 
 #### Scenario: User selects a client candidate
-- **WHEN** a user from an allowed client IP selects a candidate by client ID or client name
+- **WHEN** an authorized user selects a candidate by client ID or client name
 - **THEN** the page uses the selected candidate's client ID for the detail query
 
 #### Scenario: Empty client search is rejected

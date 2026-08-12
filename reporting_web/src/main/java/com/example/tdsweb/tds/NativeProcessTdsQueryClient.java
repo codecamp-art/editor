@@ -5,7 +5,7 @@ import com.example.tdsweb.domain.ClientCandidate;
 import com.example.tdsweb.domain.ClientQueryResult;
 import com.example.tdsweb.domain.CustomerFundRecord;
 import com.example.tdsweb.domain.CustomerHoldRecord;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;

@@ -156,12 +156,15 @@ Set profile-specific values outside source code:
 
 - `app.security.enabled`, false for DEV/local unauthenticated use and true for QA/PROD/DR
 - `app.security.oidc.enabled`, true when PingFederate OIDC login is required
-- `app.security.allowed-ip-ranges`, the optional CIDR/IP allowlist applied before OIDC when enabled
 - `app.security.oidc.allowed-groups`, the PingFederate ID token groups allowed to use the page
 - `spring.security.oauth2.client.registration.reporting-web.client-id`, defaulting to `pf_oa_qa_reporting-web-oidc_app`
 - `spring.security.oauth2.client.provider.pingfed.issuer-uri`, defaulting to `https://saml-qa.lb.com.cn:9031`
 - `spring.ssl.bundle.pem.pingfed-mtls.keystore.certificate`, defaulting to `file:/app/.cert/server.pem`
 - `spring.ssl.bundle.pem.pingfed-mtls.keystore.private-key`, defaulting to `file:/app/.cert/server.key`
+- `server.port`, set to `8443` for QA/PROD/DR
+- `server.ssl.bundle`, set to `reporting-web-server` for QA/PROD/DR browser HTTPS
+- `spring.ssl.bundle.pem.reporting-web-server.keystore.certificate`, defaulting to `file:/var/certs/host.pem`
+- `spring.ssl.bundle.pem.reporting-web-server.keystore.private-key`, defaulting to `file:/var/certs/host.key`
 - `tds.drtp-endpoints`
 - `tds.user`
 - `tds.password-source`, defaulting to `vault`; use `local-config` only for Windows local native debug
@@ -198,6 +201,8 @@ DEV uses `app.security.enabled=false`, so local development does not require OID
 
 QA, PROD, and DR enable PingFederate OIDC login. The app uses registration id `reporting-web`, scopes `openid`, `profile`, and `email`, and `client-authentication-method: tls_client_auth`. The token endpoint HTTP client applies the `pingfed-mtls` PEM SSL bundle so the `/app/.cert/server.pem` certificate and `/app/.cert/server.key` private key are sent during the OAuth2 authorization-code token exchange.
 
+Browser traffic to reporting-web also uses HTTPS, but with a separate server-side certificate bundle. QA/PROD/DR listen on port `8443` and set `server.ssl.bundle=reporting-web-server`, which loads `/var/certs/host.pem` and `/var/certs/host.key`. Keep this separate from `pingfed-mtls`: `reporting-web-server` is for browser-to-app TLS, while `pingfed-mtls` is for app-to-PingFederate client certificate authentication.
+
 The OpenID Connect discovery URL `https://saml-qa.lb.com.cn:9031/.well-known/openid-configuration` is metadata for the issuer. Spring reads it through the configured `issuer-uri` to discover the authorization endpoint, token endpoint, JWKS URI for ID token signature verification, and related OIDC endpoints. Configure the issuer, not the discovery URL itself, unless explicit endpoint overrides are required.
 
 The app requires PKCE on OIDC authorization requests. After login, the ID token `groups` claim must contain:
@@ -210,19 +215,4 @@ PingFederate redirect URLs must match the profile:
 - QA: `https://host1.linux.com.cn:8443/login/oauth2/code/reporting-web`
 - PROD/DR: `https://host2.linux.com.cn:8443/login/oauth2/code/reporting-web`
 
-Spring Boot loads PEM private keys most reliably when the key is PKCS#8, whose first line is `-----BEGIN PRIVATE KEY-----`. If `/app/.cert/server.key` is PKCS#1 (`-----BEGIN RSA PRIVATE KEY-----`), convert it during deployment and point `PINGFED_CLIENT_PRIVATE_KEY` at the converted file. Do not log or commit private key material.
-
-## IP Whitelist Access
-
-When `app.security.enabled=true`, the web app also enforces `app.security.allowed-ip-ranges` before serving the page or API. Entries may be exact IPs or CIDR ranges, for example:
-
-```yaml
-app:
-  security:
-    enabled: true
-    allowed-ip-ranges:
-      - 10.20.30.0/24
-      - 192.168.10.15
-```
-
-The filter uses the request remote address seen by the application server. If the service is deployed behind a reverse proxy or load balancer, configure that layer so the application receives the real client IP before relying on the allowlist.
+Spring Boot loads PEM private keys most reliably when the key is PKCS#8, whose first line is `-----BEGIN PRIVATE KEY-----`. If `/app/.cert/server.key` or `/var/certs/host.key` is PKCS#1 (`-----BEGIN RSA PRIVATE KEY-----`), convert it during deployment and point the matching environment variable at the converted file. Do not log or commit private key material.

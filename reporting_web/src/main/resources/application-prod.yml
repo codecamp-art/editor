@@ -1,12 +1,13 @@
 server:
+  port: 8443
   forward-headers-strategy: framework
+  ssl:
+    enabled: true
+    bundle: reporting-web-server
 
 app:
   security:
     enabled: true
-    allowed-ip-ranges:
-      - 0.0.0.0/0
-      - ::/0
     oidc:
       enabled: true
       allowed-groups:
@@ -20,6 +21,10 @@ spring:
           keystore:
             certificate: ${PINGFED_CLIENT_CERTIFICATE:file:/app/.cert/server.pem}
             private-key: ${PINGFED_CLIENT_PRIVATE_KEY:file:/app/.cert/server.key}
+        reporting-web-server:
+          keystore:
+            certificate: ${REPORTING_WEB_TLS_CERTIFICATE:file:/var/certs/host.pem}
+            private-key: ${REPORTING_WEB_TLS_PRIVATE_KEY:file:/var/certs/host.key}
   security:
     oauth2:
       client:

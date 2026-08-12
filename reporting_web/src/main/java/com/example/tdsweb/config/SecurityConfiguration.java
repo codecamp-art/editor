@@ -46,7 +46,7 @@ public class SecurityConfiguration {
 
     @Bean
     @ConditionalOnExpression("'${app.security.enabled:true}' == 'true' && '${app.security.oidc.enabled:false}' == 'false'")
-    SecurityFilterChain ipWhitelistOnlySecurityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain enabledSecurityWithoutOidcFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll());
@@ -60,7 +60,7 @@ public class SecurityConfiguration {
         ClientRegistrationRepository clientRegistrationRepository,
         OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> tokenResponseClient,
         OAuth2UserService<OidcUserRequest, OidcUser> oidcUserService,
-        IpWhitelistProperties properties
+        SecurityProperties properties
     ) throws Exception {
         String registrationId = properties.getOidc().getRegistrationId();
         DefaultOAuth2AuthorizationRequestResolver authorizationRequestResolver =
@@ -101,7 +101,7 @@ public class SecurityConfiguration {
     @ConditionalOnExpression("'${app.security.enabled:true}' == 'true' && '${app.security.oidc.enabled:false}' == 'true'")
     OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> authorizationCodeAccessTokenResponseClient(
         RestClientSsl restClientSsl,
-        IpWhitelistProperties properties
+        SecurityProperties properties
     ) {
         RestClient restClient = RestClient.builder()
             .apply(restClientSsl.fromBundle(properties.getOidc().getSslBundle()))
@@ -121,7 +121,7 @@ public class SecurityConfiguration {
 
     @Bean
     @ConditionalOnExpression("'${app.security.enabled:true}' == 'true' && '${app.security.oidc.enabled:false}' == 'true'")
-    OAuth2UserService<OidcUserRequest, OidcUser> oidcUserService(IpWhitelistProperties properties) {
+    OAuth2UserService<OidcUserRequest, OidcUser> oidcUserService(SecurityProperties properties) {
         Set<String> allowedGroups = Set.copyOf(properties.getOidc().getAllowedGroups());
         return userRequest -> {
             OidcUser user = delegateOidcUserService().loadUser(userRequest);
