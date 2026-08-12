@@ -199,7 +199,7 @@ Before enabling native mode for users:
 
 DEV uses `app.security.enabled=false`, so local development does not require OIDC login or group authorization.
 
-QA, PROD, and DR enable PingFederate OIDC login. The app uses registration id `reporting-web`, scopes `openid`, `profile`, and `email`, and `client-authentication-method: tls_client_auth`. The token endpoint HTTP client applies the `pingfed-mtls` PEM SSL bundle so the `/app/.cert/server.pem` certificate and `/app/.cert/server.key` private key are sent during the OAuth2 authorization-code token exchange.
+QA, PROD, and DR enable PingFederate OIDC login. The app uses registration id `reporting-web`, scopes `openid`, `profile`, and `email`, and `client-authentication-method: tls_client_auth`. The token endpoint HTTP client applies the `pingfed-mtls` PEM SSL bundle so the `/app/.cert/server.pem` certificate and `/app/.cert/server.key` private key are sent during the OAuth2 authorization-code token exchange. The app also supplies a custom token request parameters converter because Spring Security 7.1's default converter does not accept `tls_client_auth`.
 
 Browser traffic to reporting-web also uses HTTPS, but with a separate server-side certificate bundle. QA/PROD/DR listen on port `8443` and set `server.ssl.bundle=reporting-web-server`, which loads `/var/certs/host.pem` and `/var/certs/host.key`. Keep this separate from `pingfed-mtls`: `reporting-web-server` is for browser-to-app TLS, while `pingfed-mtls` is for app-to-PingFederate client certificate authentication.
 

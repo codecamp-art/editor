@@ -24,9 +24,13 @@ import org.springframework.security.oauth2.client.web.DefaultOAuth2Authorization
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler;
 import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
+import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
+import org.springframework.security.oauth2.core.endpoint.PkceParameterNames;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.oauth2.core.oidc.user.OidcUserAuthority;
 import org.springframework.security.oauth2.core.user.OAuth2UserAuthority;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.web.client.RestClient;
@@ -116,7 +120,26 @@ public class SecurityConfiguration {
         RestClientAuthorizationCodeTokenResponseClient client =
             new RestClientAuthorizationCodeTokenResponseClient();
         client.setRestClient(restClient);
+        client.setParametersConverter(SecurityConfiguration::authorizationCodeTokenRequestParameters);
         return client;
+    }
+
+    private static MultiValueMap<String, String> authorizationCodeTokenRequestParameters(
+        OAuth2AuthorizationCodeGrantRequest request
+    ) {
+        MultiValueMap<String, String> parameters = new LinkedMultiValueMap<>();
+        parameters.add(OAuth2ParameterNames.GRANT_TYPE, request.getGrantType().getValue());
+        parameters.add(OAuth2ParameterNames.CODE, request.getAuthorizationExchange().getAuthorizationResponse().getCode());
+        parameters.add(OAuth2ParameterNames.REDIRECT_URI, request.getAuthorizationExchange().getAuthorizationRequest().getRedirectUri());
+        parameters.add(OAuth2ParameterNames.CLIENT_ID, request.getClientRegistration().getClientId());
+
+        Object codeVerifier = request.getAuthorizationExchange()
+            .getAuthorizationRequest()
+            .getAttribute(PkceParameterNames.CODE_VERIFIER);
+        if (codeVerifier != null) {
+            parameters.add(PkceParameterNames.CODE_VERIFIER, codeVerifier.toString());
+        }
+        return parameters;
     }
 
     @Bean
