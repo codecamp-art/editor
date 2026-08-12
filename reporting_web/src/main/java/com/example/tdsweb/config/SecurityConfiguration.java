@@ -1,15 +1,19 @@
 package com.example.tdsweb.config;
 
+import java.net.http.HttpClient;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.restclient.autoconfigure.RestClientSsl;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.converter.FormHttpMessageConverter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
@@ -37,6 +41,7 @@ import org.springframework.web.client.RestClient;
 
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfiguration {
+    private static final Logger LOGGER = LoggerFactory.getLogger(SecurityConfiguration.class);
     static final String REPORTING_VIEW_AUTHORITY = "ROLE_REPORTING_VIEW";
 
     @Bean
@@ -104,11 +109,15 @@ public class SecurityConfiguration {
     @Bean
     @ConditionalOnExpression("'${app.security.enabled:true}' == 'true' && '${app.security.oidc.enabled:false}' == 'true'")
     OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> authorizationCodeAccessTokenResponseClient(
-        RestClientSsl restClientSsl,
+        SslBundles sslBundles,
         SecurityProperties properties
     ) {
+        String sslBundleName = properties.getOidc().getSslBundle();
+        HttpClient httpClient = HttpClient.newBuilder()
+            .sslContext(sslBundles.getBundle(sslBundleName).createSslContext())
+            .build();
         RestClient restClient = RestClient.builder()
-            .apply(restClientSsl.fromBundle(properties.getOidc().getSslBundle()))
+            .requestFactory(new JdkClientHttpRequestFactory(httpClient))
             .configureMessageConverters(converters -> converters
                 .disableDefaults()
                 .addCustomConverter(new FormHttpMessageConverter())
@@ -117,6 +126,7 @@ public class SecurityConfiguration {
             .defaultStatusHandler(new OAuth2ErrorResponseErrorHandler())
             .build();
 
+        LOGGER.info("Configured PingFederate OAuth2 token client with SSL bundle '{}'", sslBundleName);
         RestClientAuthorizationCodeTokenResponseClient client =
             new RestClientAuthorizationCodeTokenResponseClient();
         client.setRestClient(restClient);

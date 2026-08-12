@@ -199,7 +199,7 @@ Before enabling native mode for users:
 
 DEV uses `app.security.enabled=false`, so local development does not require OIDC login or group authorization.
 
-QA, PROD, and DR enable PingFederate OIDC login. The app uses registration id `reporting-web`, scopes `openid`, `profile`, and `email`, and `client-authentication-method: tls_client_auth`. The token endpoint HTTP client applies the `pingfed-mtls` PEM SSL bundle so the `/app/.cert/server.pem` certificate and `/app/.cert/server.key` private key are sent during the OAuth2 authorization-code token exchange. The app also supplies a custom token request parameters converter because Spring Security 7.1's default converter does not accept `tls_client_auth`.
+QA, PROD, and DR enable PingFederate OIDC login. The app uses registration id `reporting-web`, scopes `openid`, `profile`, and `email`, and `client-authentication-method: tls_client_auth`. The token endpoint HTTP client uses a dedicated JDK `HttpClient` with an SSL context created from the `pingfed-mtls` PEM SSL bundle, so `/app/.cert/server.pem` and `/app/.cert/server.key` are available during the OAuth2 authorization-code token exchange. The app also supplies a custom token request parameters converter because Spring Security 7.1's default converter does not accept `tls_client_auth`.
 
 Browser traffic to reporting-web also uses HTTPS, but with a separate server-side certificate bundle. QA/PROD/DR listen on port `8443` and set `server.ssl.bundle=reporting-web-server`, which loads `/var/certs/host.pem` and `/var/certs/host.key`. Keep this separate from `pingfed-mtls`: `reporting-web-server` is for browser-to-app TLS, while `pingfed-mtls` is for app-to-PingFederate client certificate authentication.
 
@@ -216,3 +216,5 @@ PingFederate redirect URLs must match the profile:
 - PROD/DR: `https://host2.linux.com.cn:8443/login/oauth2/code/reporting-web`
 
 Spring Boot loads PEM private keys most reliably when the key is PKCS#8, whose first line is `-----BEGIN PRIVATE KEY-----`. If `/app/.cert/server.key` or `/var/certs/host.key` is PKCS#1 (`-----BEGIN RSA PRIVATE KEY-----`), convert it during deployment and point the matching environment variable at the converted file. Do not log or commit private key material.
+
+If PingFederate still returns `there were no client certificates sent in the request`, check the deployment host before changing application code again: the app logs the SSL bundle name used by the token client at startup, the runtime user must be able to read `/app/.cert/server.pem` and `/app/.cert/server.key`, the certificate and private key must match, the certificate chain must include the CA requested by PingFederate, and any load balancer in front of PingFederate must pass client-certificate authentication through correctly.
