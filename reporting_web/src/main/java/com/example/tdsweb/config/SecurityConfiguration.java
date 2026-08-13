@@ -322,7 +322,7 @@ public class SecurityConfiguration {
 
         private String clientAliasOrFallback(String alias) {
             if (alias != null) {
-                LOGGER.debug("JSSE selected PingFederate client certificate alias '{}'", alias);
+                LOGGER.info("JSSE selected PingFederate client certificate alias '{}'", alias);
                 return alias;
             }
             LOGGER.warn(
