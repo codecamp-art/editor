@@ -1,12 +1,23 @@
 package com.example.tdsweb.config;
 
 import java.net.http.HttpClient;
+import java.net.Socket;
+import java.security.KeyStore;
+import java.security.Principal;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
 import java.util.Collection;
+import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.X509ExtendedKeyManager;
+import javax.net.ssl.KeyManager;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -113,8 +124,9 @@ public class SecurityConfiguration {
         SecurityProperties properties
     ) {
         String sslBundleName = properties.getOidc().getSslBundle();
+        SslBundle sslBundle = sslBundles.getBundle(sslBundleName);
         HttpClient httpClient = HttpClient.newBuilder()
-            .sslContext(sslBundles.getBundle(sslBundleName).createSslContext())
+            .sslContext(createTokenClientSslContext(sslBundle, sslBundleName))
             .build();
         RestClient restClient = RestClient.builder()
             .requestFactory(new JdkClientHttpRequestFactory(httpClient))
@@ -132,6 +144,48 @@ public class SecurityConfiguration {
         client.setRestClient(restClient);
         client.setParametersConverter(SecurityConfiguration::authorizationCodeTokenRequestParameters);
         return client;
+    }
+
+    private static SSLContext createTokenClientSslContext(SslBundle sslBundle, String sslBundleName) {
+        try {
+            KeyManager[] keyManagers = sslBundle.getManagers().getKeyManagers();
+            KeyManager[] wrappedKeyManagers = wrapKeyManagers(keyManagers, sslBundle, sslBundleName);
+            SSLContext sslContext = SSLContext.getInstance(sslBundle.getProtocol());
+            sslContext.init(wrappedKeyManagers, sslBundle.getManagers().getTrustManagers(), null);
+            return sslContext;
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to create PingFederate token client SSL context from bundle " + sslBundleName, ex);
+        }
+    }
+
+    private static KeyManager[] wrapKeyManagers(KeyManager[] keyManagers, SslBundle sslBundle, String sslBundleName) throws Exception {
+        String fallbackAlias = findPrivateKeyAlias(sslBundle.getStores().getKeyStore());
+        if (fallbackAlias == null) {
+            LOGGER.warn("PingFederate SSL bundle '{}' does not expose a private key alias", sslBundleName);
+            return keyManagers;
+        }
+        LOGGER.info("PingFederate SSL bundle '{}' loaded client certificate alias '{}'", sslBundleName, fallbackAlias);
+        KeyManager[] wrapped = keyManagers.clone();
+        for (int index = 0; index < wrapped.length; index++) {
+            if (wrapped[index] instanceof X509ExtendedKeyManager keyManager) {
+                wrapped[index] = new FallbackAliasKeyManager(keyManager, fallbackAlias);
+            }
+        }
+        return wrapped;
+    }
+
+    private static String findPrivateKeyAlias(KeyStore keyStore) throws Exception {
+        if (keyStore == null) {
+            return null;
+        }
+        Enumeration<String> aliases = keyStore.aliases();
+        while (aliases.hasMoreElements()) {
+            String alias = aliases.nextElement();
+            if (keyStore.isKeyEntry(alias)) {
+                return alias;
+            }
+        }
+        return null;
     }
 
     private static MultiValueMap<String, String> authorizationCodeTokenRequestParameters(
@@ -213,5 +267,69 @@ public class SecurityConfiguration {
             return List.of();
         }
         return List.of(new SimpleGrantedAuthority(REPORTING_VIEW_AUTHORITY));
+    }
+
+    private static final class FallbackAliasKeyManager extends X509ExtendedKeyManager {
+        private final X509ExtendedKeyManager delegate;
+        private final String fallbackAlias;
+
+        private FallbackAliasKeyManager(X509ExtendedKeyManager delegate, String fallbackAlias) {
+            this.delegate = delegate;
+            this.fallbackAlias = fallbackAlias;
+        }
+
+        @Override
+        public String[] getClientAliases(String keyType, Principal[] issuers) {
+            return delegate.getClientAliases(keyType, issuers);
+        }
+
+        @Override
+        public String chooseClientAlias(String[] keyTypes, Principal[] issuers, Socket socket) {
+            String alias = delegate.chooseClientAlias(keyTypes, issuers, socket);
+            return clientAliasOrFallback(alias);
+        }
+
+        @Override
+        public String[] getServerAliases(String keyType, Principal[] issuers) {
+            return delegate.getServerAliases(keyType, issuers);
+        }
+
+        @Override
+        public String chooseServerAlias(String keyType, Principal[] issuers, Socket socket) {
+            return delegate.chooseServerAlias(keyType, issuers, socket);
+        }
+
+        @Override
+        public X509Certificate[] getCertificateChain(String alias) {
+            return delegate.getCertificateChain(alias);
+        }
+
+        @Override
+        public PrivateKey getPrivateKey(String alias) {
+            return delegate.getPrivateKey(alias);
+        }
+
+        @Override
+        public String chooseEngineClientAlias(String[] keyTypes, Principal[] issuers, SSLEngine engine) {
+            String alias = delegate.chooseEngineClientAlias(keyTypes, issuers, engine);
+            return clientAliasOrFallback(alias);
+        }
+
+        @Override
+        public String chooseEngineServerAlias(String keyType, Principal[] issuers, SSLEngine engine) {
+            return delegate.chooseEngineServerAlias(keyType, issuers, engine);
+        }
+
+        private String clientAliasOrFallback(String alias) {
+            if (alias != null) {
+                LOGGER.debug("JSSE selected PingFederate client certificate alias '{}'", alias);
+                return alias;
+            }
+            LOGGER.warn(
+                "JSSE did not select a PingFederate client certificate alias; falling back to configured alias '{}'",
+                fallbackAlias
+            );
+            return fallbackAlias;
+        }
     }
 }
