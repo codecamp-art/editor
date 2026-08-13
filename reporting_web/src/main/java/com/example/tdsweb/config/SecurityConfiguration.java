@@ -14,6 +14,7 @@ import java.util.Set;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.X509ExtendedKeyManager;
+import javax.net.ssl.X509KeyManager;
 import javax.net.ssl.KeyManager;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -167,7 +168,8 @@ public class SecurityConfiguration {
         LOGGER.info("PingFederate SSL bundle '{}' loaded client certificate alias '{}'", sslBundleName, fallbackAlias);
         KeyManager[] wrapped = keyManagers.clone();
         for (int index = 0; index < wrapped.length; index++) {
-            if (wrapped[index] instanceof X509ExtendedKeyManager keyManager) {
+            LOGGER.info("PingFederate SSL bundle '{}' KeyManager type '{}'", sslBundleName, wrapped[index].getClass().getName());
+            if (wrapped[index] instanceof X509KeyManager keyManager) {
                 wrapped[index] = new FallbackAliasKeyManager(keyManager, fallbackAlias);
             }
         }
@@ -270,10 +272,10 @@ public class SecurityConfiguration {
     }
 
     private static final class FallbackAliasKeyManager extends X509ExtendedKeyManager {
-        private final X509ExtendedKeyManager delegate;
+        private final X509KeyManager delegate;
         private final String fallbackAlias;
 
-        private FallbackAliasKeyManager(X509ExtendedKeyManager delegate, String fallbackAlias) {
+        private FallbackAliasKeyManager(X509KeyManager delegate, String fallbackAlias) {
             this.delegate = delegate;
             this.fallbackAlias = fallbackAlias;
         }
@@ -311,13 +313,17 @@ public class SecurityConfiguration {
 
         @Override
         public String chooseEngineClientAlias(String[] keyTypes, Principal[] issuers, SSLEngine engine) {
-            String alias = delegate.chooseEngineClientAlias(keyTypes, issuers, engine);
+            String alias = delegate instanceof X509ExtendedKeyManager extendedKeyManager
+                ? extendedKeyManager.chooseEngineClientAlias(keyTypes, issuers, engine)
+                : delegate.chooseClientAlias(keyTypes, issuers, null);
             return clientAliasOrFallback(alias);
         }
 
         @Override
         public String chooseEngineServerAlias(String keyType, Principal[] issuers, SSLEngine engine) {
-            return delegate.chooseEngineServerAlias(keyType, issuers, engine);
+            return delegate instanceof X509ExtendedKeyManager extendedKeyManager
+                ? extendedKeyManager.chooseEngineServerAlias(keyType, issuers, engine)
+                : delegate.chooseServerAlias(keyType, issuers, null);
         }
 
         private String clientAliasOrFallback(String alias) {
